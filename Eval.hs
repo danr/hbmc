@@ -100,7 +100,7 @@ newProg s fns e_size = fromList <$> sequence [ newTopExpr s f e_size | f <- [0..
 newTopExpr :: Solver -> Int -> Int -> IO Expr
 newTopExpr s f size = do
     nil_e  <- newExpr s f Nothing                                                     2 (size-1)
-    cons_e <- newExpr s f (Just (\ arg_e -> app2 (bruijn f) (evar (bruijn 2)) arg_e)) 4 (size-1)
+    cons_e <- newExpr s f (Just (\ arg_e -> app2 (bruijn f) (evar (bruijn 1)) arg_e)) 4 (size-1)
     choices s [ nil_e , ecase (bruijn 0) nil_e cons_e ]
 
 newExpr :: Solver -> Int -> Maybe (Expr -> Expr) -> Int -> Int -> IO Expr
@@ -111,7 +111,7 @@ newExpr s f rec vars size = do
     e2 <- newExpr s f rec vars (size-1)
     v  <- choices s (map bruijn [0..vars-1])
 
-    -- call earlier function on ary argument
+    -- call earlier function on any argument
     mg <- if f > 0 then Just <$> choices s (map bruijn [0..f-1]) else return Nothing
 
     e <- choices s $
@@ -119,7 +119,8 @@ newExpr s f rec vars size = do
             [ econs e1 e2, evar v, enil ]
 
     case rec of
-        Just k  -> return e -- choices s [ e , k e1 ] -- can call itself
+        Just k  -> choices s [ e , k e2 ] -- can call itself, e2 specifies second argument
+                                          -- (first is tail from case)
         Nothing -> return e
 
 index :: Symbolic a => SymTerm -> List a -> H a
@@ -152,16 +153,16 @@ main = do
 
     -- prog <- return Nil -- (cons enil (cons enil Nil))
 
-    let test f a =
-          do b <- eval s prog (makeEnv [a,[]]) -- (evar (bruijn 0))
+    let test op a b =
+          do r <- eval s prog (makeEnv [a,b]) -- (evar (bruijn 0))
                               (app2 (bruijn 0) (evar (bruijn 0)) (evar (bruijn 1)))
-             pprint ("b",b)
-             pprint ("f a",fromIntList (f a))
-             eq <- equal s (fromIntList (f a)) b
+             pprint ("r",r)
+             pprint ("op a b",fromIntList (op a b))
+             eq <- equal s (fromIntList (op a b)) r
              addClauseBit s [eq]
 
     putStrLn "Adding tests..."
-    test reverse [1,2]
+    test (++) [1,2] [3,4]
 
     putStrLn "Solving..."
     b <- solve s []
@@ -224,4 +225,29 @@ showProg prg = unlines
 
 --------------------------------------------------------------------------------
 
+{-
 
+
+[ Fun
+    "Case"
+    [ Fun "Z" []
+    , Fun "Var" [ Fun "S" [ Fun "Z" [] ] ]
+    , Fun
+        "App2"
+        [ Fun "Z" []
+        , Fun "Var" [ Fun "S" [ Fun "Z" [] ] ]
+        , Fun
+            "Cons"
+            [ Fun "Var" [ Fun "S" [ Fun "Z" [] ] ]
+            , Fun "Var" [ Fun "S" [ Fun "S" [ Fun "S" [ Fun "Z" [] ] ] ] ]
+            ]
+        ]
+    ]
+]
+-}
+
+{-
+f xs ys = case xs of
+    []   -> ys
+    z:zs -> f zs (zs : ys)
+-}
