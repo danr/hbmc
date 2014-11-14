@@ -39,7 +39,7 @@ pprint = putStrLn . ppShow
 
 evalH :: List Expr -> List (List Nat) -> Expr -> H (List Nat)
 evalH p env e = do
-    io $ pprint ("evalH",e)
+    -- io $ pprint ("evalH",e)
     (arg1,env1,arg2) <- match e
         [ ("Var",  \[v]     -> return (UNR,UNR,UNR))
         , ("App2", \[f,x,y] -> return (The x,The env,The y))
@@ -162,7 +162,7 @@ main = do
              addClauseBit s [eq]
 
     putStrLn "Adding tests..."
-    test (++) [1,2] [3,4]
+    test (++) [6,3,5] [2,8,4]
 
     putStrLn "Solving..."
     b <- solve s []
@@ -249,5 +249,5 @@ showProg prg = unlines
 {-
 f xs ys = case xs of
     []   -> ys
-    z:zs -> f zs (zs : ys)
+    z:zs -> (z : xs) : f zs ys
 -}
