@@ -6,7 +6,7 @@ import Control.Applicative
 
 --------------------------------------------------------------------------------
 
-newtype H a = H (Solver -> [Bit] -> IO (Maybe a))
+newtype H a = H{ run :: Solver -> [Bit] -> IO (Maybe a) }
 
 instance Applicative H where
   pure x      = H (\_ _ -> return (Just x))
@@ -27,7 +27,7 @@ instance Monad H where
   H m >>= k = H (\s ctx -> do mx <- m s ctx
                               case mx of
                                 Nothing -> return Nothing
-                                Just x  -> let H m' = k x in m' s ctx)
+                                Just x  -> run (k x) s ctx)
 
 --------------------------------------------------------------------------------
 
@@ -54,6 +54,19 @@ withSolver f = H (\s _ -> Just `fmap` f s)
 
 ifThenElse :: Symbolic a => Bit -> a -> a -> H a
 ifThenElse c x y = withSolver (\s -> iff s c x y)
+
+match :: Symbolic a => SymTerm -> [(Name, [SymTerm] -> H a)] -> H a
+match t alts = H (\s ctx ->
+  do lx <- switch s t [ (c, \b xs -> do my <- run (alt xs) s (b:ctx)
+                                        return (case my of
+                                                  Nothing -> UNR
+                                                  Just y  -> The y))
+                      | (c, alt) <- alts
+                      ]
+     return (case lx of
+               UNR   -> Nothing
+               The x -> Just x)
+  )
 
 --------------------------------------------------------------------------------
 
