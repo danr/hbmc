@@ -186,6 +186,10 @@ the :: Lift a -> a
 the (The x) = x
 the UNR     = error "the UNR"
 
+withThe :: Lift a -> (a -> IO (Lift b)) -> IO (Lift b)
+The x `withThe` f = f x
+UNR   `withThe` f = return UNR
+
 instance Symbolic a => Symbolic (Lift a) where
   type Type (Lift a) = Type a
 
