@@ -89,18 +89,46 @@ eval s prog env e =
     -}
 
 newProg :: Solver -> Int -> Int -> IO (List Expr)
-newProg s e_size i = case i of
+newProg s fns e_size  = case fns of
     0 -> return Nil
     _ -> do
-        e <- newExpr s i e_size [0,1] [] 0
-        es <- newProg s (i-1) e_size
+        e <-  newExprTop s fns e_size
+        es <- newProg s (fns-1) e_size
         return (cons e es)
 
-newBaseExpr :: Solver -> [Int] -> IO Expr
-newBaseExpr s scope = choices s (enil:map (evar . bruijn) scope)
+newBaseExpr :: Solver -> Int -> IO Expr
+newBaseExpr s vars = choices s (enil:map (evar . bruijn) [0..vars-1])
 
-newExpr :: Solver -> Int -> Int -> [Int] -> [Int] -> Int -> IO Expr
-newExpr s f size scope rec inarg = case size of
+newExprTop :: Solver -> Int -> Int -> IO Expr
+newExprTop s f size = do
+    b <- newBit s
+    nil_e  <- newExpr s f Nothing                                                         2 (size-1)
+    cons_e <- newExpr s f (Just (\ arg_e -> app2 (bruijn (f-1)) (evar (bruijn 2)) arg_e)) 4 (size-1)
+    choices s [ nil_e , ecase (bruijn 0) nil_e cons_e ]
+
+orr :: Symbolic a => Solver -> a -> a -> IO a
+orr s u v = do
+    b <- newBit s
+    iff s b u v
+
+orPerhaps :: Symbolic a => Solver -> a -> b -> Maybe (b -> a) -> IO a
+orPerhaps s u v (Just f) = orr s u (f v)
+orPerhaps s u _ _        = return u
+
+newExpr :: Solver -> Int -> Maybe (Expr -> Expr) -> Int -> Int -> IO Expr
+newExpr s f rec vars 0    = newBaseExpr s vars
+newExpr s f rec vars size = do
+
+    e1 <- newExpr s f rec vars (size-1)
+    e2 <- newExpr s f rec vars (size-1)
+    v  <- choices s (map bruijn [0..f-1])
+    g  <- choices s (map bruijn [0..f-1])
+
+    chs <- choices s [ app2 g e1 e2 , ecase v e1 e2 , econs e1 e2, evar v, enil ]
+
+    orPerhaps s chs e1 rec
+
+{-
     0 -> newBaseExpr s scope
     _ -> do
         xs <- sequence $
@@ -130,6 +158,7 @@ newExpr s f size scope rec inarg = case size of
       where
         go' = newExpr s f (size-1)
         go  = go' scope rec inarg
+        -}
 
 index :: Symbolic a => SymTerm -> List a -> H a
 index i xs =
