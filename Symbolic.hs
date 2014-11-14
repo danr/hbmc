@@ -573,7 +573,7 @@ leq s (Nat xs) (Nat ys) = cmp (reverse (pad n xs)) (reverse (pad n ys))
 
 fromInt :: Integer -> Nat
 fromInt 0 = Nat []
-fromInt n = Nat (Bool (even n):xs) where Nat xs = fromInt (n `div` 2)
+fromInt n = Nat (Bool (odd n):xs) where Nat xs = fromInt (n `div` 2)
 
 count :: Solver -> [Bit] -> IO Nat
 count s [] = return (Nat [])
