@@ -4,6 +4,8 @@ import Symbolic
 import MiniSat
 import H
 
+import Data.List as L
+
 import Control.Applicative
 
 import Text.Show.Pretty (ppShow)
@@ -12,10 +14,10 @@ bruijn :: Integral i => i -> SymTerm
 bruijn 0 = z
 bruijn n = s (bruijn (n-1))
 
-tnat = TApp "0Nat" []
+tnat = TApp "Nat" []
 nat  = Data tnat [("Z",[]),("S",[tnat])]
 
-texpr = TApp "1Expr" []
+texpr = TApp "Expr" []
 expr  = Data texpr [ ("App2",[tnat,texpr,texpr])
                    , ("Case",[tnat,texpr,texpr])
                    , ("Cons",[texpr,texpr])
@@ -39,7 +41,7 @@ pprint = putStrLn . ppShow
 
 evalH :: List Expr -> List (List Nat) -> Expr -> H (List Nat)
 evalH p env e = do
-    -- io $ pprint ("evalH",e)
+    io $ pprint ("evalH",e)
     (arg1,env1,arg2) <- match e
         [ ("Var",  \[v]     -> return (UNR,UNR,UNR))
         , ("App2", \[f,x,y] -> return (The x,The env,The y))
@@ -119,7 +121,7 @@ newExpr s f rec vars size = do
             [ econs e1 e2, evar v, enil ]
 
     case rec of
-        Just k  -> choices s [ e , k e2 ] -- can call itself, e2 specifies second argument
+        Just k  -> choices s [ e , k e1 ] -- can call itself, e1 specifies second argument
                                           -- (first is tail from case)
         Nothing -> return e
 
@@ -147,81 +149,119 @@ main = do
     eliminate s True
 
     putStrLn "Creating symbolic program..."
-    prog <- newProg s 1 3
+
+    let funs      = 1
+        expr_size = 3
+
+    prog <- newProg s funs expr_size
 
     pprint prog
 
-    -- prog <- return Nil -- (cons enil (cons enil Nil))
-
     let test op a b =
-          do r <- eval s prog (makeEnv [a,b]) -- (evar (bruijn 0))
-                              (app2 (bruijn 0) (evar (bruijn 0)) (evar (bruijn 1)))
+          do r <- eval s prog (makeEnv [a,b])
+                              (app2 (bruijn (funs-1)) (evar (bruijn 0)) (evar (bruijn 1)))
              pprint ("r",r)
              pprint ("op a b",fromIntList (op a b))
              eq <- equal s (fromIntList (op a b)) r
              addClauseBit s [eq]
 
     putStrLn "Adding tests..."
-    test (++) [6,3,5] [2,8,4]
+
+    test (\ xs ys -> xs ++ ys) [1,2] [4,5]
+    -- test (\ xs ys -> xs ++ ys) [1,2,3] [4,5,6]
+    -- test (\ xs ys -> reverse xs ++ ys) [1,2] [4,5]
+    -- test (\ xs ys -> reverse xs ++ ys) [1,2,3] [4,5,6]
+    -- test (\ xs ys -> reverse xs ++ ys) [1,2,3] []
+    -- test (\ xs ys -> xs ++ xs) [1,2,3] []
+    -- test (\ xs _ -> xs ++ xs) [1,2,3] []
+
+    -- size=4, 0m23.256s: f1 = case a1 of { [] -> a2; x:y -> ((a1:[]):(x:f1(y,y))) }
+    -- test (\ _ _ -> [1,1,2,2,3,3]) [1,2,3] []
+
+    -- size=4, 0m0.435: sf1 = case a1 of { [] -> ([]:(a2:a1)); x:y -> ((a1:([]:[])):(x:(y:y))) }
+    -- test (\ _ _ -> [1,1,2,2]) [1,2] []
 
     putStrLn "Solving..."
     b <- solve s []
     if b then
       do putStrLn "Solution!"
          pprint =<< get s prog
+         pprint . map toExp =<< get s prog
+         putStrLn . showProg . map toExp =<< get s prog
      else
       do putStrLn "No solution."
 
     deleteSolver s
 
-{-
-prog =
-  [ App (S Z) [Var Z, Nil]
-  , Case Z (Var (S Z)) (App (S Z) [Var (S Z), Cons (Var Z) (Var (S (S (S Z))))])
-  ]
--}
+--------------------------------------------------------------------------------
 
-{-
-data Expr
-  = App Int [Expr]
-  | Case Int Expr Expr
-  | Cons Expr Expr
-  | Nil
-  | Var Int
+data Peano = Z | S Peano
  deriving ( Eq, Ord, Show )
 
-showExpr :: [String] -> [String] -> Expr -> String
-showExpr prg env (App f xs) =
-  index f prg ++ "(" ++ concat (L.intersperse "," (map (showExpr prg env) xs)) ++ ")"
+data Exp
+  = App Peano [Exp]
+  | Case Peano Exp Exp
+  | Cons Exp Exp
+  | ENil
+  | Var Peano
+ deriving ( Eq, Ord, Show )
 
-showExpr prg env (Case v nil cns) =
-  "case " ++ index v env ++ " of { [] -> " ++ showExpr prg env nil
-          ++ "; " ++ x ++ ":" ++ xs ++ " -> " ++ showExpr prg (x:xs:env) cns ++ " }"
+toExp :: Term -> Exp
+toExp tm = case tm of
+    Fun "App2" [f,x,y] -> App (toPeano f) [toExp x,toExp y]
+    Fun "Case" [v,x,y] -> Case (toPeano v) (toExp x) (toExp y)
+    Fun "Cons" [x,y]   -> Cons (toExp x) (toExp y)
+    Fun "Nil"  []      -> ENil
+    Fun "Var"  [v]     -> Var (toPeano v)
+    _                  -> error $ "toExp: " ++ ppShow tm
+
+toPeano :: Term -> Peano
+toPeano tm = case tm of
+    Fun "Z" []  -> Z
+    Fun "S" [x] -> S (toPeano x)
+    _           -> error $ "toPeano: " ++ ppShow tm
+
+prog :: [Exp]
+prog =
+  [ App (S Z) [Var Z, ENil]
+  , Case Z (Var (S Z)) (App (S Z) [Var (S Z), Cons (Var Z) (Var (S (S (S Z))))])
+  ]
+
+indexPeano :: Show a => Peano -> [a] -> a
+indexPeano Z     (x:xs) = x
+indexPeano (S n) (x:xs) = indexPeano n xs
+indexPeano n     xs     = error $ "indexPeano: " ++ ppShow n ++ ", " ++ ppShow xs
+
+showExp :: [String] -> [String] -> Exp -> String
+showExp prg env (App f xs) =
+  indexPeano f prg ++ "(" ++ concat (L.intersperse "," (map (showExp prg env) xs)) ++ ")"
+
+showExp prg env (Case v nil cns) =
+  "case " ++ indexPeano v env ++ " of { [] -> " ++ showExp prg env nil
+          ++ "; " ++ x ++ ":" ++ xs ++ " -> " ++ showExp prg (x:xs:env) cns ++ " }"
  where
   x:xs:_ = new env
 
-showExpr prg env (Cons a as) =
-  "(" ++ showExpr prg env a ++ ":" ++ showExpr prg env as ++ ")"
+showExp prg env (Cons a as) =
+  "(" ++ showExp prg env a ++ ":" ++ showExp prg env as ++ ")"
 
-showExpr prg env Nil =
+showExp prg env ENil =
   "[]"
 
-showExpr prg env (Var v) =
-  index v env
+showExp prg env (Var v) =
+  indexPeano v env
 
 new :: [String] -> [String]
 new vs = (["x","y","z","v","w","p","q","r"] ++ ["x" ++ show i | i <- [1..] ]) L.\\ L.nub vs
 
-showProg :: Program -> String
+showProg :: [Exp] -> String
 showProg prg = unlines
-  [ f ++ " = " ++ showExpr fs env e
+  [ f ++ " = " ++ showExp fs env e
   | (f,e) <- fs `zip` prg
   ]
  where
   fs  = ["f" ++ show i | i <- [1..] ]
   env = ["a" ++ show i | i <- [1..10] ]
-
--}
 
 --------------------------------------------------------------------------------
 
