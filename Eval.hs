@@ -37,26 +37,26 @@ evalH p env e = do
     (arg1,env1,arg2) <- match e
         [ ("Var",  \[v]     -> return (UNR,UNR,UNR))
         , ("App2", \[f,x,y] -> return (The x,The env,The y))
-        , ("Case", \[v,n,c] -> do
-            i <- index v env
-            matchList True i
-                (return (The n,The env,UNR))
-                (\a as -> return (The c,The ((a `cons` Nil) `cons` (as `cons` env)),UNR))
-          )
-        , ("Cons", \[x,xs]  -> return (The x,The env,The xs))
+        --, ("Case", \[v,n,c] -> do
+        --    t <- index v env
+        --    matchList True t
+        --        (return (The n,The env,UNR))
+        --        (\a as -> return (The c,The ((a `cons` Nil) `cons` (as `cons` env)),UNR))
+        --  )
+        --, ("Cons", \[x,xs]  -> return (The x,The env,The xs))
         , ("Nil",  \[]      -> return (UNR,UNR,UNR))
         ]
     f1 <- lift (peek env1 >>= \e1 -> peek arg1 >>= \a1 -> evalH p e1 a1)
     f2 <- lift (peek arg2 >>= \a2 -> evalH p env a2)
     match e
         [ ("Var",  \[v]     -> index v env)
-        , ("App2", \[f,x,y] -> evalH p (cons (the f1) (cons (the f2) Nil)) =<< index f p)
-        , ("Case", \[v,n,c] -> return (the f1))
-        , ("Cons", \[x,xs]  ->
-            matchList False (the f1)
-              (return (cons (fromInt 0) (the f2)))
-              (\y _ -> return (cons y (the f2)))
-          )
+        , ("App2", \[f,x,y] -> do check; evalH p (cons (the f1) (cons (the f2) Nil)) =<< index f p)
+        --, ("Case", \[v,n,c] -> return (the f1))
+        --, ("Cons", \[x,xs]  ->
+        --    matchList False (the f1)
+        --      (return (cons (fromInt 0) (the f2)))
+        --      (\y _ -> return (cons y (the f2)))
+        --  )
         , ("Nil",  \[]      -> return Nil)
         ]
 
@@ -155,11 +155,12 @@ main = do
     eliminate s True
 
     putStrLn "Creating symbolic program..."
-    prog <- newProg s 2 5
+    --prog <- newProg s 2 5
+    prog <- return Nil -- (cons enil (cons enil Nil))
 
     let test f a =
-          do b <- eval s prog (makeEnv [a,[]])
-                              (app2 (bruijn 0) (evar (bruijn 0)) (evar (bruijn 1)))
+          do b <- eval s prog (makeEnv [a,[]]) (evar (bruijn 0))
+--                              (app2 (bruijn 0) (evar (bruijn 0)) (evar (bruijn 1)))
              eq <- equal s (fromIntList (f a)) b
              addClauseBit s [eq]
 
