@@ -141,6 +141,9 @@ align ((a1,b1):abs1) ((a2,b2):abs2) =
     EQ -> (Just a1, Just a2, b1) : align abs1 abs2
     GT -> (Nothing, Just a2, b2) : align ((a1,b1):abs1) abs2
 
+align [] ys = [(Nothing, Just a, b) | (a,b) <- ys]
+align xs [] = [(Just a, Nothing, b) | (a,b) <- xs]
+
 --------------------------------------------------------------------------------
 
 class Symbolic a where
