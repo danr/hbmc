@@ -122,12 +122,23 @@ newExpr s f size scope rec inarg = case size of
         go' = newExpr s f (size-1)
         go  = go' scope rec inarg
 
-index :: Symbolic a => Solver -> SymTerm -> List a -> IO a
-index s i (ConsNil c x xs) =
-  do addClauseBit s [nt c]
+index :: Symbolic a => Solver -> [Bit] -> SymTerm -> List a -> IO a
+index s ctx i (ConsNil c x xs) =
+  do addClauseBit s (nt c : map nt ctx)
      switch s i
        [ ("Z", \_ _   -> return x)
-       , ("S", \_ [j] -> index s j xs)
+       , ("S", \b [j] -> index' s (b:ctx) x j xs)
+       ]
+
+index' :: Symbolic a => Solver -> [Bit] -> a -> SymTerm -> List a -> IO a
+index' s ctx x0 i Nil =
+  do addClauseBit s (map nt ctx)
+     return x0
+index' s ctx x0 i (ConsNil c x xs) =
+  do addClauseBit s (nt c : map nt ctx)
+     switch s i
+       [ ("Z", \_ _   -> return x)
+       , ("S", \b [j] -> index' s (b:ctx) x0 j xs)
        ]
 
 fromList :: Symbolic a => [a] -> List a
