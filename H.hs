@@ -34,6 +34,17 @@ instance Monad H where
 withExtra :: H a -> Bit -> H a
 H m `withExtra` b = H (\s ctx -> m s (b:ctx))
 
+check :: H ()
+check = H (\s ctx ->
+  do b <- if ff `elem` ctx
+            then return False
+            else solve s [ x | Lit x <- ctx ]
+     if b then
+       return (Just ())
+      else
+       return Nothing
+  )
+
 impossible :: H a
 impossible = H (\s ctx -> do addClauseBit s (map nt ctx)
                              return Nothing)
