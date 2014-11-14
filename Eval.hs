@@ -155,15 +155,17 @@ main = do
     s <- newSolver
     eliminate s True
 
-    putStrLn "Creating problem..."
-    prog <- newProg s 2 10
+    putStrLn "Creating symbolic program..."
+    prog <- newProg s 2 5
 
-    let a === b = equal s (fromIntList a) =<< eval s prog (makeEnv [b,[]])
-                                                          (app2 (bruijn 0) (evar (bruijn 0)) (evar (bruijn 1)))
+    let test f a =
+          do b <- eval s prog (makeEnv [a,[]])
+                              (app2 (bruijn 0) (evar (bruijn 0)) (evar (bruijn 1)))
+             eq <- equal s (fromIntList (f a)) b
+             addClauseBit s [eq]
 
-    fact_1 <- [1,2,3,4] === reverse [1,2,3,4]
-
-    addClauseBit s [fact_1]
+    putStrLn "Adding tests..."
+    test reverse []
 
     putStrLn "Solving..."
     b <- solve s []
