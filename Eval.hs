@@ -37,7 +37,7 @@ eval s p env e = do
         [ ("Var",  \_ [v]     -> return (UNR,(UNR,UNR)))
         , ("App2", \_ [f,x,y] -> return (The x,(The env,The y)))
         , ("Case", \b [v,n,c] -> do
-            i <- index s v env
+            i <- index s [b] v env
             caseList' s [b] i
                 (return (The n,(The env,UNR)))
                 (\ _ a as -> return (The c,(The ((a `cons` Nil) `cons` (as `cons` env)),UNR)))
@@ -45,15 +45,18 @@ eval s p env e = do
         , ("Cons", \_ [x,xs]  -> return (The x,(The env,The xs)))
         , ("Nil",  \_ []      -> return (UNR,(UNR,UNR)))
         ]
-    f1 <- eval s p (the env1) (the arg1)
-    f2 <- eval s p env (the arg2)
+    f1 <- env1 `withThe` \e1 ->
+            arg1 `withThe` \a1 ->
+              The `fmap` eval s p e1 a1
+    f2 <- arg2 `withThe` \a2 ->
+              The `fmap` eval s p env a2
     switch s e
-        [ ("Var",  \_ [v]     -> index s v env)
-        , ("App2", \_ [f,x,y] -> eval s p (cons f1 (cons f2 Nil)) =<< index s f p)
-        , ("Case", \b [v,n,c] -> return f1)
-        , ("Cons", \_ [x,xs]  -> caseList s f1
-            (return (cons (fromInt 0) f2))
-            (\ _ y _ -> return (cons y f2))
+        [ ("Var",  \b [v]     -> index s [b] v env)
+        , ("App2", \b [f,x,y] -> eval s p (cons (the f1) (cons (the f2) Nil)) =<< index s [b] f p)
+        , ("Case", \b [v,n,c] -> return (the f1))
+        , ("Cons", \_ [x,xs]  -> caseList s (the f1)
+            (return (cons (fromInt 0) (the f2)))
+            (\ _ y _ -> return (cons y (the f2)))
           )
         , ("Nil",  \_ []      -> return Nil)
 
