@@ -121,7 +121,7 @@ newExpr s f rec vars size = do
 
     e1 <- newExpr s f rec vars (size-1)
     e2 <- newExpr s f rec vars (size-1)
-    v  <- choices s (map bruijn [0..f-1])
+    v  <- choices s (map bruijn [0..vars-1])
     g  <- choices s (map bruijn [0..f-1])
 
     chs <- choices s [ app2 g e1 e2 , ecase v e1 e2 , econs e1 e2, evar v, enil ]
