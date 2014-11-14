@@ -56,17 +56,41 @@ ifThenElse :: Symbolic a => Bit -> a -> a -> H a
 ifThenElse c x y = withSolver (\s -> iff s c x y)
 
 match :: Symbolic a => SymTerm -> [(Name, [SymTerm] -> H a)] -> H a
-match t alts = H (\s ctx ->
-  do lx <- switch s t [ (c, \b xs -> do my <- run (alt xs) s (b:ctx)
-                                        return (case my of
-                                                  Nothing -> UNR
-                                                  Just y  -> The y))
-                      | (c, alt) <- alts
-                      ]
-     return (case lx of
-               UNR   -> Nothing
-               The x -> Just x)
+match t alts =
+  H (\s ctx ->
+    do lx <- switch s t [ (c, \b xs -> do my <- run (alt xs) s (b:ctx)
+                                          return (case my of
+                                                    Nothing -> UNR
+                                                    Just y  -> The y))
+                        | (c, alt) <- alts
+                        ]
+       return (case lx of
+                 UNR   -> Nothing
+                 The x -> Just x)
   )
+
+matchList :: Symbolic b => Bool -> List a -> H b -> (a -> List a -> H b) -> H b
+matchList check t nil cns =
+  H (\s ctx ->
+    do lx <- caseL s ctx t
+               (           lft (run nil s ctx)) -- should we add stuff to the context here?
+               (\b x xs -> lft (run (cns x xs) s (b:ctx)))
+       return (case lx of
+                 UNR   -> Nothing
+                 The x -> Just x)
+  )
+ where
+  caseL | check     = caseList'
+        | otherwise = \s _ctx -> caseList s
+
+  lft io =
+    do mx <- io
+       return (case mx of
+                 Just x  -> The x
+                 Nothing -> UNR)
+
+--caseList  :: Symbolic b => Solver ->          List a -> IO b -> (Bit -> a -> List a -> IO b) -> IO b
+--caseList' :: Symbolic b => Solver -> [Bit] -> List a -> IO b -> (Bit -> a -> List a -> IO b) -> IO b
 
 --------------------------------------------------------------------------------
 
