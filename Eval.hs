@@ -6,6 +6,8 @@ import H
 
 import Control.Applicative
 
+import Text.Show.Pretty (ppShow)
+
 bruijn :: Integral i => i -> SymTerm
 bruijn 0 = z
 bruijn n = s (bruijn (n-1))
@@ -32,31 +34,35 @@ evar  v     = Con expr (val "Var")  [(v,tnat)      ]
 
 type Expr = SymTerm
 
+pprint :: Show a => a -> IO ()
+pprint = putStrLn . ppShow
+
 evalH :: List Expr -> List (List Nat) -> Expr -> H (List Nat)
 evalH p env e = do
+    io $ pprint ("evalH",e)
     (arg1,env1,arg2) <- match e
         [ ("Var",  \[v]     -> return (UNR,UNR,UNR))
         , ("App2", \[f,x,y] -> return (The x,The env,The y))
-        --, ("Case", \[v,n,c] -> do
-        --    t <- index v env
-        --    matchList True t
-        --        (return (The n,The env,UNR))
-        --        (\a as -> return (The c,The ((a `cons` Nil) `cons` (as `cons` env)),UNR))
-        --  )
-        --, ("Cons", \[x,xs]  -> return (The x,The env,The xs))
+        , ("Case", \[v,n,c] -> do
+            t <- index v env
+            matchList True t
+                (return (The n,The env,UNR))
+                (\a as -> return (The c,The ((a `cons` Nil) `cons` (as `cons` env)),UNR))
+          )
+        , ("Cons", \[x,xs]  -> return (The x,The env,The xs))
         , ("Nil",  \[]      -> return (UNR,UNR,UNR))
         ]
     f1 <- lift (peek env1 >>= \e1 -> peek arg1 >>= \a1 -> evalH p e1 a1)
     f2 <- lift (peek arg2 >>= \a2 -> evalH p env a2)
     match e
-        [ ("Var",  \[v]     -> index v env)
+        [ ("Var",  \[v]     -> do i <- index v env; return i)
         , ("App2", \[f,x,y] -> do check; evalH p (cons (the f1) (cons (the f2) Nil)) =<< index f p)
-        --, ("Case", \[v,n,c] -> return (the f1))
-        --, ("Cons", \[x,xs]  ->
-        --    matchList False (the f1)
-        --      (return (cons (fromInt 0) (the f2)))
-        --      (\y _ -> return (cons y (the f2)))
-        --  )
+        , ("Case", \[v,n,c] -> return (the f1))
+        , ("Cons", \[x,xs]  ->
+            matchList False (the f1)
+              (return (cons (fromInt 0) (the f2)))
+              (\y _ -> return (cons y (the f2)))
+          )
         , ("Nil",  \[]      -> return Nil)
         ]
 
@@ -89,69 +95,32 @@ eval s prog env e =
     -}
 
 newProg :: Solver -> Int -> Int -> IO (List Expr)
-newProg s fns e_size  = case fns of
-    0 -> return Nil
-    _ -> do
-        e <-  newExprTop s fns e_size
-        es <- newProg s (fns-1) e_size
-        return (cons e es)
+newProg s fns e_size = fromList <$> sequence [ newTopExpr s f e_size | f <- [0..fns-1] ]
 
-newBaseExpr :: Solver -> Int -> IO Expr
-newBaseExpr s vars = choices s (enil:map (evar . bruijn) [0..vars-1])
-
-newExprTop :: Solver -> Int -> Int -> IO Expr
-newExprTop s f size = do
-    b <- newBit s
-    nil_e  <- newExpr s f Nothing                                                         2 (size-1)
-    cons_e <- newExpr s f (Just (\ arg_e -> app2 (bruijn (f-1)) (evar (bruijn 2)) arg_e)) 4 (size-1)
+newTopExpr :: Solver -> Int -> Int -> IO Expr
+newTopExpr s f size = do
+    nil_e  <- newExpr s f Nothing                                                     2 (size-1)
+    cons_e <- newExpr s f (Just (\ arg_e -> app2 (bruijn f) (evar (bruijn 2)) arg_e)) 4 (size-1)
     choices s [ nil_e , ecase (bruijn 0) nil_e cons_e ]
 
 newExpr :: Solver -> Int -> Maybe (Expr -> Expr) -> Int -> Int -> IO Expr
-newExpr s f rec vars 0    = newBaseExpr s vars
+newExpr s f rec vars size | size <= 0 = choices s (enil:map (evar . bruijn) [0..vars-1])
 newExpr s f rec vars size = do
 
     e1 <- newExpr s f rec vars (size-1)
     e2 <- newExpr s f rec vars (size-1)
     v  <- choices s (map bruijn [0..vars-1])
-    g  <- choices s (map bruijn [0..f-1])
 
-    e <- choices s [ app2 g e1 e2 , ecase v e1 e2 , econs e1 e2, evar v, enil ]
+    -- call earlier function on ary argument
+    mg <- if f > 0 then Just <$> choices s (map bruijn [0..f-1]) else return Nothing
+
+    e <- choices s $
+            [ app2 g e1 e2 | Just g <- [mg] ] ++
+            [ econs e1 e2, evar v, enil ]
 
     case rec of
-        Just k  -> choices s [ e , k e1 ]
+        Just k  -> return e -- choices s [ e , k e1 ] -- can call itself
         Nothing -> return e
-
-{-
-    0 -> newBaseExpr s scope
-    _ -> do
-        xs <- sequence $
-            [ newBaseExpr s scope
-            , econs <$> go <*> go
-            ] ++
-            -- recursive call, first argument must be one of the allowed ones:
-            [ app2 (bruijn f) (evar (bruijn rec_var)) <$> go
-            | rec_var <- rec
-            ]
-            ++
-            -- case: if you case on the input argument,
-            -- you may now recurse on the tail
-            [ ecase (evar (bruijn v)) <$> go
-                <*> go' (0:1:map (+2) scope)
-                        (if v `elem` (inarg:rec)
-                            then 1:map (+2) rec
-                            else map (+2) rec)
-                        (inarg + 2)
-            | v <- scope
-            ] ++
-            -- non-recursive calls:
-            [ app2 (bruijn g) <$> go <*> go
-            | g <- [0..f-1]
-            ]
-        choices s xs
-      where
-        go' = newExpr s f (size-1)
-        go  = go' scope rec inarg
-        -}
 
 index :: Symbolic a => SymTerm -> List a -> H a
 index i xs =
@@ -177,23 +146,28 @@ main = do
     eliminate s True
 
     putStrLn "Creating symbolic program..."
-    --prog <- newProg s 2 5
-    prog <- return Nil -- (cons enil (cons enil Nil))
+    prog <- newProg s 1 3
+
+    pprint prog
+
+    -- prog <- return Nil -- (cons enil (cons enil Nil))
 
     let test f a =
-          do b <- eval s prog (makeEnv [a,[]]) (evar (bruijn 0))
---                              (app2 (bruijn 0) (evar (bruijn 0)) (evar (bruijn 1)))
+          do b <- eval s prog (makeEnv [a,[]]) -- (evar (bruijn 0))
+                              (app2 (bruijn 0) (evar (bruijn 0)) (evar (bruijn 1)))
+             pprint ("b",b)
+             pprint ("f a",fromIntList (f a))
              eq <- equal s (fromIntList (f a)) b
              addClauseBit s [eq]
 
     putStrLn "Adding tests..."
-    test reverse []
+    test reverse [1,2]
 
     putStrLn "Solving..."
     b <- solve s []
     if b then
       do putStrLn "Solution!"
-         print =<< get s prog
+         pprint =<< get s prog
      else
       do putStrLn "No solution."
 

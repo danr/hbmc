@@ -57,7 +57,7 @@ lift (H m) = H (\s ctx -> do mx <- m s ctx
                                              Just x  -> The x)))
 peek :: Lift a -> H a
 peek UNR     = H (\_ _ -> return Nothing)
-peek (The x) = return x 
+peek (The x) = return x
 
 withSolver :: (Solver -> IO a) -> H a
 withSolver f = H (\s _ -> Just `fmap` f s)
@@ -85,7 +85,11 @@ matchList :: Symbolic b => Bool -> List a -> H b -> (a -> List a -> H b) -> H b
 matchList check t nil cns =
   H (\s ctx ->
     do lx <- caseL s ctx t
-               (           lft (run nil s ctx)) -- should we add stuff to the context here?
+               (           lft (run nil s (nt (is_cons t):ctx)))
+                                    -- should we add stuff to the context here?
+                                    -- yes! we need to say that
+                                    -- we're inthis nil branch
+                                    -- in case we use impossible
                (\b x xs -> lft (run (cns x xs) s (b:ctx)))
        return (case lx of
                  UNR   -> Nothing
@@ -94,6 +98,9 @@ matchList check t nil cns =
  where
   caseL | check     = caseList'
         | otherwise = \s _ctx -> caseList s
+
+  is_cons (ConsNil x _ _) = x
+  is_cons _               = ff
 
   lft io =
     do mx <- io
@@ -105,4 +112,8 @@ matchList check t nil cns =
 --caseList' :: Symbolic b => Solver -> [Bit] -> List a -> IO b -> (Bit -> a -> List a -> IO b) -> IO b
 
 --------------------------------------------------------------------------------
+
+io :: IO a -> H a
+io m = H $ \ _ _ -> do x <- m; return (Just x)
+
 

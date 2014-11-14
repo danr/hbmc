@@ -10,6 +10,10 @@ import Data.Maybe
 data Bit = Lit Lit | Bool Bool
  deriving ( Eq, Ord )
 
+instance Show Bit where
+    show (Bool t) = show t ++ "Bit"
+    show (Lit v)  = show (show v)
+
 newBit :: Solver -> IO Bit
 newBit s = Lit `fmap` newLit s
 
@@ -21,6 +25,11 @@ nt :: Bit -> Bit
 nt (Bool b) = Bool (not b)
 nt (Lit x)  = Lit (neg x)
 
+addClause_db :: Solver -> [Lit] -> IO Bool
+addClause_db s lits = do
+---    putStrLn $ "addClause " ++ show lits
+    addClause s lits
+
 andl, orl :: Solver -> [Bit] -> IO Bit
 andl s xs
   | ff `elem` xs = return ff
@@ -29,8 +38,8 @@ andl s xs
   andl' []  = do return tt
   andl' [x] = do return (Lit x)
   andl' xs  = do y <- newLit s
-                 addClause s (y : map neg xs)
-                 sequence_ [ addClause s [neg y, x] | x <- xs ]
+                 addClause_db s (y : map neg xs)
+                 sequence_ [ addClause_db s [neg y, x] | x <- xs ]
                  return (Lit y)
 
 orl s xs = nt `fmap` andl s (map nt xs)
@@ -38,7 +47,7 @@ orl s xs = nt `fmap` andl s (map nt xs)
 addClauseBit :: Solver -> [Bit] -> IO ()
 addClauseBit s xs
   | tt `elem` xs = do return ()
-  | otherwise    = do addClause s [ x | Lit x <- xs ]
+  | otherwise    = do addClause_db s [ x | Lit x <- xs ]
                       return ()
 
 iffBit :: Solver -> Bit -> Bit -> Bit -> IO Bit
@@ -62,6 +71,7 @@ iffBit s c x y =
 --------------------------------------------------------------------------------
 
 data Val a = Val [(Bit,a)]
+ deriving ( Show )
 
 val :: a -> Val a
 val x = Val [(tt,x)]
@@ -228,6 +238,10 @@ data Data = Data Typ [(Name, [Typ])]
 
 data SymTerm = Con Data (Val Name) [(SymTerm,Typ)]
 
+instance Show SymTerm where
+    showsPrec x (Con _ v ats) = showParen (x >= 11) $
+       showString "Con " . showsPrec 11 v . showString " " . showsPrec 11 (map fst ats)
+
 data Term = Fun Name [Term]
  deriving ( Eq, Ord, Show )
 
@@ -353,6 +367,7 @@ instance (Symbolic a, Symbolic b, Symbolic c) => Symbolic (a,b,c) where
 
 data List a = ConsNil Bit a (List a)
             | Nil
+  deriving Show
 
 newLists :: Solver -> Int -> IO a -> IO (List a)
 newLists s 0 el =
@@ -529,6 +544,7 @@ instance Symbolic a => Symbolic (TREE a) where
 --------------------------------------------------------------------------------
 
 data Nat = Nat [Bit]
+  deriving Show
 
 newNat :: Solver -> Int -> IO Nat
 newNat s k =
