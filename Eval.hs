@@ -2,6 +2,7 @@ module Main where
 
 import Symbolic
 import MiniSat
+import H
 
 import Control.Applicative
 
@@ -31,36 +32,41 @@ evar  v     = Con expr (val "Var")  [(v,tnat)      ]
 
 type Expr = SymTerm
 
-eval :: Solver -> List Expr -> List (List Nat) -> Expr -> IO (List Nat)
-eval s p env e = do
-    (arg1,(env1,arg2)) <- switch s e
-        [ ("Var",  \_ [v]     -> return (UNR,(UNR,UNR)))
-        , ("App2", \_ [f,x,y] -> return (The x,(The env,The y)))
-        , ("Case", \b [v,n,c] -> do
-            i <- index s [b] v env
-            caseList' s [b] i
-                (return (The n,(The env,UNR)))
-                (\ _ a as -> return (The c,(The ((a `cons` Nil) `cons` (as `cons` env)),UNR)))
+evalH :: List Expr -> List (List Nat) -> Expr -> H (List Nat)
+evalH p env e = do
+    (arg1,env1,arg2) <- match e
+        [ ("Var",  \[v]     -> return (UNR,UNR,UNR))
+        , ("App2", \[f,x,y] -> return (The x,The env,The y))
+        , ("Case", \[v,n,c] -> do
+            i <- index v env
+            matchList True i
+                (return (The n,The env,UNR))
+                (\a as -> return (The c,The ((a `cons` Nil) `cons` (as `cons` env)),UNR))
           )
-        , ("Cons", \_ [x,xs]  -> return (The x,(The env,The xs)))
-        , ("Nil",  \_ []      -> return (UNR,(UNR,UNR)))
+        , ("Cons", \[x,xs]  -> return (The x,The env,The xs))
+        , ("Nil",  \[]      -> return (UNR,UNR,UNR))
         ]
-    f1 <- env1 `withThe` \e1 ->
-            arg1 `withThe` \a1 ->
-              The `fmap` eval s p e1 a1
-    f2 <- arg2 `withThe` \a2 ->
-              The `fmap` eval s p env a2
-    switch s e
-        [ ("Var",  \b [v]     -> index s [b] v env)
-        , ("App2", \b [f,x,y] -> eval s p (cons (the f1) (cons (the f2) Nil)) =<< index s [b] f p)
-        , ("Case", \b [v,n,c] -> return (the f1))
-        , ("Cons", \_ [x,xs]  -> caseList s (the f1)
-            (return (cons (fromInt 0) (the f2)))
-            (\ _ y _ -> return (cons y (the f2)))
+    f1 <- lift (peek env1 >>= \e1 -> peek arg1 >>= \a1 -> evalH p e1 a1)
+    f2 <- lift (peek arg2 >>= \a2 -> evalH p env a2)
+    match e
+        [ ("Var",  \[v]     -> index v env)
+        , ("App2", \[f,x,y] -> evalH p (cons (the f1) (cons (the f2) Nil)) =<< index f p)
+        , ("Case", \[v,n,c] -> return (the f1))
+        , ("Cons", \[x,xs]  ->
+            matchList False (the f1)
+              (return (cons (fromInt 0) (the f2)))
+              (\y _ -> return (cons y (the f2)))
           )
-        , ("Nil",  \_ []      -> return Nil)
+        , ("Nil",  \[]      -> return Nil)
+        ]
 
-        ]
+eval :: Solver -> List Expr -> List (List Nat) -> Expr -> IO (List Nat)
+eval s prog env e =
+  do mx <- run (evalH prog env e) s []
+     case mx of
+       Just x -> return x
+       Nothing -> error "eval = Nothing"
+
 {-
   case e of
     Var v          -> index v env
@@ -125,24 +131,14 @@ newExpr s f size scope rec inarg = case size of
         go' = newExpr s f (size-1)
         go  = go' scope rec inarg
 
-index :: Symbolic a => Solver -> [Bit] -> SymTerm -> List a -> IO a
-index s ctx i (ConsNil c x xs) =
-  do addClauseBit s (nt c : map nt ctx)
-     switch s i
-       [ ("Z", \_ _   -> return x)
-       , ("S", \b [j] -> index' s (b:ctx) x j xs)
-       ]
-
-index' :: Symbolic a => Solver -> [Bit] -> a -> SymTerm -> List a -> IO a
-index' s ctx x0 i Nil =
-  do addClauseBit s (map nt ctx)
-     return x0
-index' s ctx x0 i (ConsNil c x xs) =
-  do addClauseBit s (nt c : map nt ctx)
-     switch s i
-       [ ("Z", \_ _   -> return x)
-       , ("S", \b [j] -> index' s (b:ctx) x0 j xs)
-       ]
+index :: Symbolic a => SymTerm -> List a -> H a
+index i xs =
+  matchList False xs
+    (impossible)
+    (\y ys -> match i
+              [ ("Z", \_   -> return y)
+              , ("S", \[j] -> index j ys)
+              ])
 
 fromList :: Symbolic a => [a] -> List a
 fromList = foldr cons Nil
