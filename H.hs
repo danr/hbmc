@@ -42,7 +42,8 @@ check = H (\s ctx ->
      if b then
        return (Just ())
       else
-       return Nothing
+       do putStrLn "Context is inconsistent."
+          return Nothing
   )
 
 impossible :: H a
