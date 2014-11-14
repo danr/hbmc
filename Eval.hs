@@ -106,15 +106,6 @@ newExprTop s f size = do
     cons_e <- newExpr s f (Just (\ arg_e -> app2 (bruijn (f-1)) (evar (bruijn 2)) arg_e)) 4 (size-1)
     choices s [ nil_e , ecase (bruijn 0) nil_e cons_e ]
 
-orr :: Symbolic a => Solver -> a -> a -> IO a
-orr s u v = do
-    b <- newBit s
-    iff s b u v
-
-orPerhaps :: Symbolic a => Solver -> a -> b -> Maybe (b -> a) -> IO a
-orPerhaps s u v (Just f) = orr s u (f v)
-orPerhaps s u _ _        = return u
-
 newExpr :: Solver -> Int -> Maybe (Expr -> Expr) -> Int -> Int -> IO Expr
 newExpr s f rec vars 0    = newBaseExpr s vars
 newExpr s f rec vars size = do
@@ -124,9 +115,11 @@ newExpr s f rec vars size = do
     v  <- choices s (map bruijn [0..vars-1])
     g  <- choices s (map bruijn [0..f-1])
 
-    chs <- choices s [ app2 g e1 e2 , ecase v e1 e2 , econs e1 e2, evar v, enil ]
+    e <- choices s [ app2 g e1 e2 , ecase v e1 e2 , econs e1 e2, evar v, enil ]
 
-    orPerhaps s chs e1 rec
+    case rec of
+        Just k  -> choices s [ e , k e1 ]
+        Nothing -> return e
 
 {-
     0 -> newBaseExpr s scope
