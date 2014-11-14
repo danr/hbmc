@@ -12,10 +12,10 @@ bruijn :: Integral i => i -> SymTerm
 bruijn 0 = z
 bruijn n = s (bruijn (n-1))
 
-tnat = TApp "Nat" []
+tnat = TApp "0Nat" []
 nat  = Data tnat [("Z",[]),("S",[tnat])]
 
-texpr = TApp "Expr" []
+texpr = TApp "1Expr" []
 expr  = Data texpr [ ("App2",[tnat,texpr,texpr])
                    , ("Case",[tnat,texpr,texpr])
                    , ("Cons",[texpr,texpr])
