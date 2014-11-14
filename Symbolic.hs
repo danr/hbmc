@@ -249,7 +249,7 @@ equalArgs s (Data _ cons) fs xs ys =
              | (Just a, Just b, t) <- align xs ys
              ]
      sequence
-       [ do eq <- andl s [ eq | eq <- match args eqts ]
+       [ do eq <- andl s [ eq | eq <- matchArgs args eqts ]
             orl s [nt a, eq]
        | (a, f) <- fs
        , let args:_ = [ args | (c,args) <- cons, c == f ]
@@ -257,15 +257,15 @@ equalArgs s (Data _ cons) fs xs ys =
 
 getArgs :: Solver -> Data -> Name -> [(SymTerm,Typ)] -> IO [Term]
 getArgs s (Data _ cons) f xs =
-  sequence [ get s x | x <- match args xs ]
+  sequence [ get s x | x <- matchArgs args xs ]
  where
   args:_ = [ args | (c,args) <- cons, c == f ]
 
-match :: [Typ] -> [(a,Typ)] -> [a]
-match [] _    = []
-match (t:ts) ((a,t'):as)
-  | t == t'   = a : match ts as
-  | otherwise = match (t:ts) as
+matchArgs :: [Typ] -> [(a,Typ)] -> [a]
+matchArgs [] _    = []
+matchArgs (t:ts) ((a,t'):as)
+  | t == t'   = a : matchArgs ts as
+  | otherwise = matchArgs (t:ts) as
 
 instance Symbolic SymTerm where
   type Type SymTerm = Term
@@ -290,7 +290,7 @@ instance Symbolic SymTerm where
 switch :: Symbolic b => Solver -> SymTerm -> [(Name, Bit -> [SymTerm] -> IO b)] -> IO b
 switch s (Con (Data _ cons) cn xs) alts =
   do bs <- sequence
-           [ do b <- alt (cn =? f) (match args xs)
+           [ do b <- alt (cn =? f) (matchArgs args xs)
                 return (c,b)
            | f <- domain cn
            , let c      = cn =? f
@@ -327,6 +327,27 @@ instance (Symbolic a, Symbolic b) => Symbolic (a,b) where
     do x <- get s a
        y <- get s b
        return (x,y)
+
+instance (Symbolic a, Symbolic b, Symbolic c) => Symbolic (a,b,c) where
+  type Type (a,b,c) = (Type a, Type b, Type c)
+
+  iff s c (x1,y1,z1) (x2,y2,z2) =
+    do x <- iff s c x1 x2
+       y <- iff s c y1 y2
+       z <- iff s c z1 z2
+       return (x,y,z)
+
+  equal s (x1,y1,z1) (x2,y2,z2) =
+    do ex <- equal s x1 x2
+       ey <- equal s y1 y2
+       ez <- equal s z1 z2
+       andl s [ex,ey,ez]
+
+  get s (a,b,c) =
+    do x <- get s a
+       y <- get s b
+       z <- get s c
+       return (x,y,z)
 
 --------------------------------------------------------------------------------
 
