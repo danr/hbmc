@@ -1,9 +1,11 @@
 {-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving #-}
 module Symbolic
   ( H -- :: Monad, Functor, Applicative
-  , lift, peek, withSolver, withExtra, context, cutoff, check, impossible
+  , lift, peek, withSolver, withExtra, context, cutoff, check, impossible, io
+  , runH
   
   , Choice(..), Equal(..), Value(..)
+  , equal
   
   , Bit
   , newBit, ff, tt, nt, andl, orl, addClause, (==>)
@@ -17,7 +19,11 @@ module Symbolic
   , newNat
   
   , Data(..)
+  , Argument(..)
+  , Struct(..)
   , switch
+  
+  , List(..), L(..), nil, cons
   )
  where
 
@@ -60,13 +66,15 @@ instance Monad H where
 --------------------------------------------------------------------------------
 
 lift :: H a -> H (Lift a)
-lift (H m) = H (\s ctx -> do a <- newBit -- haha!
-                             mx <- m s (a:ctx)
+lift (H m) = H (\s ctx -> do mx <- m s ctx
                              return (The mx))
 
 peek :: Lift a -> H a
-peek UNR     = impossible
+peek UNR     = H (\_ _ -> return UNR)
 peek (The x) = return x
+
+io :: IO a -> H a
+io m = H (\_ _ -> The `fmap` m)
 
 withSolver :: (Solver -> IO a) -> H a
 withSolver f = H (\s _ -> The `fmap` f s)
@@ -89,7 +97,7 @@ runH m =
 cutoff :: Int -> H ()
 cutoff n =
   do ctx <- context
-     if length ctx >= n then impossible else return ()
+     if length ctx >= n then impossible "cutoff" else return ()
 
 check :: H ()
 check =
@@ -102,11 +110,17 @@ check =
       else
        fail "context is inconsistent"
 
-impossible :: H a
-impossible =
+impossible :: String -> H a
+impossible tag =
   do ctx <- context
      addClause (map nt ctx)
+     --io $ putStrLn ("impossible: " ++ tag)
      fail "impossible"
+
+--
+
+--addClause_db s xs = do print xs; M.addClause s xs
+addClause_db s xs = M.addClause s xs
 
 {-
 ================================================================================
@@ -172,8 +186,8 @@ andl xs
   andl' s []  = do return tt
   andl' s [x] = do return (Lit x)
   andl' s xs  = do y <- M.newLit s
-                   M.addClause s (y : map M.neg xs)
-                   sequence_ [ M.addClause s [M.neg y, x] | x <- xs ]
+                   addClause_db s (y : map M.neg xs)
+                   sequence_ [ addClause_db s [M.neg y, x] | x <- xs ]
                    return (Lit y)
 
 orl xs = nt `fmap` andl (map nt xs)
@@ -181,7 +195,7 @@ orl xs = nt `fmap` andl (map nt xs)
 addClause :: [Bit] -> H ()
 addClause xs
   | tt `elem` xs = do return ()
-  | otherwise    = do withSolver (\s -> M.addClause s [ x | Lit x <- xs ])
+  | otherwise    = do withSolver (\s -> addClause_db s [ x | Lit x <- xs ])
                       return ()
 
 (==>) :: [Bit] -> [Bit] -> H ()
@@ -214,7 +228,10 @@ instance Value Bit where
   type Type Bit = Bool
 
   get (Bool b) = return b
-  get (Lit x)  = (Just True ==) `fmap` withSolver (\s -> M.modelValue s x)
+  get (Lit x)  = h `fmap` withSolver (\s -> M.modelValue s x)
+   where
+    h Nothing  = error "Nooooooo!"
+    h (Just b) = b
 
 {-
 ================================================================================
@@ -371,9 +388,24 @@ newVal xs =
    where
     k = n `div` 2
 
+(<&&) :: Ord a => Val a -> Val a -> Val a
+Val xs <&& Val ys =
+  Val [ (x, a)
+      | (Just x, Just _, a) <- align xs ys
+      ]
+
 choose :: Choice b => Val a -> (a -> H b) -> H b
+choose (Val [])         h = impossible "choose"
 choose (Val [(_,x)])    h = do h x
-choose (Val ((a,x):xs)) h = do y <- h x; z <- choose (Val xs) h; iff a y z
+choose (Val ((a,x):xs)) h =
+  do ly <- lift (h x `withExtra` a)
+     case ly of
+       The y ->
+         do z <- choose (Val xs) h
+            iff a y z
+       
+       UNR ->
+         do choose (Val xs) h
 
 --------------------------------------------------------------------------------
 
@@ -549,8 +581,8 @@ data Data l arg = Con (Val l) arg
 switch :: (Ord l, Choice b) => Data l arg -> (l -> arg -> H b) -> H b
 switch (Con cn arg) h = choose cn (\cn -> h cn arg)
 
-class EqualArg l where
-  equalArg :: l -> Struct Bit -> [Struct Bit]
+class Argument l where
+  argument :: Show a => l -> Struct a -> [Struct a]
 
 --------------------------------------------------------------------------------
 
@@ -560,12 +592,12 @@ instance (Ord l, Choice arg) => Choice (Data l arg) where
        arg <- iff c arg1 arg2
        return (Con cn arg)
 
-instance (Ord l, EqualArg l, Equal arg) => Equal (Data l arg) where
+instance (Ord l, Argument l, Equal arg) => Equal (Data l arg) where
   equalStruct (Con c1 arg1) (Con c2 arg2) =
     do eq <- equal c1 c2
        eqstr <- equalStruct arg1 arg2
-       eqs <- choose c1 $ \l -> do eq <- andl (concatMap bits (equalArg l eqstr))
-                                   orl [nt (c1 =? l), eq]
+       eqs <- choose (c1 <&& c2) $ \l -> do eq <- andl (concatMap bits (argument l eqstr))
+                                            orl [nt (c1 =? l), eq]
        Bit `fmap` andl [eq,eqs]
 
 {-
@@ -593,9 +625,9 @@ instance Value a => Value (List a) where
          Cons -> do ~(Just (a,as)) <- get args
                     return (a:as)
 
-instance EqualArg L where
-  equalArg Nil  _              = []
-  equalArg Cons (Tuple [x,xs]) = [x,xs]
+instance Argument L where
+  argument Nil  _              = []
+  argument Cons (Tuple [x,xs]) = [x,xs]
 
 caseList (List d) nl cns =
   switch d $ \l args ->
@@ -623,5 +655,6 @@ bepa =
      xs <- get l
      withSolver $ \_ -> print xs
 -}
---------------------------------------------------------------------------------
+
+-------------------------------------------------------------------------------
 
