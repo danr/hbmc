@@ -54,8 +54,9 @@ evalH p env e = do
         , ("Cons", \[x,xs]  -> return (The x,The env,The xs))
         , ("Nil",  \[]      -> return (UNR,UNR,UNR))
         ]
-    f1 <- lift (peek env1 >>= \e1 -> peek arg1 >>= \a1 -> evalH p e1 a1)
-    f2 <- lift (peek arg2 >>= \a2 -> evalH p env a2)
+    b1 <- withSolver $ \s -> orl s [cn =? "App2", cn =? "Case", cn =? "Cons"]
+    f1 <- lift (peek env1 >>= \e1 -> peek arg1 >>= \a1 -> evalH p e1 a1) `withExtra` b1
+    f2 <- lift (peek arg2 >>= \a2 -> evalH p env a2) `withExtra` b1
     match e
         [ ("Var",  \[v]     -> do i <- index v env; return i)
         , ("App2", \[f,x,y] -> do check; evalH p (cons (the f1) (cons (the f2) Nil)) =<< index f p)
