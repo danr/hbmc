@@ -60,11 +60,12 @@ instance Monad H where
 --------------------------------------------------------------------------------
 
 lift :: H a -> H (Lift a)
-lift (H m) = H (\s ctx -> do mx <- m s ctx
+lift (H m) = H (\s ctx -> do a <- newBit -- haha!
+                             mx <- m s (a:ctx)
                              return (The mx))
 
 peek :: Lift a -> H a
-peek UNR     = H (\_ _ -> return UNR)
+peek UNR     = impossible
 peek (The x) = return x
 
 withSolver :: (Solver -> IO a) -> H a
