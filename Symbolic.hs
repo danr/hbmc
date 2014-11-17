@@ -1,21 +1,159 @@
-{-# LANGUAGE TypeFamilies #-}
-module Symbolic where
+{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving #-}
+module Symbolic
+  ( H -- :: Monad, Functor, Applicative
+  , lift, peek, withSolver, withExtra, context, cutoff, check, impossible
+  
+  , Choice(..), Equal(..), Value(..)
+  
+  , Bit
+  , newBit, ff, tt, nt, andl, orl, addClause, (==>)
+  
+  , Lift(..)
+  
+  , Val
+  , val, domain, newVal, (=?), choose
+  
+  , Nat
+  , newNat
+  
+  , Data(..)
+  , switch
+  )
+ where
 
-import MiniSat
-import qualified Data.List as L
+import MiniSat( Solver, Lit )
+import qualified MiniSat as M
+import Control.Applicative
+import Data.List
 import Data.Maybe
 
+{-
+================================================================================
+-- The H monad
+================================================================================
+-}
+
+newtype H a = H{ run :: Solver -> [Bit] -> IO (Lift a) }
+
+instance Applicative H where
+  pure x      = H (\_ _ -> return (The x))
+  H f <*> H x = H (\s ctx -> do mf <- f s ctx
+                                case mf of
+                                  UNR   -> return UNR
+                                  The f -> do mx <- x s ctx
+                                              case mx of
+                                                UNR   -> return UNR
+                                                The x -> return (The (f x)))
+
+instance Functor H where
+  f `fmap` H m = H (\s ctx -> do mx <- m s ctx
+                                 return (f `fmap` mx))
+
+instance Monad H where
+  return    = pure
+  fail s    = H (\_ _ -> return UNR)
+  H m >>= k = H (\s ctx -> do mx <- m s ctx
+                              case mx of
+                                UNR   -> return UNR
+                                The x -> run (k x) s ctx)
+
 --------------------------------------------------------------------------------
+
+lift :: H a -> H (Lift a)
+lift (H m) = H (\s ctx -> do mx <- m s ctx
+                             return (The mx))
+
+peek :: Lift a -> H a
+peek UNR     = H (\_ _ -> return UNR)
+peek (The x) = return x
+
+withSolver :: (Solver -> IO a) -> H a
+withSolver f = H (\s _ -> The `fmap` f s)
+
+withExtra :: H a -> Bit -> H a
+H m `withExtra` b = H (\s ctx -> m s (b:ctx))
+
+context :: H [Bit]
+context = H (\_ ctx -> return (The ctx))
+
+runH :: H a -> IO (Lift a)
+runH m =
+  do s <- M.newSolver
+     x <- run m s []
+     M.deleteSolver s
+     return x
+
+--------------------------------------------------------------------------------
+
+cutoff :: Int -> H ()
+cutoff n =
+  do ctx <- context
+     if length ctx >= n then impossible else return ()
+
+check :: H ()
+check =
+  do ctx <- context
+     b <- if ff `elem` ctx
+            then return False
+            else withSolver (\s -> M.solve s [ x | Lit x <- ctx ])
+     if b then
+       return ()
+      else
+       fail "context is inconsistent"
+
+impossible :: H a
+impossible =
+  do ctx <- context
+     addClause (map nt ctx)
+     fail "impossible"
+
+{-
+================================================================================
+-- Useful type classes
+================================================================================
+-}
+
+class Choice a where
+  iff :: Bit -> a -> a -> H a
+
+class Value a where
+  type Type a
+  get :: a -> H (Type a)
+
+class Equal a where
+  equalStruct :: a -> a -> H (Struct Bit)
+
+data Struct a
+  = Tuple [Struct a]
+  | Bit a
+  | Empty
+ deriving ( Eq, Ord, Show )
+
+equal :: Equal a => a -> a -> H Bit
+equal x y =
+  do str <- equalStruct x y
+     andl (bits str)
+
+bits :: Struct Bit -> [Bit]
+bits (Tuple ts) = concatMap bits ts
+bits (Bit x)    = [x]
+bits Empty      = []
+
+{-
+================================================================================
+-- type Bit
+================================================================================
+-}
 
 data Bit = Lit Lit | Bool Bool
  deriving ( Eq, Ord )
 
 instance Show Bit where
-    show (Bool t) = show t ++ "Bit"
-    show (Lit v)  = show (show v)
+  show (Bool b) = if b then "TT" else "FF"
+  show (Lit v)  = show v
 
-newBit :: Solver -> IO Bit
-newBit s = Lit `fmap` newLit s
+newBit :: H Bit
+newBit = withSolver (\s -> Lit `fmap` M.newLit s)
 
 ff, tt :: Bit
 ff = Bool False
@@ -23,61 +161,175 @@ tt = Bool True
 
 nt :: Bit -> Bit
 nt (Bool b) = Bool (not b)
-nt (Lit x)  = Lit (neg x)
+nt (Lit x)  = Lit (M.neg x)
 
-addClause_db :: Solver -> [Lit] -> IO Bool
-addClause_db s lits = do
----    putStrLn $ "addClause " ++ show lits
-    addClause s lits
-
-andl, orl :: Solver -> [Bit] -> IO Bit
-andl s xs
+andl, orl :: [Bit] -> H Bit
+andl xs
   | ff `elem` xs = return ff
-  | otherwise    = andl' [ x | Lit x <- xs ]
+  | otherwise    = withSolver (\s -> andl' s [ x | Lit x <- xs ])
  where
-  andl' []  = do return tt
-  andl' [x] = do return (Lit x)
-  andl' xs  = do y <- newLit s
-                 addClause_db s (y : map neg xs)
-                 sequence_ [ addClause_db s [neg y, x] | x <- xs ]
-                 return (Lit y)
+  andl' s []  = do return tt
+  andl' s [x] = do return (Lit x)
+  andl' s xs  = do y <- M.newLit s
+                   M.addClause s (y : map M.neg xs)
+                   sequence_ [ M.addClause s [M.neg y, x] | x <- xs ]
+                   return (Lit y)
 
-orl s xs = nt `fmap` andl s (map nt xs)
+orl xs = nt `fmap` andl (map nt xs)
 
-addClauseBit :: Solver -> [Bit] -> IO ()
-addClauseBit s xs
+addClause :: [Bit] -> H ()
+addClause xs
   | tt `elem` xs = do return ()
-  | otherwise    = do addClause_db s [ x | Lit x <- xs ]
+  | otherwise    = do withSolver (\s -> M.addClause s [ x | Lit x <- xs ])
                       return ()
 
-iffBit :: Solver -> Bit -> Bit -> Bit -> IO Bit
-iffBit s (Bool b) x y =
-  do return (if b then x else y)
-
-iffBit s _ x y | x == y =
-  do return x
-
-iffBit s c (Bool a) (Bool b) = -- a /= b now!
-  do return (if a then c else nt c)
-
-iffBit s c x y =
-  do z <- newBit s
-     addClauseBit s [nt c, nt x, z]
-     addClauseBit s [nt c, x, nt z]
-     addClauseBit s [c, nt y, z]
-     addClauseBit s [c, y, nt z]
-     return z
+(==>) :: [Bit] -> [Bit] -> H ()
+xs ==> ys = addClause (map nt xs ++ ys)
 
 --------------------------------------------------------------------------------
 
-data Val a = Val [(Bit,a)]
- deriving ( Show )
+instance Choice Bit where
+  iff (Bool b) x y =
+    do return (if b then x else y)
+
+  iff _ x y | x == y =
+    do return x
+
+  iff c (Bool a) (Bool b) = -- a /= b now!
+    do return (if a then c else nt c)
+
+  iff c x y =
+    do z <- newBit
+       [c, x]    ==> [z]
+       [c, z]    ==> [x]
+       [nt c, y] ==> [z]
+       [nt c, z] ==> [y]
+       return z
+
+instance Equal Bit where
+  equalStruct x y = Bit `fmap` iff x y (nt y)
+
+instance Value Bit where
+  type Type Bit = Bool
+
+  get (Bool b) = return b
+  get (Lit x)  = (Just True ==) `fmap` withSolver (\s -> M.modelValue s x)
+
+{-
+================================================================================
+-- Tuples
+================================================================================
+-}
+
+instance (Choice a, Choice b) => Choice (a,b) where
+  iff c (x1,y1) (x2,y2) =
+    do x <- iff c x1 x2
+       y <- iff c y1 y2
+       return (x,y)
+
+instance (Equal a, Equal b) => Equal (a,b) where
+  equalStruct (x1,y1) (x2,y2) =
+    do eq1 <- equalStruct x1 x2
+       eq2 <- equalStruct y1 y2
+       return (Tuple [eq1,eq2])
+
+instance (Value a, Value b) => Value (a,b) where
+  type Type (a,b) = (Type a, Type b)
+
+  get (x,y) =
+    do a <- get x
+       b <- get y
+       return (a,b)
+
+--------------------------------------------------------------------------------
+
+instance (Choice a, Choice b, Choice c) => Choice (a,b,c) where
+  iff c (x1,y1,z1) (x2,y2,z2) =
+    do x <- iff c x1 x2
+       y <- iff c y1 y2
+       z <- iff c z1 z2
+       return (x,y,z)
+
+instance (Equal a, Equal b, Equal c) => Equal (a,b,c) where
+  equalStruct (x1,y1,z1) (x2,y2,z2) =
+    do eq1 <- equalStruct x1 x2
+       eq2 <- equalStruct y1 y2
+       eq3 <- equalStruct z1 z2
+       return (Tuple [eq1,eq2,eq3])
+
+instance (Value a, Value b, Value c) => Value (a,b,c) where
+  type Type (a,b,c) = (Type a, Type b, Type c)
+
+  get (x,y,z) =
+    do a <- get x
+       b <- get y
+       c <- get z
+       return (a,b,c)
+
+{-
+================================================================================
+-- type Lift
+================================================================================
+-}
+
+data Lift a = The a | UNR
+ deriving ( Eq, Ord, Show )
+
+instance Applicative Lift where
+  pure x = The x
+  The f <*> The x = The (f x)
+  _     <*> _     = UNR
+
+instance Functor Lift where
+  fmap f (The x) = The (f x)
+  fmap f UNR     = UNR
+
+instance Monad Lift where
+  return x = The x
+  The x >>= k = k x
+  UNR   >>= k = UNR
+
+instance Choice a => Choice (Lift a) where
+  iff c (The x) (The y) =
+    do z <- iff c x y
+       return (The z)
+
+  iff c (The x) _ =
+    do return (The x)
+
+  iff c _ (The y) =
+    do return (The y)
+
+  iff c _ _ =
+    do return UNR
+
+instance Equal a => Equal (Lift a) where
+  equalStruct (The x) (The y) =
+    do equalStruct x y
+  
+  equalStruct _ _ =
+    do return Empty
+
+instance Value a => Value (Lift a) where
+  type Type (Lift a) = Maybe (Type a)
+  
+  get (The x) = Just `fmap` get x
+  get UNR     = return Nothing
+  
+{-
+================================================================================
+-- type Val
+================================================================================
+-}
+
+newtype Val a = Val [(Bit,a)] -- sorted on a
+ deriving ( Eq, Ord, Show )
 
 val :: a -> Val a
 val x = Val [(tt,x)]
 
 (=?) :: Eq a => Val a -> a -> Bit
-Val []        =? x  = ff
+Val []         =? x  = ff
 Val ((a,y):xs) =? x
   | x == y      = a
   | otherwise   = Val xs =? x
@@ -85,62 +337,70 @@ Val ((a,y):xs) =? x
 domain :: Val a -> [a]
 domain (Val xs) = map snd xs
 
-newVal :: Ord a => Solver -> [a] -> IO (Val a)
-newVal s xs =
+newVal :: Ord a => [a] -> H (Val a)
+newVal xs =
   do as <- lits (length ys)
      return (Val (as `zip` ys))
  where
-  ys = map head . L.group . L.sort $ xs
+  ys = map head . group . sort $ xs
 
   lits 1 =
     do return [tt]
 
   lits 2 =
-    do a <- newBit s
+    do a <- newBit
        return [a,nt a]
 
   lits n =
-    do as <- sequence [ newBit s | i <- [1..n] ]
-       addClauseBit s as
+    do as <- sequence [ newBit | i <- [1..n] ]
+       addClause as
        atMostOne n as
        return as
 
   atMostOne n as | n <= 5 =
-    do sequence_ [ addClauseBit s [nt x, nt y] | (x,y) <- pairs as ]
+    do sequence_ [ addClause [nt x, nt y] | (x,y) <- pairs as ]
    where
     pairs (x:xs) = [ (x,y) | y <- xs ] ++ pairs xs
     pairs _      = []
 
   atMostOne n as =
-    do a <- newBit s
+    do a <- newBit
        atMostOne (k+1) (a : take k as)
        atMostOne (n-k+1) (nt a : drop k as)
    where
     k = n `div` 2
 
-iffVal :: Ord a => Solver -> Bit -> Val a -> Val a -> IO (Val a)
-iffVal s c (Val xs) (Val ys) =
-  Val `fmap` sequence
-    [ do d <- iff s c a b
-         return (d,x)
-    | (ma, mb, x) <- align xs ys
-    , let a = fromMaybe ff ma
-          b = fromMaybe ff mb
-    ]
+choose :: Choice b => Val a -> (a -> H b) -> H b
+choose (Val [(_,x)])    h = do h x
+choose (Val ((a,x):xs)) h = do y <- h x; z <- choose (Val xs) h; iff a y z
 
-equalVal :: Ord a => Solver -> Val a -> Val a -> IO Bit
-equalVal s (Val xs) (Val ys) =
-  andl s =<< sequence
-    [ equal s a b
-    | (ma, mb, x) <- align xs ys
-    , let a = fromMaybe ff ma
-          b = fromMaybe ff mb
-    ]
+--------------------------------------------------------------------------------
 
-getVal :: Solver -> Val a -> IO a
-getVal s (Val ((a,x):xs)) =
-  do b <- get s a
-     if b then return x else getVal s (Val xs)
+instance Ord a => Choice (Val a) where
+  iff c (Val xs) (Val ys) =
+    Val `fmap` sequence
+      [ do d <- iff c a b
+           return (d,x)
+      | (ma, mb, x) <- align xs ys
+      , let a = fromMaybe ff ma
+            b = fromMaybe ff mb
+      ]
+
+instance Ord a => Equal (Val a) where
+  equalStruct (Val xs) (Val ys) =
+    ((Bit `fmap`) . andl) =<< sequence
+      [ equal a b
+      | (ma, mb, _) <- align xs ys
+      , let a = fromMaybe ff ma
+            b = fromMaybe ff mb
+      ]
+
+instance Value (Val a) where
+  type Type (Val a) = a
+  
+  get (Val ((a,x):xs)) =
+    do b <- get a
+       if b then return x else get (Val xs)
 
 --------------------------------------------------------------------------------
 
@@ -154,528 +414,213 @@ align ((a1,b1):abs1) ((a2,b2):abs2) =
 align [] ys = [(Nothing, Just a, b) | (a,b) <- ys]
 align xs [] = [(Just a, Nothing, b) | (a,b) <- xs]
 
---------------------------------------------------------------------------------
+{-
+================================================================================
+-- type Nat
+================================================================================
+-}
 
-class Symbolic a where
-  type Type a
-
-  iff   :: Solver -> Bit -> a -> a -> IO a
-  equal :: Solver -> a -> a -> IO Bit
-  get   :: Solver -> a -> IO (Type a)
-
---------------------------------------------------------------------------------
-
-instance Symbolic Bit where
-  type Type Bit = Bool
-
-  iff = iffBit
-
-  equal s x y =
-    do iff s x y (nt y)
-
-  get s (Bool b) =
-    do return b
-
-  get s (Lit x) =
-    do mb <- modelValue s x
-       return (mb == Just True)
-
-instance Ord a => Symbolic (Val a) where
-  type Type (Val a) = a
-
-  iff   = iffVal
-  equal = equalVal
-  get   = getVal
-
---------------------------------------------------------------------------------
-
-data Lift a = The a | UNR
+newtype Nat = Nat [Bit]
  deriving ( Eq, Ord, Show )
 
-the :: Lift a -> a
-the (The x) = x
-the UNR     = error "the UNR"
-
-withThe :: Lift a -> (a -> IO (Lift b)) -> IO (Lift b)
-The x `withThe` f = f x
-UNR   `withThe` f = return UNR
-
-instance Symbolic a => Symbolic (Lift a) where
-  type Type (Lift a) = Type a
-
-  iff s c x UNR =
-    do return x
-
-  iff s c UNR y =
-    do return y
-
-  iff s c (The x) (The y) =
-    do z <- iff s c x y
-       return (The z)
-
-  equal s (The x) (The y) =
-    do equal s x y
-
-  equal s _ _ =
-    do return (error "equal on an UNR")
-    -- do return ff
-
-  get s (The x) =
-    do get s x
-
-  get s UNR =
-    do return (error "get on an UNR")
-
---------------------------------------------------------------------------------
-
-type Name = String -- Int?
-
-data Typ = TApp Name [Typ]
- deriving ( Eq, Ord, Show )
-
-data Data = Data Typ [(Name, [Typ])]
- deriving ( Eq, Ord, Show )
-
-data SymTerm = Con Data (Val Name) [(SymTerm,Typ)]
-
-instance Show SymTerm where
-    showsPrec x (Con _ v ats) = showParen (x >= 11) $
-       showString "Con " . showsPrec 11 v . showString " " . showsPrec 11 (map fst ats)
-
-data Term = Fun Name [Term]
- deriving ( Eq, Ord, Show )
-
-iffArgs :: Solver -> Bit -> [(SymTerm,Typ)] -> [(SymTerm,Typ)] -> IO [(SymTerm,Typ)]
-iffArgs s c xs ys =
-  sequence
-  [ case (mx, my) of
-      (Just x,  Just y)  -> (\z -> (z,t)) `fmap` iff s c x y
-      (Nothing, Just y)  -> return (y, t)
-      (Just x,  Nothing) -> return (x, t)
-  | (mx, my, t) <- align xs ys
-  ]
-
-equalArgs :: Solver -> Data -> [(Bit,Name)] -> [(SymTerm,Typ)] -> [(SymTerm,Typ)] -> IO [Bit]
-equalArgs s (Data _ cons) fs xs ys =
-  do eqts <- sequence
-             [ do eq <- equal s a b
-                  return (eq, t)
-             | (Just a, Just b, t) <- align xs ys
-             ]
-     sequence
-       [ do eq <- andl s [ eq | eq <- matchArgs args eqts ]
-            orl s [nt a, eq]
-       | (a, f) <- fs
-       , let args:_ = [ args | (c,args) <- cons, c == f ]
-       ]
-
-getArgs :: Solver -> Data -> Name -> [(SymTerm,Typ)] -> IO [Term]
-getArgs s (Data _ cons) f xs =
-  sequence [ get s x | x <- matchArgs args xs ]
- where
-  args:_ = [ args | (c,args) <- cons, c == f ]
-
-matchArgs :: [Typ] -> [(a,Typ)] -> [a]
-matchArgs [] _    = []
-matchArgs (t:ts) ((a,t'):as)
-  | t == t'   = a : matchArgs ts as
-  | otherwise = matchArgs (t:ts) as
-
-instance Symbolic SymTerm where
-  type Type SymTerm = Term
-
-  iff s c (Con tp c1 x1) (Con _ c2 x2) =
-    do c' <- iff s c c1 c2
-       x' <- iffArgs s c x1 x2
-       return (Con tp c' x')
-
-  equal s (Con tp c1 x1) (Con _ c2 x2) =
-    do eqc <- equal s c1 c2
-       eqs <- equalArgs s tp [ (c1 =? f, f) | f <- fs ] x1 x2
-       andl s (eqc : eqs)
-   where
-    fs = domain c1 `L.intersect` domain c2
-
-  get s (Con tp c x) =
-    do f <- get s c
-       xs <- getArgs s tp f x
-       return (Fun f xs)
-
-switch :: Symbolic b => Solver -> SymTerm -> [(Name, Bit -> [SymTerm] -> IO b)] -> IO b
-switch s (Con (Data _ cons) cn xs) alts =
-  do bs <- sequence
-           [ do b <- alt (cn =? f) (matchArgs args xs)
-                return (c,b)
-           | f <- domain cn
-           , let c      = cn =? f
-                 args:_ = [ args | (c,args) <- cons, c == f ]
-           , (f', alt) <- alts
-           , f == f'
-           ]
-     smash s bs
-
-smash :: Symbolic a => Solver -> [(Bit,a)] -> IO a
-smash s [(_,x)] =
-  do return x
-
-smash s ((a,x):xs) =
-  do y <- smash s xs
-     iff s a x y
-
---------------------------------------------------------------------------------
-
-instance (Symbolic a, Symbolic b) => Symbolic (a,b) where
-  type Type (a,b) = (Type a, Type b)
-
-  iff s c (x1,y1) (x2,y2) =
-    do x <- iff s c x1 x2
-       y <- iff s c y1 y2
-       return (x,y)
-
-  equal s (x1,y1) (x2,y2) =
-    do ex <- equal s x1 x2
-       ey <- equal s y1 y2
-       andl s [ex,ey]
-
-  get s (a,b) =
-    do x <- get s a
-       y <- get s b
-       return (x,y)
-
-instance (Symbolic a, Symbolic b, Symbolic c) => Symbolic (a,b,c) where
-  type Type (a,b,c) = (Type a, Type b, Type c)
-
-  iff s c (x1,y1,z1) (x2,y2,z2) =
-    do x <- iff s c x1 x2
-       y <- iff s c y1 y2
-       z <- iff s c z1 z2
-       return (x,y,z)
-
-  equal s (x1,y1,z1) (x2,y2,z2) =
-    do ex <- equal s x1 x2
-       ey <- equal s y1 y2
-       ez <- equal s z1 z2
-       andl s [ex,ey,ez]
-
-  get s (a,b,c) =
-    do x <- get s a
-       y <- get s b
-       z <- get s c
-       return (x,y,z)
-
---------------------------------------------------------------------------------
-
-data List a = ConsNil Bit a (List a)
-            | Nil
-  deriving Show
-
-newLists :: Solver -> Int -> IO a -> IO (List a)
-newLists s 0 el =
-  do return Nil
-
-newLists s n el =
-  do c  <- newBit s
-     x  <- el
-     xs <- newLists s (n-1) el
-     return (ConsNil c x xs)
-
-cons :: a -> List a -> List a
-cons x xs = ConsNil tt x xs
-
-caseList :: Symbolic b => Solver -> List a -> IO b -> (Bit -> a -> List a -> IO b) -> IO b
-caseList s Nil nil _ =
-  do nil
-
-caseList s (ConsNil c x xs) nil cns =
-  do b1 <- nil
-     b2 <- cns c x xs
-     iff s c b2 b1
-
-maybeCons :: Solver -> [Bit] -> List a -> IO Bool
-maybeCons s ass Nil                    = do return False
-maybeCons s ass (ConsNil (Bool b) _ _) = do return b
-maybeCons s ass (ConsNil (Lit x) _ _)
-  | ff `elem` ass                      = do return False
-  | otherwise                          = do solve s (x:[y | Lit y <- ass])
-
-caseList' :: Symbolic b => Solver -> [Bit] -> List a -> IO b -> (Bit -> a -> List a -> IO b) -> IO b
-caseList' s ass xs nil cns =
-  do b <- maybeCons s ass xs
-     caseList s (if b then xs else Nil) nil cns
-
-instance Symbolic a => Symbolic (List a) where
-  type Type (List a) = [Type a]
-
-  iff s c (ConsNil c1 x1 xs1) (ConsNil c2 x2 xs2) =
-    do c'  <- iff s c c1 c2
-       x'  <- iff s c x1 x2
-       xs' <- iff s c xs1 xs2
-       return (ConsNil c' x' xs')
-
-  iff s c (ConsNil c1 x1 xs1) Nil =
-    do c' <- iff s c c1 ff
-       return (ConsNil c' x1 xs1)
-
-  iff s c Nil (ConsNil c2 x2 xs2) =
-    do c' <- iff s c ff c2
-       return (ConsNil c' x2 xs2)
-
-  iff s c Nil Nil =
-    do return Nil
-
-  equal s Nil Nil =
-    do return tt
-
-  equal s (ConsNil c _ _) Nil =
-    do return (nt c)
-
-  equal s Nil (ConsNil c _ _) =
-    do return (nt c)
-
-  equal s (ConsNil c1 x1 xs1) (ConsNil c2 x2 xs2) =
-    do e1 <- equal s c1 c2
-       e2 <- equal s (x1,xs1) (x2,xs2)
-       e2' <- orl s [nt c1, e2]
-       andl s [e1, e2']
-
-  get s Nil =
-    do return []
-
-  get s (ConsNil c x xs) =
-    do b <- get s c
-       if b
-         then do a <- get s x
-                 as <- get s xs
-                 return (a:as)
-         else do return []
-
---------------------------------------------------------------------------------
-
-data Tree a = Node (Tree a) a (Tree a)
-            | Empty
- deriving ( Eq, Ord, Show )
-
-data TREE a = NodeEmpty Bit (TREE a) a (TREE a)
-            | EMPTY
-
-newTrees :: Solver -> Int -> IO a -> IO (TREE a)
-newTrees s 0 el =
-  do return EMPTY
-
-newTrees s n el =
-  do c <- newBit s
-     x <- el
-     p <- newTrees s (n-1) el
-     q <- newTrees s (n-1) el
-     return (NodeEmpty c p x q)
-
-node :: TREE a -> a -> TREE a -> TREE a
-node p x q = NodeEmpty tt p x q
-
-caseTree :: Symbolic b => Solver -> TREE a -> IO b -> (Bit -> TREE a -> a -> TREE a -> IO b) -> IO b
-caseTree s EMPTY emp _ =
-  do emp
-
-caseTree s (NodeEmpty c p x q) emp nod =
-  do b1 <- emp
-     b2 <- nod c p x q
-     iff s c b2 b1
-
-maybeNode :: Solver -> [Bit] -> TREE a -> IO Bool
-maybeNode s ass EMPTY                      = do return False
-maybeNode s ass (NodeEmpty (Bool b) _ _ _) = do return b
-maybeNode s ass (NodeEmpty (Lit x) _ _ _)
-  | ff `elem` ass                          = do return False
-  | otherwise                              = do solve s (x:[y | Lit y <- ass])
-
-caseTree' :: Symbolic b => Solver -> [Bit] -> TREE a -> IO b -> (Bit -> TREE a -> a -> TREE a -> IO b) -> IO b
-caseTree' s ass p emp nod =
-  do b <- maybeNode s ass p
-     caseTree s (if b then p else EMPTY) emp nod
-
-instance Symbolic a => Symbolic (TREE a) where
-  type Type (TREE a) = Tree (Type a)
-
-  iff s c (NodeEmpty c1 p1 x1 q1) (NodeEmpty c2 p2 x2 q2) =
-    do c'  <- iff s c c1 c2
-       p'  <- iff s c p1 p2
-       x'  <- iff s c x1 x2
-       q'  <- iff s c q1 q2
-       return (NodeEmpty c' p' x' q')
-
-  iff s c (NodeEmpty c1 p1 x1 q1) EMPTY =
-    do c' <- iff s c c1 ff
-       return (NodeEmpty c' p1 x1 q1)
-
-  iff s c EMPTY (NodeEmpty c2 p2 x2 q2) =
-    do c' <- iff s c c2 ff
-       return (NodeEmpty c' p2 x2 q2)
-
-  iff s c EMPTY EMPTY =
-    do return EMPTY
-
-  equal s EMPTY EMPTY =
-    do return tt
-
-  equal s (NodeEmpty c _ _ _) EMPTY =
-    do return (nt c)
-
-  equal s EMPTY (NodeEmpty c _ _ _) =
-    do return (nt c)
-
-  equal s (NodeEmpty c1 p1 x1 q1) (NodeEmpty c2 p2 x2 q2) =
-    do e1 <- equal s c1 c2
-       e2 <- equal s (p1,(x1,q1)) (p2,(x2,q2))
-       e2' <- orl s [nt c1, e2]
-       andl s [e1, e2']
-
-  get s EMPTY =
-    do return Empty
-
-  get s (NodeEmpty c p x q) =
-    do b <- get s c
-       if b
-         then do a <- get s x
-                 t <- get s p
-                 t' <- get s q
-                 return (Node t a t')
-         else do return Empty
-
---------------------------------------------------------------------------------
-
-data Nat = Nat [Bit]
-  deriving Show
-
-newNat :: Solver -> Int -> IO Nat
-newNat s k =
-  do xs <- sequence [ newBit s | i <- [1..k] ]
+newNat :: Int -> H Nat
+newNat k =
+  do xs <- sequence [ newBit | i <- [1..k] ]
      return (Nat xs)
 
-leq :: Solver -> Nat -> Nat -> IO Bit
-leq s (Nat xs) (Nat ys) = cmp (reverse (pad n xs)) (reverse (pad n ys))
+pad :: Nat -> Nat -> (Nat, Nat)
+pad (Nat xs) (Nat ys) = (Nat (xs ++ ffs n), Nat (ys ++ ffs m))
  where
-  n = length xs `max` length ys
-  pad n xs = xs ++ replicate (n-length xs) ff
+  n = length xs
+  m = length ys
+  p = n `max` m
+  ffs k = replicate (p-k) ff
+
+leq :: Nat -> Nat -> H Bit
+leq a b = cmp (reverse xs) (reverse ys)
+ where
+  (Nat xs, Nat ys) = pad a b
 
   cmp [] [] =
     do return tt
 
   cmp (x:xs) (y:ys) =
-    do z <- newBit s
+    do z <- newBit
        r <- cmp xs ys
-       addClauseBit s [nt x, y, nt z]
-       addClauseBit s [x, nt y, z]
-       addClauseBit s [nt x, nt y, nt r, z]
-       addClauseBit s [x, y, nt r, z]
-       addClauseBit s [nt x, nt y, r, nt z]
-       addClauseBit s [x, y, r, nt z]
+       
+       [x,    nt y] ==> [nt z]
+       [nt x, y]    ==> [z]
+       [x,    y,    r]    ==> [z]
+       [nt x, nt y, r]    ==> [z]
+       [x,    y,    nt r] ==> [nt z]
+       [nt x, nt y, nt r] ==> [nt z]
+
        return z
 
 fromInt :: Integer -> Nat
 fromInt 0 = Nat []
 fromInt n = Nat (Bool (odd n):xs) where Nat xs = fromInt (n `div` 2)
 
-count :: Solver -> [Bit] -> IO Nat
-count s [] = return (Nat [])
-count s xs = go [[x] | x <- xs]
+add :: Nat -> Nat -> H Nat
+add (Nat xs) (Nat ys) = Nat `fmap` plus ff xs ys
  where
-  go [n] =
-    do return (Nat n)
+  plus c xs ys | c == ff && (null xs || null ys) =
+    do return (xs ++ ys)
 
-  go (a:b:xs) =
-    do c <- add ff a b
-       go (xs ++ [c])
-
-  add c [] [] =
+  plus c [] [] =
     do return [c]
 
-  add c [] ys =
-    do add c [ff] ys
+  plus c [] ys =
+    do plus c [ff] ys
 
-  add c xs [] =
-    do add c xs [ff]
+  plus c xs [] =
+    do plus c xs [ff]
 
-  add c (x:xs) (y:ys) =
-    do c' <- newBit s
-       addClauseBit s [nt x, nt y, c']
-       addClauseBit s [nt x, nt c, c']
-       addClauseBit s [nt y, nt c, c']
-       addClauseBit s [   x,    y, nt c']
-       addClauseBit s [   x,    c, nt c']
-       addClauseBit s [   y,    c, nt c']
-
-       z <- newBit s
-       addClauseBit s [nt x, nt y, nt c, z]
-       addClauseBit s [   x, nt y, nt c, nt z]
-       addClauseBit s [nt x,    y, nt c, nt z]
-       addClauseBit s [nt x, nt y,    c, nt z]
-       addClauseBit s [nt x,    y,    c, z]
-       addClauseBit s [   x, nt y,    c, z]
-       addClauseBit s [   x,    y, nt c, z]
-       addClauseBit s [   x,    y,    c, nt z]
-
-       zs <- add c' xs ys
+  plus c (x:xs) (y:ys) =
+    do c' <- atLeast 2 [c,x,y] []
+       z  <- parity True [c,x,y] []
+       zs <- plus c' xs ys
        return (z:zs)
 
-len :: Solver -> List a -> IO Nat
-len s xs =
-  do Nat cs <- cnt xs
-     count s cs
- where
-  cnt xs =
-    caseList s xs
-      (return (Nat []))
-      (\_ _ xs ->
-         do Nat cs <- cnt xs
-            return (Nat (tt:cs)))
+  atLeast k (Bool True  : xs) ys = atLeast (k-1) xs ys
+  atLeast k (Bool False : xs) ys = atLeast k xs ys
+  atLeast k (x:xs)            ys = atLeast k xs (x:ys)
+  atLeast 0 [] ys = return tt
+  atLeast 1 [] ys = orl ys
+  atLeast k [] ys =
+    do c <- newBit
+       sequence_ [ zs ==> [c] | zs <- pick k ys ]
+       sequence_ [ [c] ==> zs | zs <- pick (length ys + 1 - k) ys ]
+       return c
+   where
+    pick 0 ys     = [ [] ]
+    pick k []     = []
+    pick k (y:ys) = [ y:zs | zs <- pick (k-1) ys ] ++ pick k ys
 
-instance Symbolic Nat where
-  type Type Nat = Integer
-
-  iff s c (Nat []) (Nat []) =
-    do return (Nat [])
-
-  iff s c (Nat []) (Nat ys) =
-    do iff s c (Nat [ff]) (Nat ys)
-
-  iff s c (Nat xs) (Nat []) =
-    do iff s c (Nat xs) (Nat [ff])
-
-  iff s c (Nat (x:xs)) (Nat (y:ys)) =
-    do z <- iff s c x y
-       Nat zs <- iff s c (Nat xs) (Nat ys)
-       return (Nat (z:zs))
-
-  equal s (Nat []) (Nat []) =
-    do return tt
-
-  equal s (Nat []) (Nat ys) =
-    do equal s (Nat [ff]) (Nat ys)
-
-  equal s (Nat xs) (Nat []) =
-    do equal s (Nat xs) (Nat [ff])
-
-  equal s (Nat (x:xs)) (Nat (y:ys)) =
-    do eq1 <- equal s x y
-       eq2 <- equal s (Nat xs) (Nat ys)
-       andl s [eq1,eq2]
-
-  get s (Nat []) =
-    do return 0
-
-  get s (Nat (x:xs)) =
-    do b <- get s x
-       n <- get s (Nat xs)
-       return (2*n + (if b then 1 else 0))
+  parity b (Bool True  : xs) ys = parity (not b) xs ys
+  parity b (Bool False : xs) ys = parity b xs ys
+  parity b (x:xs)            ys = parity b xs (x:ys)
+  parity b [] []  = return (if b then ff else tt)
+  parity b [] [y] = return (if b then y else nt y)
+  parity b [] ys  =
+    do c <- newBit
+       sequence_ [ addClause zs | zs <- par b c ys ]
+       return c
+   where
+    par b c []     = [ [nt c] | b ] ++ [ [c] | not b ]
+    par b c (y:ys) = [ nt y : zs | zs <- par (not b) c ys ] ++
+                     [ y : zs | zs <- par b c ys ]
 
 --------------------------------------------------------------------------------
 
--- (linear :p) Construction of values:
+instance Choice Nat where
+  iff c a b =
+    Nat `fmap` sequence [ iff c x y | (x,y) <- xs `zip` ys ]
+   where
+    (Nat xs, Nat ys) = pad a b
 
-choices :: Symbolic a => Solver -> [a] -> IO a
-choices s [] = error "choices: empty list of alternatives"
-choices s [x] = return x
-choices s (x:xs) = do
-    b <- newBit s
-    iff s b x =<< choices s xs
+instance Equal Nat where
+  equalStruct a b =
+    ((Bit `fmap`) . andl) =<< sequence [ equal x y | (x,y) <- xs `zip` ys ]
+   where
+    (Nat xs, Nat ys) = pad a b
+
+instance Value Nat where
+  type Type Nat = Int
+  
+  get (Nat []) =
+    do return 0
+
+  get (Nat (x:xs)) =
+    do b <- get x
+       n <- get (Nat xs)
+       return (if b then 1+2*n else 2*n)
+
+{-
+================================================================================
+-- type Data
+================================================================================
+-}
+
+data Data l arg = Con (Val l) arg
+ deriving ( Eq, Ord, Show )
+
+switch :: (Ord l, Choice b) => Data l arg -> (l -> arg -> H b) -> H b
+switch (Con cn arg) h = choose cn (\cn -> h cn arg)
+
+class EqualArg l where
+  equalArg :: l -> Struct Bit -> [Struct Bit]
+
+--------------------------------------------------------------------------------
+
+instance (Ord l, Choice arg) => Choice (Data l arg) where
+  iff c (Con cn1 arg1) (Con cn2 arg2) =
+    do cn  <- iff c cn1 cn2
+       arg <- iff c arg1 arg2
+       return (Con cn arg)
+
+instance (Ord l, EqualArg l, Equal arg) => Equal (Data l arg) where
+  equalStruct (Con c1 arg1) (Con c2 arg2) =
+    do eq <- equal c1 c2
+       eqstr <- equalStruct arg1 arg2
+       eqs <- choose c1 $ \l -> do eq <- andl (concatMap bits (equalArg l eqstr))
+                                   orl [nt (c1 =? l), eq]
+       Bit `fmap` andl [eq,eqs]
+
+{-
+================================================================================
+-- type List
+================================================================================
+-}
+
+data L = Nil | Cons
+ deriving ( Eq, Ord, Show )
+
+newtype List a = List (Data L (Lift (a, List a)))
+ deriving ( Choice, Equal )
+
+nil       = List $ Con (val Nil)  UNR
+cons x xs = List $ Con (val Cons) (The (x, xs))
+
+instance Value a => Value (List a) where
+  type Type (List a) = [Type a]
+  
+  get (List (Con cn args)) =
+    do l <- get cn
+       case l of
+         Nil  -> do return []
+         Cons -> do ~(Just (a,as)) <- get args
+                    return (a:as)
+
+instance EqualArg L where
+  equalArg Nil  _              = []
+  equalArg Cons (Tuple [x,xs]) = [x,xs]
+
+caseList (List d) nl cns =
+  switch d $ \l args ->
+    case (l, args) of
+      (Nil, _)           -> nl
+      (Cons, The (x,xs)) -> cns x xs
+
+--------------------------------------------------------------------------------
+{-
+apa =
+  do s <- M.newSolver
+     r <- run bepa s []
+     print r
+     M.deleteSolver s
+
+bepa =
+  do a <- newNat 3
+     b <- newNat 3
+     eq <- equal a b
+     addClause [nt eq]
+     let l = cons a (cons b nil)
+     eq2 <- equal l l
+     addClause [nt eq2]
+     check
+     xs <- get l
+     withSolver $ \_ -> print xs
+-}
+--------------------------------------------------------------------------------
 
