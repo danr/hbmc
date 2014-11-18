@@ -17,6 +17,9 @@ module Symbolic
   
   , Nat
   , newNat
+  , fromInt
+  , leq
+  , add
   
   , Data(..)
   , Argument(..)
