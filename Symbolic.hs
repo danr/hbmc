@@ -402,16 +402,10 @@ Val xs <&& Val ys =
 
 choose :: Choice b => Val a -> (a -> H b) -> H b
 choose (Val [])         h = impossible "choose"
-choose (Val [(_,x)])    h = do h x
 choose (Val ((a,x):xs)) h =
   do ly <- lift (h x `withExtra` a)
-     case ly of
-       The y ->
-         do z <- choose (Val xs) h
-            iff a y z
-       
-       UNR ->
-         do choose (Val xs) h
+     lz <- lift (choose (Val xs) h `withExtra` nt a)
+     peek =<< iff a ly lz
 
 --------------------------------------------------------------------------------
 
