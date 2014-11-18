@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving #-}
 module Symbolic
   ( H -- :: Monad, Functor, Applicative
-  , lift, peek, withSolver, withExtra, context, cutoff, check, impossible, io
+  , lift, peek, withSolver, withExtra, context, check, impossible, io
   , runH
   
   , Choice(..), Equal(..), Value(..)
@@ -93,11 +93,6 @@ runH m =
      return x
 
 --------------------------------------------------------------------------------
-
-cutoff :: Int -> H ()
-cutoff n =
-  do ctx <- context
-     if length ctx >= n then impossible "cutoff" else return ()
 
 check :: H ()
 check =
