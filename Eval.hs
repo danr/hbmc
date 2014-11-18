@@ -1,294 +1,258 @@
+{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving #-}
 module Main where
 
 import Symbolic
-import MiniSat
-import H
-
-import Data.List as L
-
-import Control.Applicative
-
-import Text.Show.Pretty (ppShow)
-
-bruijn :: Integral i => i -> SymTerm
-bruijn 0 = z
-bruijn n = s (bruijn (n-1))
-
-tnat = TApp "Nat" []
-nat  = Data tnat [("Z",[]),("S",[tnat])]
-
-texpr = TApp "Expr" []
-expr  = Data texpr [ ("App2",[tnat,texpr,texpr])
-                   , ("Case",[tnat,texpr,texpr])
-                   , ("Cons",[texpr,texpr])
-                   , ("Nil", [])
-                   , ("Var", [tnat])
-                   ]
-
-z   = Con nat (val "Z") []
-s x = Con nat (val "S") [(x,tnat)]
-
-app2  f x y = Con expr (val "App2") [(f,tnat), (x,texpr), (y,texpr)]
-ecase v x y = Con expr (val "Case") [(v,tnat), (x,texpr), (y,texpr)]
-econs   x y = Con expr (val "Cons") [   (x,texpr), (y,texpr)]
-enil        = Con expr (val "Nil")  [       ]
-evar  v     = Con expr (val "Var")  [(v,tnat)      ]
-
-type Expr = SymTerm
-
-pprint :: Show a => a -> IO ()
-pprint = putStrLn . ppShow
-
-evalH :: List Expr -> List (List Nat) -> Expr -> H (List Nat)
-evalH p env e = do
-    io $ pprint ("evalH",e)
-    (arg1,env1,arg2) <- match e
-        [ ("Var",  \[v]     -> return (UNR,UNR,UNR))
-        , ("App2", \[f,x,y] -> return (The x,The env,The y))
-        , ("Case", \[v,n,c] -> do
-            t <- index v env
-            matchList True t
-                (return (The n,The env,UNR))
-                (\a as -> return (The c,The ((a `cons` Nil) `cons` (as `cons` env)),UNR))
-          )
-        , ("Cons", \[x,xs]  -> return (The x,The env,The xs))
-        , ("Nil",  \[]      -> return (UNR,UNR,UNR))
-        ]
-    b1 <- withSolver $ \s -> orl s [cn =? "App2", cn =? "Case", cn =? "Cons"]
-    f1 <- lift (peek env1 >>= \e1 -> peek arg1 >>= \a1 -> evalH p e1 a1) `withExtra` b1
-    f2 <- lift (peek arg2 >>= \a2 -> evalH p env a2) `withExtra` b1
-    match e
-        [ ("Var",  \[v]     -> do i <- index v env; return i)
-        , ("App2", \[f,x,y] -> do check; evalH p (cons (the f1) (cons (the f2) Nil)) =<< index f p)
-        , ("Case", \[v,n,c] -> return (the f1))
-        , ("Cons", \[x,xs]  ->
-            matchList False (the f1)
-              (return (cons (fromInt 0) (the f2)))
-              (\y _ -> return (cons y (the f2)))
-          )
-        , ("Nil",  \[]      -> return Nil)
-        ]
-
-eval :: Solver -> List Expr -> List (List Nat) -> Expr -> IO (List Nat)
-eval s prog env e =
-  do mx <- run (evalH prog env e) s []
-     case mx of
-       Just x -> return x
-       Nothing -> error "eval = Nothing"
-
-{-
-  case e of
-    Var v          -> index v env
-
-    App2 f x y     -> let a = eval p env x
-                          b = eval p env y
-                       in eval p [a,b] (index f p)
-
-    Case v nil cns -> case index v env of
-                        []   -> eval p env nil
-                        a:as -> eval p ([a]:as:env) cns
-
-    Cons x xs      -> let a  = eval p env x
-                          as = eval p env xs
-                       in (case a of
-                             []  -> 0
-                             y:_ -> y) : as
-
-    Nil            -> []
-    -}
-
-newProg :: Solver -> Int -> Int -> IO (List Expr)
-newProg s fns e_size = fromList <$> sequence [ newTopExpr s f e_size | f <- [0..fns-1] ]
-
-newTopExpr :: Solver -> Int -> Int -> IO Expr
-newTopExpr s f size = do
-    nil_e  <- newExpr s f Nothing                                                     2 (size-1)
-    cons_e <- newExpr s f (Just (\ arg_e -> app2 (bruijn f) (evar (bruijn 1)) arg_e)) 4 (size-1)
-    choices s [ nil_e , ecase (bruijn 0) nil_e cons_e ]
-
-newExpr :: Solver -> Int -> Maybe (Expr -> Expr) -> Int -> Int -> IO Expr
-newExpr s f rec vars size | size <= 0 = choices s (enil:map (evar . bruijn) [0..vars-1])
-newExpr s f rec vars size = do
-
-    e1 <- newExpr s f rec vars (size-1)
-    e2 <- newExpr s f rec vars (size-1)
-    v  <- choices s (map bruijn [0..vars-1])
-
-    -- call earlier function on any argument
-    mg <- if f > 0 then Just <$> choices s (map bruijn [0..f-1]) else return Nothing
-
-    e <- choices s $
-            [ app2 g e1 e2 | Just g <- [mg] ] ++
-            [ econs e1 e2, evar v, enil ]
-
-    case rec of
-        Just k  -> choices s [ e , k e1 ] -- can call itself, e1 specifies second argument
-                                          -- (first is tail from case)
-        Nothing -> return e
-
-index :: Symbolic a => SymTerm -> List a -> H a
-index i xs =
-  matchList False xs
-    (impossible)
-    (\y ys -> match i
-              [ ("Z", \_   -> return y)
-              , ("S", \[j] -> index j ys)
-              ])
-
-fromList :: Symbolic a => [a] -> List a
-fromList = foldr cons Nil
-
-fromIntList :: [Integer] -> List Nat
-fromIntList = fromList . map fromInt
-
-makeEnv :: [[Integer]] -> List (List Nat)
-makeEnv = fromList . map fromIntList
-
-main :: IO ()
-main = do
-    s <- newSolver
-    eliminate s True
-
-    putStrLn "Creating symbolic program..."
-
-    let funs      = 1
-        expr_size = 3
-
-    prog <- newProg s funs expr_size
-
-    pprint prog
-
-    let test op a b =
-          do r <- eval s prog (makeEnv [a,b])
-                              (app2 (bruijn (funs-1)) (evar (bruijn 0)) (evar (bruijn 1)))
-             pprint ("r",r)
-             pprint ("op a b",fromIntList (op a b))
-             eq <- equal s (fromIntList (op a b)) r
-             addClauseBit s [eq]
-
-    putStrLn "Adding tests..."
-
-    test (\ xs ys -> xs ++ ys) [1,2] [4,5]
-    -- test (\ xs ys -> xs ++ ys) [1,2,3] [4,5,6]
-    -- test (\ xs ys -> reverse xs ++ ys) [1,2] [4,5]
-    -- test (\ xs ys -> reverse xs ++ ys) [1,2,3] [4,5,6]
-    -- test (\ xs ys -> reverse xs ++ ys) [1,2,3] []
-    -- test (\ xs ys -> xs ++ xs) [1,2,3] []
-    -- test (\ xs _ -> xs ++ xs) [1,2,3] []
-
-    -- size=4, 0m23.256s: f1 = case a1 of { [] -> a2; x:y -> ((a1:[]):(x:f1(y,y))) }
-    -- test (\ _ _ -> [1,1,2,2,3,3]) [1,2,3] []
-
-    -- size=4, 0m0.435: sf1 = case a1 of { [] -> ([]:(a2:a1)); x:y -> ((a1:([]:[])):(x:(y:y))) }
-    -- test (\ _ _ -> [1,1,2,2]) [1,2] []
-
-    putStrLn "Solving..."
-    b <- solve s []
-    if b then
-      do putStrLn "Solution!"
-         pprint =<< get s prog
-         pprint . map toExp =<< get s prog
-         putStrLn . showProg . map toExp =<< get s prog
-     else
-      do putStrLn "No solution."
-
-    deleteSolver s
+import Control.Monad
 
 --------------------------------------------------------------------------------
 
-data Peano = Z | S Peano
- deriving ( Eq, Ord, Show )
+data N = S | Z
+ deriving ( Ord, Eq, Show )
 
-data Exp
-  = App Peano [Exp]
-  | Case Peano Exp Exp
-  | Cons Exp Exp
-  | ENil
-  | Var Peano
- deriving ( Eq, Ord, Show )
+newtype DNat = DNat (Data N (Lift DNat))
+ deriving ( Choice, Equal )
 
-toExp :: Term -> Exp
-toExp tm = case tm of
-    Fun "App2" [f,x,y] -> App (toPeano f) [toExp x,toExp y]
-    Fun "Case" [v,x,y] -> Case (toPeano v) (toExp x) (toExp y)
-    Fun "Cons" [x,y]   -> Cons (toExp x) (toExp y)
-    Fun "Nil"  []      -> ENil
-    Fun "Var"  [v]     -> Var (toPeano v)
-    _                  -> error $ "toExp: " ++ ppShow tm
+instance Show DNat where
+  show (DNat d) = show d
 
-toPeano :: Term -> Peano
-toPeano tm = case tm of
-    Fun "Z" []  -> Z
-    Fun "S" [x] -> S (toPeano x)
-    _           -> error $ "toPeano: " ++ ppShow tm
+dnat :: Int -> DNat
+dnat 0 = DNat (Con (val Z) UNR)
+dnat n = suck (dnat (n-1))
 
-prog :: [Exp]
-prog =
-  [ App (S Z) [Var Z, ENil]
-  , Case Z (Var (S Z)) (App (S Z) [Var (S Z), Cons (Var Z) (Var (S (S (S Z))))])
-  ]
+suck n = DNat (Con (val S) (The n))
 
-indexPeano :: Show a => Peano -> [a] -> a
-indexPeano Z     (x:xs) = x
-indexPeano (S n) (x:xs) = indexPeano n xs
-indexPeano n     xs     = error $ "indexPeano: " ++ ppShow n ++ ", " ++ ppShow xs
+instance Argument N where
+  argument Z _ = []
+  argument S x = [x]
 
-showExp :: [String] -> [String] -> Exp -> String
-showExp prg env (App f xs) =
-  indexPeano f prg ++ "(" ++ concat (L.intersperse "," (map (showExp prg env) xs)) ++ ")"
+instance Value DNat where
+  type Type DNat = Int
+  
+  get (DNat (Con cn args)) =
+    do l <- get cn
+       case (l, args) of
+         (Z, _)     -> return 0
+         (S, The n) -> (+1) `fmap` get n
 
-showExp prg env (Case v nil cns) =
-  "case " ++ indexPeano v env ++ " of { [] -> " ++ showExp prg env nil
-          ++ "; " ++ x ++ ":" ++ xs ++ " -> " ++ showExp prg (x:xs:env) cns ++ " }"
+newDNat :: Int -> H DNat
+newDNat k =
+  do cn <- newVal ([Z] ++ [S | k > 0])
+     choose cn $ \n -> case n of
+       Z -> return (dnat 0)
+       S -> do n <- newDNat (k-1)
+               return (suck n)
+
+{-
+-- bad, bad function!
+newDNat :: Int -> H DNat
+newDNat 0 = return (dnat 0)
+newDNat k = do b <- newBit
+               n' <- newDNat (k-1)
+               iff b n' (suck n')
+-}
+
+--------------------------------------------------------------------------------
+
+data Expr
+  = Var  Int
+  | App2 Int Expr Expr
+  | Case Int Expr Expr
+  | Nl
+  | Cns      Expr Expr
+ deriving ( Eq, Ord )
+
+instance Show Expr where
+  show = showExpr []
+
+showExpr env (Var v)      = env !! v
+showExpr env (App2 f a b) = "f" ++ show f ++ "(" ++ showExpr env a ++ "," ++ showExpr env b ++ ")"
+showExpr env (Case x a b) = "case " ++ env !! x ++ " of { [] -> " ++ showExpr env a ++ "; "
+                         ++ y ++ ":" ++ ys ++ " -> " ++ showExpr (("["++y++"]"):ys:env) b ++ " }"
  where
-  x:xs:_ = new env
-
-showExp prg env (Cons a as) =
-  "(" ++ showExp prg env a ++ ":" ++ showExp prg env as ++ ")"
-
-showExp prg env ENil =
-  "[]"
-
-showExp prg env (Var v) =
-  indexPeano v env
+  y:ys:_ = new env
+showExpr env Nl           = "[]"
+showExpr env (Cns a b)    = "(" ++ showExpr env a ++ " `cns` " ++ showExpr env b ++ ")"
 
 new :: [String] -> [String]
-new vs = (["x","y","z","v","w","p","q","r"] ++ ["x" ++ show i | i <- [1..] ]) L.\\ L.nub vs
-
-showProg :: [Exp] -> String
-showProg prg = unlines
-  [ f ++ " = " ++ showExp fs env e
-  | (f,e) <- fs `zip` prg
-  ]
+new env = [ x | x <- vars, x `notElem` env ]
  where
-  fs  = ["f" ++ show i | i <- [1..] ]
-  env = ["a" ++ show i | i <- [1..10] ]
+  vars = [ "x", "y", "z", "v", "w" ] ++ [ "x" ++ show i | i <- [1..] ]
+
+data E = EVar | EApp2 | ECase | ENl | ECns
+ deriving ( Eq, Ord, Show )
+
+newtype DExpr = DExpr (Data E (Lift DNat,Lift DExpr,Lift DExpr))
+ deriving ( Choice, Equal )
+
+instance Show DExpr where
+  show (DExpr d) = show d
+
+evar  v     = DExpr (Con (val EVar)  (The v, UNR,   UNR))
+eapp2 f a b = DExpr (Con (val EApp2) (The f, The a, The b))
+ecase x a b = DExpr (Con (val ECase) (The x, The a, The b))
+enl         = DExpr (Con (val ENl)   (UNR,   UNR,   UNR))
+ecns    a b = DExpr (Con (val ECns)  (UNR,   The a, The b))
+
+instance Argument E where
+  argument EVar  (Tuple [v, _, _]) = [v]
+  argument EApp2 (Tuple [f, a, b]) = [f, a, b]
+  argument ECase (Tuple [x, a, b]) = [x, a, b]
+  argument ENl   _                 = []
+  argument ECns  (Tuple [_, a, b]) = [a, b]
+
+instance Value DExpr where
+  type Type DExpr = Expr
+  
+  get (DExpr (Con cn args)) =
+    do l <- get cn
+       case (l, args) of
+         (EVar,  (The v, _, _))         -> liftM  Var  (get v)
+         (EApp2, (The f, The a, The b)) -> liftM3 App2 (get f) (get a) (get b)
+         (ECase, (The x, The a, The b)) -> liftM3 Case (get x) (get a) (get b)
+         (ENl,   _)                     -> return Nl
+         (ECns,  (_,     The a, The b)) -> liftM2 Cns  (get a) (get b)
 
 --------------------------------------------------------------------------------
 
-{-
+seval :: Int -> List DExpr -> List (List Nat) -> DExpr -> H (List Nat)
+seval d p env e | d < 0 =
+  impossible "seval depth"
 
+seval d p env (DExpr de@(Con cn (lx, la, lb))) =
+  do check
+     
+     c <- orl [cn =? EVar, cn =? ECase]
+     valx <- lift ((peek lx >>= sindex env) `withExtra` c)
+     
+     (ca,cb,lenv2) <- switch de $ \ce ae ->
+       case (ce, ae) of
+         (ECase, (The x, The a, The b)) ->
+           do List da <- peek valx
+              switch da $ \ca aa ->
+                case (ca, aa) of
+                  (Nil, _)            -> return (tt,ff,UNR)
+                  (Cons, The (y, ys)) -> return (ff,tt,The (cons (cons y nil) (cons ys env)))
 
-[ Fun
-    "Case"
-    [ Fun "Z" []
-    , Fun "Var" [ Fun "S" [ Fun "Z" [] ] ]
-    , Fun
-        "App2"
-        [ Fun "Z" []
-        , Fun "Var" [ Fun "S" [ Fun "Z" [] ] ]
-        , Fun
-            "Cons"
-            [ Fun "Var" [ Fun "S" [ Fun "Z" [] ] ]
-            , Fun "Var" [ Fun "S" [ Fun "S" [ Fun "S" [ Fun "Z" [] ] ] ] ]
-            ]
-        ]
-    ]
-]
--}
+         (EApp2, (_, The a, The b)) ->
+           do return (tt,tt,The env)
+         
+         (ECns, (_, The a, The b)) ->
+           do return (tt,tt,The env)
+         
+         _ ->
+           do return (ff,ff,UNR)
 
-{-
-f xs ys = case xs of
-    []   -> ys
-    z:zs -> (z : xs) : f zs ys
--}
+     ea <- lift ((do a <- peek la
+                     seval d p env a) `withExtra` ca)
+     eb <- lift ((do env2 <- peek lenv2
+                     b <- peek lb
+                     seval d p env2 b) `withExtra` cb)
+
+     switch de $ \ce ae ->
+       case (ce, ae) of
+         (EVar, _) ->
+           do peek valx
+         
+         (EApp2, (The f, _, _)) ->
+           do a <- peek ea
+              b <- peek eb
+              e' <- sindex p f
+              seval (d-1) p (cons a (cons b nil)) e' -- dangerous recursion, decrease d
+         
+         (ECase, _) ->
+           do List da <- peek valx
+              switch da $ \ca aa ->
+                case (ca, aa) of
+                  (Nil, _)  -> peek ea
+                  (Cons, _) -> peek eb
+
+         (ENl, _) ->
+           do return nil
+         
+         (ECns, _) ->
+           do a <- peek ea
+              b <- peek eb
+              ha <- shead a
+              return (cons ha b)
+
+shead :: List Nat -> H Nat
+shead (List xs) =
+  switch xs $ \cxs axs ->
+    case (cxs, axs) of
+      (Nil, _)          -> return (fromInt 0)
+      (Cons, The (y,_)) -> return y
+
+sindex :: Choice a => List a -> DNat -> H a
+sindex (List xs) (DNat i) =
+  switch xs $ \cxs axs ->
+    case (cxs, axs) of
+      (Nil, _) -> impossible "sindex"
+      (Cons, The (y,ys)) ->
+        switch i $ \ci ai ->
+          case (ci, ai) of
+            (Z, _)     -> return y
+            (S, The j) -> sindex ys j
+
+--------------------------------------------------------------------------------
+
+newExpr :: Bool -> Int -> Int -> Int -> H DExpr
+newExpr cs p e k | k < 0 =
+  do impossible "newExpr"
+
+newExpr cs p e k =
+  do cn <- newVal ([EVar, ENl] ++ [ c | k > 0, c <- [EApp2, ECns]] ++ [ECase | k > 0 && cs ])
+     c <- orl [cn =? EApp2, cn =? ECase, cn =? ECns]
+     lab <- lift ((do a <- newExpr False p e (k-1)
+                      b <- newExpr False p (if cs then e+2 else e) (k-1)
+                      return (a,b)) `withExtra` c)
+     nv <- newDNat e
+     nf <- newDNat p
+     choose cn $ \c ->
+       case c of
+         EVar  -> return (evar nv)
+         EApp2 -> peek lab >>= \(a,b) -> return $ eapp2 nf a b
+         ECase -> peek lab >>= \(a,b) -> return $ ecase nv a b
+         ENl   -> return enl
+         ECns  -> peek lab >>= \(a,b) -> return $ ecns a b
+
+--------------------------------------------------------------------------------
+
+fromList :: [Integer] -> List Nat
+fromList []     = nil
+fromList (x:xs) = cons (fromInt x) (fromList xs)
+
+main = runH $
+  do io $ putStrLn "Creating program..."
+     let numFuns = 1 -- number of functions in the program
+         depEval = 5 -- maximum number of function calls per test
+         depExpr = 3 -- maximum depth of the RHS of a function definition
+     es <- sequence [ newExpr True i 1 depExpr | i <- [0..numFuns-1] ]
+     --let es = [ecase (dnat 0) (evar (dnat 1)) (ecns (evar (dnat 0)) (eapp2 (dnat 0) (evar (dnat 1)) (evar (dnat 3))))]
+     let p = foldr cons nil es
+     
+     let f xs ys = reverse xs
+         --f xs ys = if null xs then [] else [last xs]
+         --f xs ys = if null xs then ys else reverse ys
+     
+     let test xs ys =
+           do zs1 <- seval depEval p (cons (fromList xs) (cons (fromList ys) nil))
+                                     (eapp2 (dnat (numFuns-1)) (evar (dnat 0)) (evar (dnat 1)))
+              let zs2 = fromList (f xs ys)
+              b <- equal zs1 zs2
+              addClause [b]
+     
+     io $ putStrLn "Adding tests..."
+     test [1,2,3,4] [] -- [5,6,7]
+     --test [] [4,5,6]
+     --test [1,2] [3,2]
+
+     io $ putStrLn "Solving..."
+     check
+     
+     fs <- sequence [ get e | e <- es ]
+     let text = [ "f" ++ show i ++ "(a1,a2) = " ++ showExpr ["a1","a2"] e
+                | (i,e) <- [0..] `zip` fs
+                ]
+     io $ putStr $ unlines text
+     io $ writeFile "Found.hs" (unlines ("cns [] xs = 0:xs":"cns (x:_) xs = x:xs":text))
+
