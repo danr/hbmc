@@ -159,7 +159,7 @@ data Bit = Lit Lit | Bool Bool
  deriving ( Eq, Ord )
 
 instance Show Bit where
-  show (Bool b) = if b then "TT" else "FF"
+  show (Bool b) = if b then "T" else "F"
   show (Lit v)  = show v
 
 newBit :: H Bit
@@ -286,7 +286,11 @@ instance (Value a, Value b, Value c) => Value (a,b,c) where
 -}
 
 data Lift a = The a | UNR
- deriving ( Eq, Ord, Show )
+ deriving ( Eq, Ord )
+
+instance Show a => Show (Lift a) where
+  show (The x) = show x -- ++ "!"
+  show UNR     = "_"
 
 instance Applicative Lift where
   pure x = The x
@@ -336,7 +340,10 @@ instance Value a => Value (Lift a) where
 -}
 
 newtype Val a = Val [(Bit,a)] -- sorted on a
- deriving ( Eq, Ord, Show )
+ deriving ( Eq, Ord )
+
+instance Show a => Show (Val a) where
+  show (Val xs) = concat (intersperse "|" [ show x | (_,x) <- xs ])
 
 val :: a -> Val a
 val x = Val [(tt,x)]
@@ -449,7 +456,13 @@ align xs [] = [(Just a, Nothing, b) | (a,b) <- xs]
 -}
 
 newtype Nat = Nat [Bit]
- deriving ( Eq, Ord, Show )
+ deriving ( Eq, Ord )
+
+instance Show Nat where
+  show (Nat []) = "#"
+  show (Nat (Bool True  : xs)) = "1" ++ show (Nat xs)
+  show (Nat (Bool False : xs)) = "0" ++ show (Nat xs)
+  show (Nat (_          : xs)) = "-" ++ show (Nat xs)
 
 newNat :: Int -> H Nat
 newNat k =
@@ -571,7 +584,22 @@ instance Value Nat where
 -}
 
 data Data l arg = Con (Val l) arg
- deriving ( Eq, Ord, Show )
+ deriving ( Eq, Ord )
+
+instance (Show l, Show arg) => Show (Data l arg) where
+  show (Con cn arg) = show cn ++ empty (hide (protect (show arg)))
+   where
+    protect s@(c:_) | c `elem` "([{" = s
+    protect s                        = "(" ++ s ++ ")"
+    
+    hide ('_':',':s) = hide s
+    hide (',':'_':s) = hide s
+    hide ('_':')':s) = ')' : hide s
+    hide (c:s)       = c : hide s
+    hide ""          = ""
+    
+    empty "()" = ""
+    empty s    = s
 
 switch :: (Ord l, Choice b) => Data l arg -> (l -> arg -> H b) -> H b
 switch (Con cn arg) h = choose cn (\cn -> h cn arg)
@@ -606,6 +634,9 @@ data L = Nil | Cons
 
 newtype List a = List (Data L (Lift (a, List a)))
  deriving ( Choice, Equal )
+
+instance Show a => Show (List a) where
+  show (List d) = show d
 
 nil       = List $ Con (val Nil)  UNR
 cons x xs = List $ Con (val Cons) (The (x, xs))
