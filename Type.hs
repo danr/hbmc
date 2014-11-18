@@ -31,7 +31,6 @@ instance Value DNat where
          (Z, _)     -> return 0
          (S, The n) -> (+1) `fmap` get n
 
-{-
 newDNat :: Int -> H DNat
 newDNat k =
   do cn <- newVal ([Z] ++ [S | k > 0])
@@ -39,13 +38,15 @@ newDNat k =
        Z -> return (dnat 0)
        S -> do n <- newDNat (k-1)
                return (suck n)
--}
 
+{-
+-- bad, bad function!
 newDNat :: Int -> H DNat
 newDNat 0 = return (dnat 0)
 newDNat k = do b <- newBit
                n' <- newDNat (k-1)
                iff b n' (suck n')
+-}
 
 --------------------------------------------------------------------------------
 
