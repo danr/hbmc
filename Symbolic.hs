@@ -73,7 +73,7 @@ lift (H m) = H (\s ctx -> do mx <- m s ctx
                              return (The mx))
 
 peek :: Lift a -> H a
-peek UNR     = H (\_ _ -> return UNR)
+peek UNR     = impossible "peek UNR" -- H (\_ _ -> return UNR)
 peek (The x) = return x
 
 io :: IO a -> H a
@@ -83,7 +83,8 @@ withSolver :: (Solver -> IO a) -> H a
 withSolver f = H (\s _ -> The `fmap` f s)
 
 withExtra :: H a -> Bit -> H a
-H m `withExtra` b = H (\s ctx -> m s (b:ctx))
+_   `withExtra` Bool False = H (\_ _ -> return UNR)
+H m `withExtra` b          = H (\s ctx -> m s (b:ctx))
 
 context :: H [Bit]
 context = H (\_ ctx -> return (The ctx))
