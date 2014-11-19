@@ -7,7 +7,7 @@ module Symbolic
   , Choice(..), Equal(..), Value(..)
   , equal
   
-  , Bit
+  , Bit(..)
   , newBit, ff, tt, nt, andl, orl, addClause, (==>)
   
   , Lift(..)
@@ -24,6 +24,7 @@ module Symbolic
   , Data(..)
   , Argument(..)
   , Struct(..)
+  , collapse
   , switch
   
   , List(..), L(..), nil, cons
@@ -146,12 +147,12 @@ data Struct a
 equal :: Equal a => a -> a -> H Bit
 equal x y =
   do str <- equalStruct x y
-     andl (bits str)
+     andl (collapse str)
 
-bits :: Struct Bit -> [Bit]
-bits (Tuple ts) = concatMap bits ts
-bits (Bit x)    = [x]
-bits Empty      = []
+collapse :: Struct a -> [a]
+collapse (Tuple ts) = concatMap collapse ts
+collapse (Bit x)    = [x]
+collapse Empty      = []
 
 {-
 ================================================================================
@@ -617,7 +618,7 @@ instance (Ord l, Argument l, Equal arg) => Equal (Data l arg) where
   equalStruct (Con c1 arg1) (Con c2 arg2) =
     do eq <- equal c1 c2
        eqstr <- equalStruct arg1 arg2
-       eqs <- choose (c1 <&& c2) $ \l -> do eq <- andl (concatMap bits (argument l eqstr))
+       eqs <- choose (c1 <&& c2) $ \l -> do eq <- andl (concatMap collapse (argument l eqstr))
                                             orl [nt (c1 =? l), eq]
        Bit `fmap` andl [eq,eqs]
 
