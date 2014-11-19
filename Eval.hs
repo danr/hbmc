@@ -228,20 +228,19 @@ main = runH $
   do io $ putStrLn "Creating program..."
      let numFuns = 1         -- number of functions in the program
          numApp  = 2*numFuns -- number of function calls in the program
-         depEval = 5         -- maximum number of function calls per test
-         depExpr = 3         -- maximum depth of the RHS of a function definition
+         depExpr = 5         -- maximum depth of the RHS of a function definition
      nes <- sequence [ newExpr True i 1 depExpr | i <- [0..numFuns-1] ]
      n@(N.Nat nxs _) <- bagSize (foldr union bag0 [ n | (n,_) <- nes ])
      
      --let es = [ecase (dnat 0) (evar (dnat 1)) (ecns (evar (dnat 0)) (eapp2 (dnat 0) (evar (dnat 1)) (evar (dnat 3))))]
      let p = foldr cons nil [ e | (_,e) <- nes ]
      
-     let --f xs ys = reverse xs
-         f xs ys = if null xs then [] else [last xs]
+     let f xs ys = reverse xs
+         --f xs ys = if null xs then [] else [last xs]
          --f xs ys = if null xs then ys else reverse ys
      
-     let test xs ys =
-           do zs1 <- seval depEval p (cons (fromList xs) (cons (fromList ys) nil))
+     let test d xs ys =
+           do zs1 <- seval d p (cons (fromList xs) (cons (fromList ys) nil))
                                      (eapp2 (dnat (numFuns-1)) (evar (dnat 0)) (evar (dnat 1)))
               let zs2 = fromList (f xs ys)
               b <- equal zs1 zs2
@@ -251,7 +250,9 @@ main = runH $
      addClause [Lit (n N..<= numApp)]
      
      io $ putStrLn "Adding tests..."
-     test [1,2,3,4] [] -- [5,6,7]
+     test 2 [] []
+     test 3 [1,2] []
+     test 5 [1,2,3,4] [] -- [5,6,7]
      --test [] [4,5,6]
      --test [1,2] [3,2]
 
