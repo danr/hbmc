@@ -2,6 +2,9 @@
 module Main where
 
 import Symbolic
+import qualified MiniSat as M
+import Size
+import qualified Nat as N
 import Control.Monad
 
 --------------------------------------------------------------------------------
@@ -10,7 +13,7 @@ data N = S | Z
  deriving ( Ord, Eq, Show )
 
 newtype DNat = DNat (Data N (Lift DNat))
- deriving ( Choice, Equal )
+ deriving ( Choice, Equal, Sized )
 
 instance Show DNat where
   show (DNat d) = show d
@@ -82,7 +85,7 @@ data E = EVar | EApp2 | ECase | ENl | ECns
  deriving ( Eq, Ord, Show )
 
 newtype DExpr = DExpr (Data E (Lift DNat,Lift DExpr,Lift DExpr))
- deriving ( Choice, Equal )
+ deriving ( Choice, Equal, Sized )
 
 instance Show DExpr where
   show (DExpr d) = show d
@@ -195,7 +198,7 @@ sindex (List xs) (DNat i) =
 
 --------------------------------------------------------------------------------
 
-newExpr :: Bool -> Int -> Int -> Int -> H DExpr
+newExpr :: Bool -> Int -> Int -> Int -> H (BitBag,DExpr)
 newExpr cs p e k | k < 0 =
   do impossible "newExpr"
 
@@ -209,11 +212,11 @@ newExpr cs p e k =
      nf <- newDNat p
      choose cn $ \c ->
        case c of
-         EVar  -> return (evar nv)
-         EApp2 -> peek lab >>= \(a,b) -> return $ eapp2 nf a b
-         ECase -> peek lab >>= \(a,b) -> return $ ecase nv a b
-         ENl   -> return enl
-         ECns  -> peek lab >>= \(a,b) -> return $ ecns a b
+         EVar  -> return (bag0,evar nv)
+         EApp2 -> peek lab >>= \((fa,a),(fb,b)) -> return $ ((fa `union` fb)`union`bag1,eapp2 nf a b)
+         ECase -> peek lab >>= \((fa,a),(fb,b)) -> return $ (fa `union` fb, ecase nv a b)
+         ENl   -> return (bag0,enl)
+         ECns  -> peek lab >>= \((fa,a),(fb,b)) -> return $ ((fa `union` fb)`union`bag1, ecns a b)
 
 --------------------------------------------------------------------------------
 
@@ -223,15 +226,18 @@ fromList (x:xs) = cons (fromInt x) (fromList xs)
 
 main = runH $
   do io $ putStrLn "Creating program..."
-     let numFuns = 1 -- number of functions in the program
-         depEval = 5 -- maximum number of function calls per test
-         depExpr = 3 -- maximum depth of the RHS of a function definition
-     es <- sequence [ newExpr True i 1 depExpr | i <- [0..numFuns-1] ]
-     --let es = [ecase (dnat 0) (evar (dnat 1)) (ecns (evar (dnat 0)) (eapp2 (dnat 0) (evar (dnat 1)) (evar (dnat 3))))]
-     let p = foldr cons nil es
+     let numFuns = 1         -- number of functions in the program
+         numApp  = 2*numFuns -- number of function calls in the program
+         depEval = 5         -- maximum number of function calls per test
+         depExpr = 3         -- maximum depth of the RHS of a function definition
+     nes <- sequence [ newExpr True i 1 depExpr | i <- [0..numFuns-1] ]
+     n@(N.Nat nxs _) <- bagSize (foldr union bag0 [ n | (n,_) <- nes ])
      
-     let f xs ys = reverse xs
-         --f xs ys = if null xs then [] else [last xs]
+     --let es = [ecase (dnat 0) (evar (dnat 1)) (ecns (evar (dnat 0)) (eapp2 (dnat 0) (evar (dnat 1)) (evar (dnat 3))))]
+     let p = foldr cons nil [ e | (_,e) <- nes ]
+     
+     let --f xs ys = reverse xs
+         f xs ys = if null xs then [] else [last xs]
          --f xs ys = if null xs then ys else reverse ys
      
      let test xs ys =
@@ -241,18 +247,25 @@ main = runH $
               b <- equal zs1 zs2
               addClause [b]
      
+     io $ putStrLn ("Applications: " ++ show numApp ++ " (<= " ++ show (length nxs) ++ ")")
+     addClause [Lit (n N..<= numApp)]
+     
      io $ putStrLn "Adding tests..."
      test [1,2,3,4] [] -- [5,6,7]
      --test [] [4,5,6]
      --test [1,2] [3,2]
 
      io $ putStrLn "Solving..."
-     check
-     
-     fs <- sequence [ get e | e <- es ]
-     let text = [ "f" ++ show i ++ "(a1,a2) = " ++ showExpr ["a1","a2"] e
-                | (i,e) <- [0..] `zip` fs
-                ]
-     io $ putStr $ unlines text
-     io $ writeFile "Found.hs" (unlines ("cns [] xs = 0:xs":"cns (x:_) xs = x:xs":text))
+     b <- withSolver $ \s -> N.solveMinimize s [] n
+     --b <- withSolver $ \s -> M.solve s []
+     if b then
+       do io $ putStrLn "Solution!"
+          fs <- sequence [ get e | (_,e) <- nes ]
+          let text = [ "f" ++ show i ++ "(a1,a2) = " ++ showExpr ["a1","a2"] e
+                     | (i,e) <- [0..] `zip` fs
+                     ]
+          io $ putStr $ unlines text
+          io $ writeFile "Found.hs" (unlines ("cns [] xs = 0:xs":"cns (x:_) xs = x:xs":text))
+      else
+       do io $ putStrLn "No solution."
 
