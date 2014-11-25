@@ -4,7 +4,7 @@ module Symbolic
   , lift, peek, withSolver, withExtra, context, check, impossible, io
   , runH
   
-  , Choice(..), Equal(..), Value(..)
+  , Choice(..), Equal(..), Value(..), Traceable(..)
   , equal
   
   , Bit(..)
@@ -13,7 +13,7 @@ module Symbolic
   , Lift(..)
   
   , Val
-  , val, domain, newVal, (=?), choose
+  , val, domain, newVal, (=?), oneof, choose
   
   , Nat
   , newNat
@@ -36,6 +36,8 @@ import qualified MiniSat as M
 import Control.Applicative
 import Data.List
 import Data.Maybe
+import Data.IORef
+import Trace
 
 {-
 ================================================================================
@@ -93,6 +95,7 @@ context = H (\_ ctx -> return (The ctx))
 runH :: H a -> IO (Lift a)
 runH m =
   do s <- M.newSolver
+     M.eliminate s True
      x <- run m s []
      M.deleteSolver s
      return x
@@ -134,6 +137,9 @@ class Choice a where
 class Value a where
   type Type a
   get :: a -> H (Type a)
+
+class Value a => Traceable a where
+  get' :: Trace Bit -> a -> H (Type a)
 
 class Equal a where
   equalStruct :: a -> a -> H (Struct Bit)
@@ -233,6 +239,11 @@ instance Value Bit where
     h Nothing  = error "Nooooooo!"
     h (Just b) = b
 
+instance Traceable Bit where
+  get' t a =
+    do b <- get a
+       return (trace t (if b then a else nt a) b)
+
 {-
 ================================================================================
 -- Tuples
@@ -259,6 +270,12 @@ instance (Value a, Value b) => Value (a,b) where
        b <- get y
        return (a,b)
 
+instance (Traceable a, Traceable b) => Traceable (a,b) where
+  get' t (x,y) =
+    do a <- get' t x
+       b <- get' t y
+       return (a,b)
+
 --------------------------------------------------------------------------------
 
 instance (Choice a, Choice b, Choice c) => Choice (a,b,c) where
@@ -282,6 +299,13 @@ instance (Value a, Value b, Value c) => Value (a,b,c) where
     do a <- get x
        b <- get y
        c <- get z
+       return (a,b,c)
+
+instance (Traceable a, Traceable b, Traceable c) => Traceable (a,b,c) where
+  get' t (x,y,z) =
+    do a <- get' t x
+       b <- get' t y
+       c <- get' t z
        return (a,b,c)
 
 {-
@@ -337,7 +361,11 @@ instance Value a => Value (Lift a) where
   
   get (The x) = Just `fmap` get x
   get UNR     = return Nothing
-  
+
+instance Traceable a => Traceable (Lift a) where
+  get' t (The x) = Just `fmap` get' t x
+  get' t UNR     = return Nothing
+
 {-
 ================================================================================
 -- type Val
@@ -401,6 +429,11 @@ Val xs <&& Val ys =
       | (Just x, Just _, a) <- align xs ys
       ]
 
+oneof :: Choice a => [a] -> H a
+oneof xs =
+  do ck <- newVal [0..length xs-1]
+     choose ck $ \k -> return (xs !! k)
+
 choose :: Choice b => Val a -> (a -> H b) -> H b
 choose (Val [])         h = impossible "choose"
 choose (Val ((a,x):xs)) h =
@@ -435,6 +468,11 @@ instance Value (Val a) where
   get (Val ((a,x):xs)) =
     do b <- get a
        if b then return x else get (Val xs)
+
+instance Ord a => Traceable (Val a) where
+  get' t v =
+    do a <- get v
+       return (trace t (v =? a) a)
 
 --------------------------------------------------------------------------------
 
@@ -568,12 +606,15 @@ instance Equal Nat where
 instance Value Nat where
   type Type Nat = Int
   
-  get (Nat []) =
+  get = get' noTrace
+
+instance Traceable Nat where
+  get' t (Nat []) =
     do return 0
 
-  get (Nat (x:xs)) =
-    do b <- get x
-       n <- get (Nat xs)
+  get' t (Nat (x:xs)) =
+    do b <- get' t x
+       n <- get' t (Nat xs)
        return (if b then 1+2*n else 2*n)
 
 {-
@@ -640,15 +681,18 @@ instance Show a => Show (List a) where
 nil       = List $ Con (val Nil)  UNR
 cons x xs = List $ Con (val Cons) (The (x, xs))
 
-instance Value a => Value (List a) where
+instance Traceable a => Value (List a) where
   type Type (List a) = [Type a]
   
-  get (List (Con cn args)) =
-    do l <- get cn
-       case l of
-         Nil  -> do return []
-         Cons -> do ~(Just (a,as)) <- get args
-                    return (a:as)
+  get = get' noTrace
+  
+instance Traceable a => Traceable (List a) where
+  get' t (List (Con cn args)) =
+    do l     <- get' t cn
+       margs <- get' t args
+       return (case l of
+                 Nil  -> []
+                 Cons -> let Just (a,as) = margs in a:as)
 
 instance Argument L where
   argument Nil  _              = []
@@ -660,7 +704,61 @@ caseList (List d) nl cns =
       (Nil, _)           -> nl
       (Cons, The (x,xs)) -> cns x xs
 
+{-
+================================================================================
+-- type Lazy
+================================================================================
+-}
+
+newtype Lazy a = Lazy (IORef (Either (H a) a))
+
+delay :: H a -> H (Lazy a)
+delay m =
+  do ref <- io $ newIORef (Left m)
+     return (Lazy ref)
+
+force :: Lazy a -> H a
+force (Lazy ref) =
+  do ema <- io $ readIORef ref
+     case ema of
+       Left m ->
+         do a <- m
+            io $ writeIORef ref (Right a)
+            return a
+       
+       Right a ->
+         do return a
+
+instance Choice a => Choice (Lazy a) where
+  iff (Bool True) la lb =
+    do return la
+
+  iff (Bool False) la lb =
+    do return lb
+
+  iff c la lb =
+    delay (do a <- force la
+              b <- force lb
+              iff c a b)
+
+instance Equal a => Equal (Lazy a) where
+  -- use with care on lazy recursive datatypes!
+  equalStruct la lb =
+    do a <- force la
+       b <- force lb
+       equalStruct a b
+
+instance Value a => Value (Lazy a) where
+  type Type (Lazy a) = Maybe (Type a)
+  
+  get (Lazy ref) =
+    do ema <- io $ readIORef ref
+       case ema of
+         Left _  -> return Nothing
+         Right a -> Just `fmap` get a
+
 --------------------------------------------------------------------------------
+
 {-
 apa =
   do s <- M.newSolver
