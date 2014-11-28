@@ -28,6 +28,8 @@ module Symbolic
   , switch
   
   , List(..), L(..), nil, cons
+
+  , One(..)
   )
  where
 
@@ -250,6 +252,34 @@ instance Traceable Bit where
 ================================================================================
 -}
 
+instance Choice () where
+  iff c _ _ = return ()
+
+instance Equal () where
+  equalStruct _ _ = return (Tuple [])
+
+instance Value () where
+  type Type () = ()
+
+  get _ = return ()
+
+--------------------------------------------------------------------------------
+
+newtype One a = One { one :: a }
+  deriving (Choice, Eq, Ord, Show)
+
+instance Equal a => Equal (One a) where
+  equalStruct (One x1) (One y1) =
+    do eq1 <- equalStruct x1 y1
+       return (Tuple [eq1])
+
+instance Value a => Value (One a) where
+  type Type (One a) = Type a
+
+  get (One x) = get x
+
+--------------------------------------------------------------------------------
+
 instance (Choice a, Choice b) => Choice (a,b) where
   iff c (x1,y1) (x2,y2) =
     do x <- iff c x1 x2
@@ -307,6 +337,34 @@ instance (Traceable a, Traceable b, Traceable c) => Traceable (a,b,c) where
        b <- get' t y
        c <- get' t z
        return (a,b,c)
+
+--------------------------------------------------------------------------------
+
+instance (Choice a, Choice b, Choice c, Choice d) => Choice (a,b,c,d) where
+  iff c (x1,y1,z1,u1) (x2,y2,z2,u2) =
+    do x <- iff c x1 x2
+       y <- iff c y1 y2
+       z <- iff c z1 z2
+       u <- iff c u1 u2
+       return (x,y,z,u)
+
+instance (Equal a, Equal b, Equal c, Equal d) => Equal (a,b,c,d) where
+  equalStruct (x1,y1,z1,u1) (x2,y2,z2,u2) =
+    do eq1 <- equalStruct x1 x2
+       eq2 <- equalStruct y1 y2
+       eq3 <- equalStruct z1 z2
+       eq4 <- equalStruct u1 u2
+       return (Tuple [eq1,eq2,eq3,eq4])
+
+instance (Value a, Value b, Value c, Value d) => Value (a,b,c,d) where
+  type Type (a,b,c,d) = (Type a, Type b, Type c, Type d)
+
+  get (x,y,z,u) =
+    do a <- get x
+       b <- get y
+       c <- get z
+       d <- get u
+       return (a,b,c,d)
 
 {-
 ================================================================================
@@ -440,6 +498,10 @@ choose (Val ((a,x):xs)) h =
   do ly <- lift (h x `withExtra` a)
      lz <- lift (choose (Val xs) h `withExtra` nt a)
      peek =<< iff a ly lz
+
+
+bitVal :: Bit -> Val Bool
+bitVal b = Val [(b,True),(nt b,False)]
 
 --------------------------------------------------------------------------------
 
@@ -659,8 +721,11 @@ instance (Ord l, Argument l, Equal arg) => Equal (Data l arg) where
   equalStruct (Con c1 arg1) (Con c2 arg2) =
     do eq <- equal c1 c2
        eqstr <- equalStruct arg1 arg2
-       eqs <- choose (c1 <&& c2) $ \l -> do eq <- andl (concatMap collapse (argument l eqstr))
-                                            orl [nt (c1 =? l), eq]
+       eqs <- choose (bitVal eq) $ \ l ->
+         if l
+           then choose (c1 <&& c2) $ \l -> do eq <- andl (concatMap collapse (argument l eqstr))
+                                              orl [nt (c1 =? l), eq]
+           else return ff
        Bit `fmap` andl [eq,eqs]
 
 {-
