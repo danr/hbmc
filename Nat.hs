@@ -6,6 +6,7 @@ import Data.List( sortBy, insertBy )
 --------------------------------------------------------------------------------
 
 data Nat = Nat [Lit]{-111..000-} Lit
+ deriving ( Show )
 
 newNat :: Solver -> Int{-maximum value-} -> IO Nat
 newNat sat k =
@@ -211,7 +212,7 @@ solveMaximizeBin sat as (Nat xs true) = solveMinimizeBin sat as (Nat (reverse (m
 modelValueNat :: Solver -> Nat -> IO Int
 modelValueNat sat (Nat xs _) =
   do bs <- sequence [ modelValue sat x | x <- xs ]
-     return (length [ b | b <- bs, b == Just True ])
+     return (length [ b | b <- bs, if b == Nothing then error "!" else True, b == Just True ])
 
 --------------------------------------------------------------------------------
 
