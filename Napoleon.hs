@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings, TemplateHaskell, MultiParamTypeClasses #-}
 module Main where
 
 import Control.Applicative
@@ -11,6 +11,7 @@ import Z3.Monad
 import Text.PrettyPrint
 import Data.Char (isDigit,chr)
 import Data.Map (Map)
+import Data.Generics.Geniplate
 import qualified Data.Map as M
 
 -- formulae --
@@ -52,6 +53,19 @@ instance Num Term where
     abs    = error "Term abs"
     signum = error "Term signum"
 
+-- generics --
+
+return []
+
+instanceUniverseBi [t| (Form,Term) |]
+
+congruences :: Form -> Form
+congruences form = And
+    [ x :=: hd ys /\ xs :=: tl ys
+    | ys@("cons" :$ [x,xs]) <- universeBi form
+    ]
+
+
 -- interpreting --
 
 type IVar = String -> Z3 FuncDecl
@@ -88,23 +102,93 @@ iTerm iVar tm0 = case tm0 of
 
 type Example = ([Term],Form)
 
+mkRev :: Integer -> Term -> U (Term,Form)
+mkRev i xs = (,) (rev xs) <$> genRev [] (fuel i) xs
+
+mkLen :: Integer -> Term -> U (Term,Form)
+mkLen i xs = (,) (len xs) <$> genLen [] (fuel i) xs
+
+mkISort :: Integer -> Term -> U (Term,Form)
+mkISort i xs = (,) (isort xs) <$> genISort [] (fuel i) xs
+
 reversing :: Integer -> Example
 reversing size = runU $ do
     let xs = var "xs"
-    len_axioms <- genLen [] (fuel (size + 5)) xs
-    rev_axioms <- genRev [] (fuel (size + 5)) xs
+    (len_xs,len_ax) <- mkLen (size + 2) xs
+    (rev_xs,rev_ax) <- mkRev (size + 2) xs
     return
         ( [xs]
         , And
-            [ len_axioms
-            , rev_axioms
-            , len xs .>. Lit size
-            , xs :=: rev xs
+            [ len_ax
+            , rev_ax
+            , len_xs .>. Lit size
+            , xs :=: rev_xs
+            ]
+        )
+
+sort_inj :: Integer -> Example
+sort_inj size = runU $ do
+    let xs = var "xs"
+    let ys = var "ys"
+    (sort_xs,ax1) <- mkISort (size + 2) xs
+    (sort_ys,ax2) <- mkISort (size + 2) ys
+    (len_xs,ax3) <- mkLen (size + 2) xs
+    (len_ys,ax4) <- mkLen (size + 2) ys
+    return
+        ( [xs,ys]
+        , And
+            [ ax1, ax2, ax3, ax4
+            , sort_xs :=: sort_ys
+            , Not (xs :=: ys)
+            , len_xs .>. Lit size
+            , len_ys .>. Lit size
+            ]
+        )
+
+sort_triple :: Integer -> Example
+sort_triple size = runU $ do
+    let xs = var "xs"
+    let ys = var "ys"
+    let ys = var "zs"
+    (sort_xs,ax1) <- mkISort (size + 2) xs
+    (sort_ys,ax2) <- mkISort (size + 2) ys
+    (len_xs,ax3) <- mkLen (size + 2) xs
+    (len_ys,ax4) <- mkLen (size + 2) ys
+    return
+        ( [xs,ys]
+        , And
+            [ ax1, ax2, ax3, ax4
+            , Not $ sort_xs :=: sort_ys
+                ==> xs :=: ys
+                 \/ sort_xs :=: xs
+                 \/ sort_ys :=: ys
+            , len_xs .>. Lit size
+            , len_ys .>. Lit size
+            ]
+        )
+
+sort_test :: Example
+sort_test = runU $ do
+    let mk_list = foldr cons nil
+    let xs = var "xs"
+    let ys = var "ys"
+    sort_ax <- genISort [] (fuel 5) xs
+    return
+        ( [xs,ys]
+        , And
+            [ xs :=: mk_list [40,50,20,30]
+            , sort_ax
+            , isort xs :=: ys
             ]
         )
 
 main :: IO ()
-main = runExample (reversing 22)
+main = sequence_
+    [ timeIt $ do
+        print i
+        runExample (sort_triple i)
+    | i <- [0..]
+    ]
 
 runExample :: Example -> IO ()
 runExample (vars,form) = evalZ3 $ do
@@ -122,7 +206,8 @@ runExample (vars,form) = evalZ3 $ do
         ([ func v [] list | v :$ [] <- vars ] ++
          [ func "length" [list] int
          , func "app" [list,list] list
-         , func "eq" [list,list] bool
+         , func "ins" [int,list] list
+         , func "isort" [list] list
          , func "rev" [list] list
          , func "cons" [int,list] list
          , func "head" [list] int
@@ -146,22 +231,26 @@ runExample (vars,form) = evalZ3 $ do
 
     let get_list m t = do
             is_nil <- local $ do
-                assertCnstr =<< iForm iVar (t :=: nil)
-                (Sat ==) <$> check
+                assertCnstr =<< iForm iVar (Not (t :=: nil))
+                (Unsat ==) <$> check
             if is_nil then
                 return []
             else do
                 -- Just tast <- eval m =<< iTerm iVar t
                 -- liftIO . putStrLn . ("not nil: " ++) =<< astToString tast
                 Just xx <- eval m =<< iTerm iVar (hd t)
-                s <- astToString xx
+                -- s <- astToString xx
                 x <- getInt xx
                 xs <- get_list m (tl t)
-                return (chr (fromInteger x):xs)
+                return (x:xs)
+
+
+    let cong = congruences form
 
     -- liftIO $ putStrLn (render (ppForm form))
+    -- liftIO $ putStrLn (render (ppForm cong))
 
-    assertCnstr =<< iForm iVar form
+    assertCnstr =<< iForm iVar (form /\ cong)
 
     (res,mm) <- getModel
 
@@ -221,11 +310,14 @@ len xs = "length" :$ [xs]
 app :: Term -> Term -> Term
 app xs ys = "app" :$ [xs,ys]
 
-eq :: Term -> Term -> Term
-eq xs ys = "eq" :$ [xs,ys]
-
 rev :: Term -> Term
 rev xs = "rev" :$ [xs]
+
+ins :: Term -> Term -> Term
+ins x xs = "ins" :$ [x,xs]
+
+isort :: Term -> Term
+isort xs = "isort" :$ [xs]
 
 nil :: Term
 nil = "nil" :$ []
@@ -244,7 +336,7 @@ impossible ts = Not (And ts)
 -- functions --
 
 genLen :: [Form] -> Fuel -> Term -> U Form
-genLen ctx Z     xs = return (impossible ctx)
+genLen ctx Z     _  = return (impossible ctx)
 genLen ctx (S n) xs = do
     b   <- Term <$> newVar "b"
     res <- newVar "r"
@@ -258,14 +350,8 @@ genLen ctx (S n) xs = do
         , rec
         ]
 
-isCons :: Term -> (Term,Term) -> Form
-ys `isCons` (x,xs) = And [ys :=: cons x xs,hd ys :=: x,tl ys :=: xs]
-
-eqList :: Term -> Term -> Form
-xs `eqList` ys = And [xs :=: ys,hd xs :=: hd ys,tl xs :=: tl ys]
-
 genApp :: [Form] -> Fuel -> Term -> Term -> U Form
-genApp ctx Z     xs ys = return (impossible ctx)
+genApp ctx Z     _  _  = return (impossible ctx)
 genApp ctx (S n) xs ys = do
     b   <- Term <$> newVar "b"
     res <- newVar "l"
@@ -275,35 +361,12 @@ genApp ctx (S n) xs ys = do
         , b     <==> xs :=: nil
         , Not b <==> xs :=: cons (hd xs) (tl xs)
         , b     ==> res :=: ys
-        , Not b ==> res `isCons` (hd xs,app (tl xs) ys)
+        , Not b ==> res :=: cons (hd xs) (app (tl xs) ys)
         , rec
         ]
-
-{-
-genEq :: [Form] -> Fuel -> Term -> Term -> U Form
-genEq ctx Z     xs ys = return (impossible ctx)
-genEq ctx (S n) xs ys = do
-    b   <- Term <$> newVar "b"
-    c   <- Term <$> newVar "b"
-    res <- newVar "b"
-    rec <- genEq (Not b:Not c:ctx) n (tl xs) (tl ys)
-    return $ And
-        [ eq xs ys :=: res
-        , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons (hd xs) (tl xs)
-        , c     <==> ys :=: nil
-        , Not c <==> ys :=: cons (hd ys) (tl ys)
-        , b /\ c ==> res :=: tt
-        , Not b /\ c ==> res :=: ff
-        , b /\ Not c ==> res :=: ff
-        , Not b /\ Not c /\ Not (hd xs :=: hd ys) ==> res :=: ff
-        , Not b /\ Not c /\ hd xs :=: hd ys ==> res :=: eq (tl xs) (tl ys)
-        , rec
-        ]
--}
 
 genRev :: [Form] -> Fuel -> Term -> U Form
-genRev ctx Z     xs = return (impossible ctx)
+genRev ctx Z     _  = return (impossible ctx)
 genRev ctx (S n) xs = do
     b   <- Term <$> newVar "b"
     res <- newVar "l"
@@ -314,7 +377,40 @@ genRev ctx (S n) xs = do
         , b     <==> xs :=: nil
         , Not b <==> xs :=: cons (hd xs) (tl xs)
         , b ==> res :=: nil
-        , Not b ==> res `eqList` app (rev (tl xs)) (cons (hd xs) nil)
+        , Not b ==> res :=: app (rev (tl xs)) (cons (hd xs) nil)
+        , rec1
+        , rec2
+        ]
+
+genIns :: [Form] -> Fuel -> Term -> Term -> U Form
+genIns ctx Z     _ _  = return (impossible ctx)
+genIns ctx (S n) x xs = do
+    b   <- Term <$> newVar "b"
+    res <- newVar "l"
+    rec <- genIns (Not b:ctx) n x (tl xs)
+    return $ And
+        [ ins x xs :=: res
+        , b     <==> xs :=: nil
+        , Not b <==> xs :=: cons (hd xs) (tl xs)
+        , b ==> res :=: cons x nil
+        , Not b /\ x .<. hd xs       ==> res :=: cons x (xs)
+        , Not b /\ Not (x .<. hd xs) ==> res :=: cons (hd xs) (ins x (tl xs))
+        , rec
+        ]
+
+genISort :: [Form] -> Fuel -> Term -> U Form
+genISort ctx Z     _  = return (impossible ctx)
+genISort ctx (S n) xs = do
+    b   <- Term <$> newVar "b"
+    res <- newVar "l"
+    rec1 <- genISort (Not b:ctx) n (tl xs)
+    rec2 <- genIns (Not b:ctx) n (hd xs) (isort (tl xs))
+    return $ And
+        [ isort xs :=: res
+        , b     <==> xs :=: nil
+        , Not b <==> xs :=: cons (hd xs) (tl xs)
+        , b     ==> res :=: nil
+        , Not b ==> res :=: ins (hd xs) (isort (tl xs))
         , rec1
         , rec2
         ]

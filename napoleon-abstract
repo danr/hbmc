@@ -4,9 +4,9 @@ Symbolic Evaluation of Functional Programs
 I will present ongoing and related work on symbolically evaluating functional
 programs using SAT- and SMT-solvers. This can be used for counter-example
 generation and bounded model checking. The technique is applicable in presence
-of preconditions and disjunctions, such as:
+of preconditions (and disjunctions), and can thus refute conjectures such as:
 
-  sort xs = sort ys ==> xs = sort xs \/ ys = sort ys \/ xs = ys
+  (sort xs == sort ys) ==> (xs == ys)
 
 Interesting applications of the counter-example generation include program
 synthesis and detecting grammar ambiguities.  The technique can also be extended to
