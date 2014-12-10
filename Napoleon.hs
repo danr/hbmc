@@ -333,9 +333,6 @@ ff = "ff" :$ []
 impossible :: [Form] -> Form
 impossible ts = Not (And ts)
 
-mkCons :: U (Term,Term)
-mkCons = (,) <$> newVar "r" <*> newVar "l"
-
 -- functions --
 
 genLen :: [Form] -> Fuel -> Term -> U Form
@@ -343,14 +340,13 @@ genLen ctx Z     _  = return (impossible ctx)
 genLen ctx (S n) xs = do
     b   <- Term <$> newVar "b"
     res <- newVar "r"
-    (h,t) <- mkCons
-    rec <- genLen (Not b:ctx) n t
+    rec <- genLen (Not b:ctx) n (tl xs)
     return $ And
         [ len xs :=: res
         , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons h t
+        , Not b <==> xs :=: cons (hd xs) (tl xs)
         , b ==> res :=: 0
-        , Not b ==> res :=: (1 + len t)
+        , Not b ==> res :=: (1 + len (tl xs))
         , rec
         ]
 
@@ -358,15 +354,14 @@ genApp :: [Form] -> Fuel -> Term -> Term -> U Form
 genApp ctx Z     _  _  = return (impossible ctx)
 genApp ctx (S n) xs ys = do
     b   <- Term <$> newVar "b"
-    (h,t) <- mkCons
     res <- newVar "l"
-    rec <- genApp (Not b:ctx) n t ys
+    rec <- genApp (Not b:ctx) n (tl xs) ys
     return $ And
         [ app xs ys :=: res
         , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons h t
+        , Not b <==> xs :=: cons (hd xs) (tl xs)
         , b     ==> res :=: ys
-        , Not b ==> res :=: cons h (app t ys)
+        , Not b ==> res :=: cons (hd xs) (app (tl xs) ys)
         , rec
         ]
 
@@ -392,15 +387,14 @@ genIns ctx Z     _ _  = return (impossible ctx)
 genIns ctx (S n) x xs = do
     b   <- Term <$> newVar "b"
     res <- newVar "l"
-    (h,t) <- mkCons
-    rec <- genIns (Not b:ctx) n x t
+    rec <- genIns (Not b:ctx) n x (tl xs)
     return $ And
         [ ins x xs :=: res
         , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons h t
+        , Not b <==> xs :=: cons (hd xs) (tl xs)
         , b ==> res :=: cons x nil
         , Not b /\ x .<. hd xs       ==> res :=: cons x (xs)
-        , Not b /\ Not (x .<. hd xs) ==> res :=: cons h (ins x t)
+        , Not b /\ Not (x .<. hd xs) ==> res :=: cons (hd xs) (ins x (tl xs))
         , rec
         ]
 
@@ -409,15 +403,14 @@ genISort ctx Z     _  = return (impossible ctx)
 genISort ctx (S n) xs = do
     b   <- Term <$> newVar "b"
     res <- newVar "l"
-    (h,t) <- mkCons
-    rec1 <- genISort (Not b:ctx) n t
-    rec2 <- genIns (Not b:ctx) n h (isort t)
+    rec1 <- genISort (Not b:ctx) n (tl xs)
+    rec2 <- genIns (Not b:ctx) n (hd xs) (isort (tl xs))
     return $ And
         [ isort xs :=: res
         , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons h t
+        , Not b <==> xs :=: cons (hd xs) (tl xs)
         , b     ==> res :=: nil
-        , Not b ==> res :=: ins h (isort t)
+        , Not b ==> res :=: ins (hd xs) (isort (tl xs))
         , rec1
         , rec2
         ]
