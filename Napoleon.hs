@@ -4,15 +4,17 @@ module Main where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.IO.Class
-import Control.Monad.State
+import Control.Monad.RWS as RWS
 import Data.IORef
 import System.TimeIt
-import Z3.Monad
+import Z3.Monad as Z3
 import Text.PrettyPrint
 import Data.Char (isDigit,chr)
 import Data.Map (Map)
 import Data.Generics.Geniplate
 import qualified Data.Map as M
+import System.IO
+import Text.Printf
 
 -- formulae --
 
@@ -65,14 +67,15 @@ congruences form = And
     | ys@("cons" :$ [x,xs]) <- universeBi form
     ]
 
-
 -- interpreting --
 
 type IVar = String -> Z3 FuncDecl
 
 iForm :: IVar -> Form -> Z3 AST
 iForm iVar f0 = case f0 of
+    And []       -> mkTrue
     And fs       -> mkAnd =<< mapM go fs
+    Or []        -> mkFalse
     Or fs        -> mkOr =<< mapM go fs
     f1 :==> f2   -> join $ mkImplies <$> go f1 <*> go f2
     f1 :<==>: f2 -> join $ mkEq <$> go f1 <*> go f2
@@ -84,13 +87,12 @@ iForm iVar f0 = case f0 of
 
 iTerm :: IVar -> Term -> Z3 AST
 iTerm iVar tm0 = case tm0 of
-    "tt" :$ [] -> mkTrue
-    "ff" :$ [] -> mkFalse
-    "<" :$ ts -> bin mkLt ts
-    ">" :$ ts -> bin mkGt ts
-    "+" :$ ts -> mkAdd =<< mapM go ts
-    "-" :$ ts -> mkSub =<< mapM go ts
-    "*" :$ ts -> mkMul =<< mapM go ts
+    "<"  :$ ts -> bin mkLt ts
+    "<=" :$ ts -> bin mkLe ts
+    ">"  :$ ts -> bin mkGt ts
+    "+"  :$ ts -> mkAdd =<< mapM go ts
+    "-"  :$ ts -> mkSub =<< mapM go ts
+    "*"  :$ ts -> mkMul =<< mapM go ts
     s :$ ts -> join $ mkApp <$> iVar s <*> mapM go ts
     Lit i   -> mkInt i
   where
@@ -98,173 +100,65 @@ iTerm iVar tm0 = case tm0 of
 
     bin mk [t1,t2] = join $ mk <$> go t1 <*> go t2
 
--- main --
+-- examples --
 
 type Example = ([Term],Form)
 
-mkRev :: Integer -> Term -> U (Term,Form)
-mkRev i xs = (,) (rev xs) <$> genRev [] (fuel i) xs
-
-mkLen :: Integer -> Term -> U (Term,Form)
-mkLen i xs = (,) (len xs) <$> genLen [] (fuel i) xs
-
-mkISort :: Integer -> Term -> U (Term,Form)
-mkISort i xs = (,) (isort xs) <$> genISort [] (fuel i) xs
-
-mkMerge :: Integer -> Term -> Term -> U (Term,Form)
-mkMerge i xs ys = (,) (merge xs ys) <$> genMerge [] (fuel i) xs ys
-
-mkMSort :: Integer -> Term -> U (Term,Form)
-mkMSort i xs = (,) (msort xs) <$> genMSort [] (fuel i) xs
-
-mkEvens :: Integer -> Term -> U (Term,Form)
-mkEvens i xs = (,) (evens xs) <$> genEvens [] (fuel i) xs
-
-mkOdds :: Integer -> Term -> U (Term,Form)
-mkOdds i xs = (,) (odds xs) <$> genOdds [] (fuel i) xs
-
 reversing :: Integer -> Example
-reversing size = runU $ do
+reversing size = runN (size + 1) $ do
     let xs = var "xs"
-    (len_xs,len_ax) <- mkLen (size + 2) xs
-    (rev_xs,rev_ax) <- mkRev (size + 2) xs
-    return
-        ( [xs]
-        , And
-            [ len_ax
-            , rev_ax
-            , len_xs .>. Lit size
-            , xs :=: rev_xs
-            ]
-        )
+    equal xs =<< qrev xs nil
+    le (Lit size) =<< len xs
+    return [xs]
 
-sort_inj :: Integer -> Example
-sort_inj size = runU $ do
+sort_inj :: (Term -> N Term) -> Integer -> Example
+sort_inj sorter size = runN (size + 2) $ do
     let xs = var "xs"
     let ys = var "ys"
-    (sort_xs,ax1) <- mkISort (size + 2) xs
-    (sort_ys,ax2) <- mkISort (size + 2) ys
-    (len_xs,ax3) <- mkLen (size + 2) xs
-    (len_ys,ax4) <- mkLen (size + 2) ys
-    return
-        ( [xs,ys]
-        , And
-            [ ax1, ax2, ax3, ax4
-            , sort_xs :=: sort_ys
-            , Not (xs :=: ys)
-            , len_xs .>. Lit size
-            , len_ys .>. Lit size
-            ]
-        )
+    join $ equal <$> sorter xs <*> sorter ys
+    assert (Not (xs :=: ys))
+    le (Lit size) =<< len xs
+    le (Lit size) =<< len ys
+    return [xs,ys]
 
-sort_triple :: Integer -> Example
-sort_triple size = runU $ do
+sort_triple :: (Term -> N Term) -> Integer -> Example
+sort_triple sorter size = runN (size + 2) $ do
     let xs = var "xs"
     let ys = var "ys"
-    let ys = var "zs"
-    (sort_xs,ax1) <- mkISort (size + 2) xs
-    (sort_ys,ax2) <- mkISort (size + 2) ys
-    (len_xs,ax3) <- mkLen (size + 2) xs
-    (len_ys,ax4) <- mkLen (size + 2) ys
-    return
-        ( [xs,ys]
-        , And
-            [ ax1, ax2, ax3, ax4
-            , Not $ sort_xs :=: sort_ys
-                ==> xs :=: ys
-                 \/ sort_xs :=: xs
-                 \/ sort_ys :=: ys
-            , len_xs .>. Lit size
-            , len_ys .>. Lit size
-            ]
-        )
+    sort_xs <- sorter xs
+    sort_ys <- sorter ys
+    le (Lit size) =<< len xs
+    le (Lit size) =<< len ys
+    assert $ Not $
+           sort_xs :=: sort_ys
+       ==> xs :=: ys
+        \/ sort_xs :=: xs
+        \/ sort_ys :=: ys
+    return [xs,ys]
 
-merge_comm :: Integer -> Example
-merge_comm size = runU $ do
+commutative :: (Term -> Term -> N Term) -> Integer -> Example
+commutative f size = runN (size + 1) $ do
     let xs = var "xs"
     let ys = var "ys"
-    (sort_xs,ax1) <- mkISort (size + 2) xs
-    (sort_ys,ax2) <- mkISort (size + 2) ys
-    (merge_xs_ys,ax3) <- mkMerge (size + 2) xs ys
-    (merge_ys_xs,ax4) <- mkMerge (size + 2) ys xs
-    (len_xs,ax5) <- mkLen (size + 2) xs
-    (len_ys,ax6) <- mkLen (size + 2) ys
-    return
-        ( [xs,ys]
-        , And
-            [ ax1, ax2, ax3, ax4
-            , ax5, ax6
-            , sort_xs :=: xs
-            , sort_ys :=: ys
-            , merge_xs_ys :=: merge_ys_xs
-            , len_xs .>. Lit size
-            , len_ys .>. Lit size
-            ]
-        )
+    xy <- f xs ys
+    yx <- f ys xs
+    assert (Not (xy :=: yx))
+    le (Lit size) =<< len xs
+    le (Lit size) =<< len ys
+    return [xs,ys]
 
-msort_triple :: Integer -> Example
-msort_triple size = runU $ do
-    let xs = var "xs"
-    let ys = var "ys"
-    (sort_xs,ax1) <- mkMSort (size + 3) xs
-    (sort_ys,ax2) <- mkMSort (size + 3) ys
-    (len_xs,ax3) <- mkLen (size + 2) xs
-    (len_ys,ax4) <- mkLen (size + 2) ys
-    return
-        ( [xs,ys]
-        , And
-            [ ax1, ax2, ax3, ax4
-            , Not $ sort_xs :=: sort_ys
-                ==> xs :=: ys
-                 \/ sort_xs :=: xs
-                 \/ sort_ys :=: ys
-            , len_xs .>. Lit size
-            , len_ys .>. Lit size
-            ]
-        )
-
-
-sort_test :: Example
-sort_test = runU $ do
-    let mk_list = foldr cons nil
-    let xs = var "xs"
-    let ys = var "ys"
-    (msort_xs,ax1) <- mkMSort 6 xs
-    return
-        ( [xs,ys]
-        , And
-            [ xs :=: mk_list [70,40,20,50]
-            , ax1
-            , msort_xs :=: ys
-            ]
-        )
-
-evens_test :: Example
-evens_test = runU $ do
-    let mk_list = foldr cons nil
-    let xs = var "xs"
-    let ys = var "ys"
-    let zs = var "zs"
-    (evens_xs,ax1) <- mkEvens 100 xs
-    (odds_ys,ax2) <- mkOdds 100 ys
-    return
-        ( [xs,ys,zs]
-        , And
-            [ zs :=: mk_list (map Lit [0..15])
-            , ax1, ax2
-            , evens_xs :=: ys
-            , odds_ys :=: zs
-            ]
-        )
+-- main --
 
 main :: IO ()
 main = do
     sequence_
         [ timeIt $ do
-            print i
-            runExample (msort_triple i)
+            printf "%02d: " i
+            runExample (sort_triple isort i)
         | i <- [0..]
         ]
+
+-- run --
 
 runExample :: Example -> IO ()
 runExample (vars,form) = evalZ3 $ do
@@ -280,8 +174,9 @@ runExample (vars,form) = evalZ3 $ do
 
     env_ref <- liftIO . newIORef . M.fromList =<< sequence
         ([ func v [] list | v :$ [] <- vars ] ++
-         [ func "length" [list] int
+         [ func "len" [list] int
          , func "app" [list,list] list
+         , func "qrev" [list,list] list
          , func "ins" [int,list] list
          , func "isort" [list] list
          , func "msort" [list] list
@@ -310,7 +205,7 @@ runExample (vars,form) = evalZ3 $ do
                     _     -> error $ "Undeclared function: " ++ s
 
     let get_list m t = do
-            is_nil <- local $ do
+            is_nil <- Z3.local $ do
                 assertCnstr =<< iForm iVar ((t :=: nil))
                 (Sat ==) <$> check
             if is_nil then
@@ -324,16 +219,15 @@ runExample (vars,form) = evalZ3 $ do
                 xs <- get_list m (tl t)
                 return (x:xs)
 
-
     let cong = congruences form
 
     -- liftIO $ putStrLn (render (ppForm form))
     -- liftIO $ putStrLn (render (ppForm cong))
 
-    liftIO $ putStrLn "Adding assertions..."
+    liftIO $ putStr "adding assertions... " >> hFlush stdout
     assertCnstr =<< iForm iVar (form /\ cong)
 
-    liftIO $ putStrLn "Solving..."
+    liftIO $ putStr "solving... " >> hFlush stdout
     (res,mm) <- getModel
 
     liftIO $ print res
@@ -342,29 +236,44 @@ runExample (vars,form) = evalZ3 $ do
         Just m  -> do
             -- liftIO . putStrLn =<< showModel m
             forM_ vars $ \ v -> liftIO . print =<< get_list m v
+            return ()
         Nothing -> return ()
 
--- fuel  --
+-- Napoleon monad --
 
-data Fuel = S Fuel | Z
+type N = RWS (Form,Integer) [Form] Int
 
-fuel :: Integer -> Fuel
-fuel i = iterate S Z !! fromInteger i
+runN :: Integer -> N a -> (a,Form)
+runN fuel m =
+    let (a,axs) = evalRWS m (And [],fuel) 0
+    in  (a,And axs)
 
--- unique variable names --
+assert :: Form -> N ()
+assert form = do
+    (ctx,_) <- ask
+    tell [ctx ==> form]
 
-type U a = State Int a
-
-runU :: U a -> a
-runU m = evalState m 0
-
-fresh :: U Int
+fresh :: N Int
 fresh = state $ \ i -> (i,i+1)
 
-newVar :: String -> U Term
+newVar :: String -> N Term
 newVar s = do
     i <- fresh
     return (var (s ++ show i))
+
+withContext :: Form -> N a -> N a
+withContext phi = RWS.local $ \ (ctx,fuel) -> (phi /\ ctx,fuel)
+
+-- utilities --
+
+impossible :: N ()
+impossible = assert (Or [])
+
+le :: Term -> Term -> N ()
+le a b = assert (a .<=. b)
+
+equal :: Term -> Term -> N ()
+equal a b = assert (a :=: b)
 
 -- term builders --
 
@@ -373,6 +282,9 @@ var x = x :$ []
 
 (.<.) :: Term -> Term -> Form
 x .<. y = Term ("<" :$ [x,y])
+
+(.<=.) :: Term -> Term -> Form
+x .<=. y = Term ("<=" :$ [x,y])
 
 (.>.) :: Term -> Term -> Form
 x .>. y = Term (">" :$ [x,y])
@@ -386,231 +298,136 @@ hd xs = "head" :$ [xs]
 cons :: Term -> Term -> Term
 cons x xs = "cons" :$ [x,xs]
 
-len :: Term -> Term
-len xs = "length" :$ [xs]
-
-app :: Term -> Term -> Term
-app xs ys = "app" :$ [xs,ys]
-
-merge :: Term -> Term -> Term
-merge xs ys = "merge" :$ [xs,ys]
-
-rev :: Term -> Term
-rev xs = "rev" :$ [xs]
-
-ins :: Term -> Term -> Term
-ins x xs = "ins" :$ [x,xs]
-
-isort :: Term -> Term
-isort xs = "isort" :$ [xs]
-
-msort :: Term -> Term
-msort xs = "msort" :$ [xs]
-
-evens :: Term -> Term
-evens xs = "evens" :$ [xs]
-
-odds :: Term -> Term
-odds xs = "odds" :$ [xs]
-
 nil :: Term
 nil = "nil" :$ []
 
-tt :: Term
-tt = "tt" :$ []
-
-ff :: Term
-ff = "ff" :$ []
-
--- impossible --
-
-impossible :: [Form] -> Form
-impossible ts = Not (And ts)
-
 -- functions --
 
-genLen :: [Form] -> Fuel -> Term -> U Form
-genLen ctx Z     _  = return (impossible ctx)
-genLen ctx (S n) xs = do
-    b   <- Term <$> newVar "b"
-    res <- newVar "r"
-    rec <- genLen (Not b:ctx) n (tl xs)
-    return $ And
-        [ len xs :=: res
-        , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons (hd xs) (tl xs)
-        , b ==> res :=: 0
-        , Not b ==> res :=: (1 + len (tl xs))
-        , rec
-        ]
+listCase :: Term -> N () -> (Term -> Term -> N ()) -> N ()
+listCase xs mk_nil mk_cons = do
+    b <- Term <$> newVar "b"
+    assert (b     <==> xs :=: nil)
+    assert (Not b <==> xs :=: cons (hd xs) (tl xs))
+    withContext b       mk_nil
+    withContext (Not b) (mk_cons (hd xs) (tl xs))
 
-genApp :: [Form] -> Fuel -> Term -> Term -> U Form
-genApp ctx Z     _  _  = return (impossible ctx)
-genApp ctx (S n) xs ys = do
-    b   <- Term <$> newVar "b"
-    res <- newVar "l"
-    rec <- genApp (Not b:ctx) n (tl xs) ys
-    return $ And
-        [ app xs ys :=: res
-        , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons (hd xs) (tl xs)
-        , b     ==> res :=: ys
-        , Not b ==> res :=: cons (hd xs) (app (tl xs) ys)
-        , rec
-        ]
+listCase' :: Term -> N Term -> (Term -> Term -> N Term) -> Term -> N ()
+listCase' xs mk_nil mk_cons res = listCase xs
+    (mk_nil >>= \ tm -> equal res tm)
+    (\ h t -> mk_cons h t >>= \ tm -> equal res tm)
 
-genRev :: [Form] -> Fuel -> Term -> U Form
-genRev ctx Z     _  = return (impossible ctx)
-genRev ctx (S n) xs = do
-    b   <- Term <$> newVar "b"
-    res <- newVar "l"
-    rec1 <- genRev (Not b:ctx) n (tl xs)
-    rec2 <- genApp (Not b:ctx) n (rev (tl xs)) (cons (hd xs) nil)
-    return $ And
-        [ rev xs :=: res
-        , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons (hd xs) (tl xs)
-        , b ==> res :=: nil
-        , Not b ==> res :=: app (rev (tl xs)) (cons (hd xs) nil)
-        , rec1
-        , rec2
-        ]
+define :: Term -> String -> (Term -> N ()) -> N Term
+define tm r k = do
+    (ctx,fuel) <- ask
+    if fuel <= 0
+        then impossible
+        else do
+            RWS.local (const (ctx,fuel-1)) $ do
+                res <- newVar r
+                equal tm res
+                k res
+    return tm
 
-genIns :: [Form] -> Fuel -> Term -> Term -> U Form
-genIns ctx Z     _ _  = return (impossible ctx)
-genIns ctx (S n) x xs = do
-    b   <- Term <$> newVar "b"
-    res <- newVar "l"
-    rec <- genIns (Not b:ctx) n x (tl xs)
-    return $ And
-        [ ins x xs :=: res
-        , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons (hd xs) (tl xs)
-        , b ==> res :=: cons x nil
-        , Not b /\ x .<. hd xs       ==> res :=: cons x (xs)
-        , Not b /\ Not (x .<. hd xs) ==> res :=: cons (hd xs) (ins x (tl xs))
-        , rec
-        ]
+len :: Term -> N Term
+len xs =
+    define ("len" :$ [xs]) "r" $ listCase' xs
+        (return 0)
+        (\ _ t -> (1 +) <$> len t)
 
-genISort :: [Form] -> Fuel -> Term -> U Form
-genISort ctx Z     _  = return (impossible ctx)
-genISort ctx (S n) xs = do
-    b   <- Term <$> newVar "b"
-    res <- newVar "l"
-    rec1 <- genISort (Not b:ctx) n (tl xs)
-    rec2 <- genIns (Not b:ctx) n (hd xs) (isort (tl xs))
-    return $ And
-        [ isort xs :=: res
-        , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons (hd xs) (tl xs)
-        , b     ==> res :=: nil
-        , Not b ==> res :=: ins (hd xs) (isort (tl xs))
-        , rec1
-        , rec2
-        ]
+app :: Term -> Term -> N Term
+app xs ys =
+    define ("app" :$ [xs,ys]) "l" $ listCase' xs
+        (return ys)
+        (\ h t -> cons h <$> app t ys)
 
-genMerge :: [Form] -> Fuel -> Term -> Term -> U Form
-genMerge ctx Z     _  _  = return (impossible ctx)
-genMerge ctx (S n) xs ys = do
-    b   <- Term <$> newVar "b"
-    c   <- Term <$> newVar "b"
-    res <- newVar "l"
-    l1  <- newVar "l"
-    l2  <- newVar "l"
-    rec <- genMerge (Not b:Not c:ctx) n l1 l2
-    return $ And
-        [ merge xs ys :=: res
-        , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons (hd xs) (tl xs)
-        , c     <==> ys :=: nil
-        , Not c <==> ys :=: cons (hd ys) (tl ys)
-        , b     ==> res :=: ys
-        , Not b /\ c ==> res :=: xs
-        , Not b /\ Not c /\      hd xs .<. hd ys  ==> l1 :=: tl xs /\ l2 :=: ys /\ res :=: cons (hd xs) (merge l1 l2)
-        , Not b /\ Not c /\ Not (hd xs .<. hd ys) ==> l1 :=: xs /\ l2 :=: tl ys /\ res :=: cons (hd ys) (merge l1 l2)
-        , rec
-        ]
+rev :: Term -> N Term
+rev xs =
+    define ("rev" :$ [xs]) "l" $ listCase' xs
+        (return nil)
+        (\ h t -> do
+            r <- rev t
+            app r (cons h nil))
 
-{-
-genMerge :: [Form] -> Fuel -> Term -> Term -> U Form
-genMerge ctx Z     _  _  = return (impossible ctx)
-genMerge ctx (S n) xs ys = do
-    b   <- Term <$> newVar "b"
-    c   <- Term <$> newVar "b"
-    res <- newVar "l"
-    rec1 <- genMerge (Not b:Not c:ctx) n (tl xs) ys
-    rec2 <- genMerge (Not b:Not c:ctx) n xs (tl ys)
-    return $ And
-        [ merge xs ys :=: res
-        , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons (hd xs) (tl xs)
-        , c     <==> ys :=: nil
-        , Not c <==> ys :=: cons (hd ys) (tl ys)
-        , b     ==> res :=: ys
-        , Not b /\ c ==> res :=: xs
-        , Not b /\ Not c /\      hd xs .<. hd ys  ==> res :=: cons (hd xs) (merge (tl xs) ys)
-        , Not b /\ Not c /\ Not (hd xs .<. hd ys) ==> res :=: cons (hd ys) (merge xs (tl ys))
-        , rec1
-        , rec2
-        ]
--}
+qrev :: Term -> Term -> N Term
+qrev xs ys =
+    define ("qrev" :$ [xs,ys]) "l" $ listCase' xs
+        (return ys)
+        (\ h t -> do
+            qrev t (cons h ys))
 
-genEvens :: [Form] -> Fuel -> Term -> U Form
-genEvens ctx Z     _  = return (impossible ctx)
-genEvens ctx (S n) xs = do
-    b   <- Term <$> newVar "b"
-    res <- newVar "l"
-    rec <- genOdds (Not b:ctx) n (tl xs)
-    return $ And
-        [ evens xs :=: res
-        , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons (hd xs) (tl xs)
-        , b     ==> res :=: nil
-        , Not b ==> res :=: cons (hd xs) (odds (tl xs))
-        , rec
-        ]
 
-genOdds :: [Form] -> Fuel -> Term -> U Form
-genOdds ctx Z     _  = return (impossible ctx)
-genOdds ctx (S n) xs = do
-    b   <- Term <$> newVar "b"
-    res <- newVar "l"
-    rec <- genEvens (Not b:ctx) n (tl xs)
-    return $ And
-        [ odds xs :=: res
-        , b     <==> xs :=: nil
-        , Not b <==> xs :=: cons (hd xs) (tl xs)
-        , b     ==> res :=: nil
-        , Not b ==> res :=: evens (tl xs)
-        , rec
-        ]
+ins :: Term -> Term -> N Term
+ins x xs = do
+    define ("ins" :$ [x,xs]) "l" $ \ res -> listCase xs
+        (equal res (cons x nil))
+        (\ h t -> do
+            withContext (x .<. h) (equal res (cons x xs))
+            withContext (Not (x .<. h)) $ do
+                tl <- ins x t
+                equal res (cons h tl))
 
-genMSort :: [Form] -> Fuel -> Term -> U Form
-genMSort ctx Z     _  = return (impossible ctx)
-genMSort ctx (S n) xs = do
-    b   <- Term <$> newVar "b"
-    c   <- Term <$> newVar "b"
-    res <- newVar "l"
-    t   <- newVar "l"
-    rec1 <- genMSort (Not b:Not c:ctx) n (evens xs)
-    rec2 <- genMSort (Not b:Not c:ctx) n (odds xs)
-    rec3 <- genMerge (Not b:Not c:ctx) n (msort (evens xs)) (msort (odds xs))
-    rec4 <- genEvens (Not b:Not c:ctx) n xs
-    rec5 <- genOdds  (Not b:Not c:ctx) n xs
-    return $ And
-        [ msort xs :=: res
-        , b              <==> xs :=: nil
-        , Not b /\ c     <==> xs :=: cons (hd xs) nil
-        , Not b /\ Not c <==> xs :=: cons (hd xs) t /\ t :=: cons (hd t) (tl t)
-        , b              ==> res :=: nil
-        , Not b /\ c     ==> res :=: xs
-        , Not b /\ Not c ==> res :=: merge (msort (evens xs)) (msort (odds xs))
-        , rec1
-        , rec2
-        , rec3
-        , rec4
-        , rec5
-        ]
+isort :: Term -> N Term
+isort xs = do
+    define ("isort" :$ [xs]) "l" $ listCase' xs
+        (return nil)
+        (\ h t -> ins h =<< isort t)
+
+merge :: Term -> Term -> N Term
+merge xs ys =
+    define ("merge" :$ [xs,ys]) "l" $ \ res -> listCase xs
+        (equal res ys)
+        (\ x xs_tail -> listCase ys
+            (equal res xs)
+            (\ y ys_tail -> do
+                l1  <- newVar "l"
+                l2  <- newVar "l"
+                rec <- merge l1 l2
+                withContext (x .<. y)       (assert $ l1 :=: xs_tail /\ l2 :=: ys /\ res :=: cons x rec)
+                withContext (Not (x .<. y)) (assert $ l1 :=: xs /\ l2 :=: ys_tail /\ res :=: cons y rec)))
+
+merge_slow :: Term -> Term -> N Term
+merge_slow xs ys =
+    define ("merge" :$ [xs,ys]) "l" $ \ res -> listCase xs
+        (equal res ys)
+        (\ x xs_tail -> listCase ys
+            (equal res xs)
+            (\ y ys_tail -> do
+                withContext (x .<. y)       $ do equal res . cons x =<< merge_slow xs_tail ys
+                withContext (Not (x .<. y)) $ do equal res . cons y =<< merge_slow xs ys_tail))
+
+evens :: Term -> N Term
+evens xs =
+    define ("evens" :$ [xs]) "l" $ listCase' xs
+        (return nil)
+        (\ h t -> cons h <$> odds t)
+
+odds :: Term -> N Term
+odds xs =
+    define ("odds" :$ [xs]) "l" $ listCase' xs
+        (return nil)
+        (\ _ t -> evens t)
+
+msort :: Term -> N Term
+msort xs =
+    define ("msort" :$ [xs]) "l" $ \ res -> listCase xs
+        (equal res xs)
+        (\ x xs_tail -> listCase xs_tail
+            (equal res xs)
+            (\ y ys_tail -> do
+                l1 <- msort =<< evens xs
+                l2 <- msort =<< odds xs
+                equal res =<< merge l1 l2))
+
+msort_slow :: Term -> N Term
+msort_slow xs =
+    define ("msort" :$ [xs]) "l" $ \ res -> listCase xs
+        (equal res xs)
+        (\ x xs_tail -> listCase xs_tail
+            (equal res xs)
+            (\ y ys_tail -> do
+                l1 <- msort_slow =<< evens xs
+                l2 <- msort_slow =<< odds xs
+                equal res =<< merge_slow l1 l2))
 
 
 -- pretty printing --
@@ -622,11 +439,13 @@ d1 $\ d2 = hang d1 2 d2
 
 ppForm :: Form -> Doc
 ppForm f0 = case f0 of
+    Or  []       -> "false"
     Or  fs       -> parens ("or" $\ sep (map ppForm fs))
+    And []       -> "true"
     And fs       -> parens ("and" $\ sep (map ppForm fs))
     Not f        -> parens ("not" $\ ppForm f)
     t1 :=: t2    -> parens ("=" $\ sep (map ppTerm [t1,t2]))
-    f1 :<==>: f2 -> parens ("=" $\ sep (map ppForm [f1,f2]))
+    f1 :<==>: f2 -> parens ("<=>" $\ sep (map ppForm [f1,f2]))
     f1 :==> f2   -> parens ("=>" $\ sep (map ppForm [f1,f2]))
     Term t       -> ppTerm t
 
