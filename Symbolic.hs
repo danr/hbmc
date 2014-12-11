@@ -6,6 +6,7 @@ module Symbolic
   
   , Choice(..), Equal(..), Value(..), Traceable(..)
   , equal
+  , align
   
   , Bit(..)
   , newBit, ff, tt, nt, andl, orl, addClause, (==>)
@@ -13,7 +14,7 @@ module Symbolic
   , Lift(..)
   
   , Val
-  , val, domain, newVal, (=?), oneof, choose
+  , val, domain, newVal, (=?), oneof, choose, (<&&), vmap, cross
   
   , Nat
   , newNat
@@ -280,6 +281,31 @@ instance Value a => Value (One a) where
 
 --------------------------------------------------------------------------------
 
+-- static length lists
+instance Choice a => Choice [a] where
+  iff c [] [] =
+    do return []
+
+  iff c (x:xs) (y:ys) =
+    do z <- iff c x y
+       zs <- iff c xs ys
+       return (z:zs)
+  
+  iff c _ _ =
+    error "iff: lists do not match up"
+
+instance Equal a => Equal [a] where
+  equalStruct []     []     = equalStruct () ()
+  equalStruct (x:xs) (y:ys) = equalStruct (x,xs) (y,ys)
+  equalStruct _      _      = error "equal: lists do not match up"
+
+instance Value a => Value [a] where
+  type Type [a] = [Type a]
+  
+  get xs = sequence [ get x | x <- xs ]
+
+--------------------------------------------------------------------------------
+
 instance (Choice a, Choice b) => Choice (a,b) where
   iff c (x1,y1) (x2,y2) =
     do x <- iff c x1 x2
@@ -480,6 +506,19 @@ newVal xs =
        atMostOne (n-k+1) (nt a : drop k as)
    where
     k = n `div` 2
+
+vmap :: (a -> b) -> Val a -> Val b
+vmap f (Val xs) = Val [ (b, f x) | (b,x) <- xs ]
+
+cross :: Val a -> Val b -> H (Val (a,b))
+cross (Val xs) (Val ys) =
+  do xys <- sequence
+            [ do d <- andl [b,c]
+                 return (d,(x,y))
+            | (b,x) <- xs
+            , (c,y) <- ys
+            ]
+     return (Val xys)
 
 (<&&) :: Ord a => Val a -> Val a -> Val a
 Val xs <&& Val ys =
@@ -776,6 +815,7 @@ caseList (List d) nl cns =
 -}
 
 newtype Lazy a = Lazy (IORef (Either (H a) a))
+ deriving ( Eq )
 
 delay :: H a -> H (Lazy a)
 delay m =
@@ -795,6 +835,9 @@ force (Lazy ref) =
          do return a
 
 instance Choice a => Choice (Lazy a) where
+  iff _ la lb | la == lb =
+    do return la
+
   iff (Bool True) la lb =
     do return la
 
