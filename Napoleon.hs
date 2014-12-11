@@ -104,6 +104,17 @@ iTerm iVar tm0 = case tm0 of
 
 type Example = ([Term],Form)
 
+app_len :: Integer -> Example
+app_len size = runN size $ do
+    let xs = var "xs"
+    let ys = var "ys"
+    res <- app_contract xs ys
+    len_xs <- clen xs
+    len_ys <- ulen ys
+    len_res <- ulen res
+    assert (Not (len_res :=: (len_xs + len_ys)))
+    return [xs,ys]
+
 reversing :: Integer -> Example
 reversing size = runN (size + 1) $ do
     let xs = var "xs"
@@ -151,6 +162,9 @@ commutative f size = runN (size + 1) $ do
 
 main :: IO ()
 main = do
+    runExample (app_len 1)
+
+bla =
     sequence_
         [ timeIt $ do
             printf "%02d: " i
@@ -221,7 +235,7 @@ runExample (vars,form) = evalZ3 $ do
 
     let cong = congruences form
 
-    -- liftIO $ putStrLn (render (ppForm form))
+    liftIO $ putStrLn (render (ppForm form))
     -- liftIO $ putStrLn (render (ppForm cong))
 
     liftIO $ putStr "adding assertions... " >> hFlush stdout
@@ -234,7 +248,7 @@ runExample (vars,form) = evalZ3 $ do
 
     case mm of
         Just m  -> do
-            -- liftIO . putStrLn =<< showModel m
+            liftIO . putStrLn =<< showModel m
             forM_ vars $ \ v -> liftIO . print =<< get_list m v
             return ()
         Nothing -> return ()
@@ -316,11 +330,11 @@ listCase' xs mk_nil mk_cons res = listCase xs
     (mk_nil >>= \ tm -> equal res tm)
     (\ h t -> mk_cons h t >>= \ tm -> equal res tm)
 
-define :: Term -> String -> (Term -> N ()) -> N Term
-define tm r k = do
+define' :: Bool -> Term -> String -> (Term -> N ()) -> N Term
+define' b tm r k = do
     (ctx,fuel) <- ask
     if fuel <= 0
-        then impossible
+        then if b then impossible else return ()
         else do
             RWS.local (const (ctx,fuel-1)) $ do
                 res <- newVar r
@@ -328,17 +342,41 @@ define tm r k = do
                 k res
     return tm
 
-len :: Term -> N Term
-len xs =
-    define ("len" :$ [xs]) "r" $ listCase' xs
+define :: Term -> String -> (Term -> N ()) -> N Term
+define = define' True
+
+len' :: Bool -> Term -> N Term
+len' b xs =
+    define' b ("len" :$ [xs]) "r" $ listCase' xs
         (return 0)
-        (\ _ t -> (1 +) <$> len t)
+        (\ _ t -> (1 +) <$> len' b t)
+
+len :: Term -> N Term
+len = len' True
+
+clen :: Term -> N Term
+clen x = len' False x
+
+ulen :: Term -> N Term
+ulen x = return ("len" :$ [x])
 
 app :: Term -> Term -> N Term
 app xs ys =
     define ("app" :$ [xs,ys]) "l" $ listCase' xs
         (return ys)
         (\ h t -> cons h <$> app t ys)
+
+app_contract :: Term -> Term -> N Term
+app_contract xs ys =
+    define' False ("app" :$ [xs,ys]) "l" $ listCase' xs
+        (return ys)
+        (\ h t -> do
+            res <- cons h <$> app_contract t ys
+            len_xs  <- ulen xs
+            len_ys  <- ulen ys
+            len_res <- ulen res
+            assert (len_res :=: (len_xs + len_ys))
+            return res)
 
 rev :: Term -> N Term
 rev xs =
