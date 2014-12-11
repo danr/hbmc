@@ -3,7 +3,8 @@ module Symbolic
   ( H -- :: Monad, Functor, Applicative
   , lift, peek, withSolver, withExtra, context, check, impossible, io
   , runH
-  
+  , escapeH, withSolverH -- for experts only
+
   , Choice(..), Equal(..), Value(..), Traceable(..)
   , equal
   , align
@@ -97,11 +98,19 @@ context = H (\_ ctx -> return (The ctx))
 
 runH :: H a -> IO (Lift a)
 runH m =
+  do (x,s) <- escapeH m
+     M.deleteSolver s
+     return x
+
+escapeH :: H a -> IO (Lift a,Solver)
+escapeH m =
   do s <- M.newSolver
      M.eliminate s True
      x <- run m s []
-     M.deleteSolver s
-     return x
+     return (x,s)
+
+withSolverH :: Solver -> H a -> IO (Lift a)
+withSolverH s m = run m s []
 
 --------------------------------------------------------------------------------
 
