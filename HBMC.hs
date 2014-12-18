@@ -44,12 +44,14 @@ trySolve :: H (Maybe Bool)
 trySolve =
   H $ \env -> 
     do ps <- readIORef (posts env)
-       putStrLn ("Trysolve: " ++ show (length ps) ++ " " ++ show (map fst (reverse ps)))
+       putStrLn ("Trysolve: " ++ show (length ps) ++ " " ++ show (map fst (reverse ps)) ++ "...")
+       putStrLn "Searching for real counter example..."
        b <- solveBit (sat env) ([ nt b | (b, _) <- ps ] ++ ctx env)
        if b then
          do return (Just True)
         else
-         do b <- solveBit (sat env) (ctx env)
+         do putStrLn "Searching for contradiction..."
+            b <- solveBit (sat env) (ctx env)
             if not b then
               do return (Just False)
              else
@@ -64,9 +66,11 @@ trySolve =
                        if b then localMin a ws' else return ws'
                
                in do a <- Lit `fmap` M.newLit (sat env)
+                     putStrLn "Finding expansion points..."
                      ws' <- localMin a ws
                      writeIORef (posts env) [ p | p@(b,_) <- ps, b `notElem` ws' ]
                      sequence_ [ m (Env (sat env) [] (posts env)) | (b,H m) <- ps, b `elem` ws' ]
+                     putStrLn ("Expanded " ++ show (length ws') ++ " points.")
                      return Nothing
               
               {-
@@ -511,23 +515,30 @@ main = run $
      xs <- new :: H (List Bit)
      ys <- new
      zs <- new
-     --xs <- newList 20 new :: H (List Bit)
-     --ys <- newList 20 new
+     --xs <- newList 50 new :: H (List Bit)
+     --ys <- newList 50 new
      --zs <- newList 20 new
-     xys <- new
-     yzs <- new
-     xyzs <- new
-     xyzs' <- new
+     --xys <- new
+     --yzs <- new
+     --xyzs <- new
+     --xyzs' <- new
      
-     p 20 xs
-     p 20 ys
-     p 20 zs
+     p 50 xs
+     p 50 ys
+     --p 20 zs
      
-     app xs ys xys
-     app xys zs xyzs
-     app ys zs yzs
-     app xs yzs xyzs'
-     notEqualHere xyzs xyzs'
+     --app xs ys xys
+     --app xys zs xyzs
+     --app ys zs yzs
+     --app xs yzs xyzs'
+     --notEqualHere xyzs xyzs'
+     
+     rs <- new
+     ssort xs rs
+     ssort ys rs
+     notEqualHere xs ys
+     rev xs zs
+     notEqualHere zs ys
      
      io $ putStrLn "Solving..."
      b <- solve
@@ -558,6 +569,36 @@ rev xs ys =
        do bs <- new
           rev as bs
           app bs (cons a nil) ys
+
+qrev xs ys zs =
+  do ifNil xs $
+       equalHere ys zs
+
+     ifCons xs $ \a as ->
+       qrev as (cons a ys) zs
+
+sinsert x xs zs =
+  do ifNil xs $
+       equalHere (cons x xs) zs
+       
+     ifCons xs $ \a as ->
+       do leq <- orl [nt x, a]
+          inContext leq $
+            equalHere (cons x xs) zs
+          inContext (nt leq) $
+            do ws <- new
+               sinsert x as ws
+               equalHere (cons a ws) zs
+
+ssort xs zs =
+  do ifNil xs $
+       isNil zs $
+         return ()
+     
+     ifCons xs $ \a as ->
+       do ws <- new
+          ssort as ws
+          sinsert a ws zs
 
 p 0 xs = isNil xs $ return ()
 p k xs = ifCons xs $ \_ ys -> p (k-1) ys
