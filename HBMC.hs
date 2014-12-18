@@ -445,8 +445,7 @@ isCons (List c thk) h =
 
 newList :: Constructive a => Int -> H a -> H (List a)
 newList 0 m =
-  do thk <- new
-     return (List ff thk)
+  do return nil
 
 newList k m =
   do c <- new
@@ -462,11 +461,17 @@ instance Constructive a => Constructive (List a) where
 instance Equal a => Equal (List a) where
   equalOr xs (List c1 t1) (List c2 t2) =
     do equalOr xs c1 c2
-       equalOr (nt c1 : nt c2 : xs) t1 t2
+       if c1 == ff || c2 == ff then
+         return ()
+        else
+         equalOr (nt c1 : nt c2 : xs) t1 t2
 
   notEqualOr xs (List c1 t1) (List c2 t2) =
     do addClause (c1 : c2 : xs)
-       notEqualOr (nt c1 : nt c2 : xs) t1 t2
+       if c1 == ff || c2 == ff then
+         return ()
+        else
+         notEqualOr (nt c1 : nt c2 : xs) t1 t2
 
 {-
   equal xs ys =
@@ -502,20 +507,21 @@ instance Value a => Value (List a) where
 --------------------------------------------------------------------------------
 
 main = run $
-  do --xs <- new :: H (List Bit)
-     --ys <- new
-     --zs <- new
-     xs <- newList 10 new :: H (List Bit)
-     ys <- newList 10 new
-     zs <- newList 10 new
+  do io $ putStrLn "Generating problem..."
+     xs <- new :: H (List Bit)
+     ys <- new
+     zs <- new
+     --xs <- newList 20 new :: H (List Bit)
+     --ys <- newList 20 new
+     --zs <- newList 20 new
      xys <- new
      yzs <- new
      xyzs <- new
      xyzs' <- new
      
-     --p 10 xs
-     --p 10 ys
-     --p 10 zs
+     p 20 xs
+     p 20 ys
+     p 20 zs
      
      app xs ys xys
      app xys zs xyzs
@@ -523,6 +529,7 @@ main = run $
      app xs yzs xyzs'
      notEqualHere xyzs xyzs'
      
+     io $ putStrLn "Solving..."
      b <- solve
      io $ print b
      if b then
