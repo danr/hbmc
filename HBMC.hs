@@ -185,10 +185,6 @@ instance Equal Bit where
   equalOr xs x y
     | x == y    = return ()
     | x == nt y = addClause xs
-    | x == tt   = addClause (y:xs)
-    | x == ff   = addClause (nt y:xs)
-    | y == tt   = addClause (x:xs)
-    | y == ff   = addClause (nt x:xs)
     | otherwise = do addClause ([nt x, y] ++ xs)
                      addClause ([nt y, x] ++ xs)
 
