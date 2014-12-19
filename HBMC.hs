@@ -440,79 +440,94 @@ instance Value a => Value (List a) where
 
 --------------------------------------------------------------------------------
 
-newtype Nat = Nat{ bits :: List Bit }
+data Fun a b = Fun (List (a,b)) b
+
+apply :: (Equal a, Equal b) => Fun a b -> a -> b -> H ()
+apply (Fun xys d) x y =
+  do ifNil xys $
+       equalHere y d
+     
+     ifCons xys $ \(a,b) abs ->
+       do q <- equal a x
+          inContext q $
+            equalHere b y
+          inContext (nt q) $
+            apply (Fun abs d) x y
+
+instance (Constructive a, Constructive b) => Constructive (Fun a b) where
+  new =
+    do (xys,d) <- new
+       return (Fun xys d)
+
+instance (Value a, Value b) => Value (Fun a b) where
+  type Type (Fun a b) = ([(Type a, Type b)], Type b)
+
+  get (Fun xys y) = get (xys,y)
+
+--------------------------------------------------------------------------------
+
+data Nat = Nat Bit (Thunk Nat)
 
 nat :: Integer -> Nat
-nat 0 = Nat nil
-nat n = Nat (cons (if even n then ff else tt) (bits (nat (n `div` 2))))
+nat 0 = Nat ff (error "0 /= 1")
+nat n = Nat tt (this (nat (n-1)))
 
-instance Equal Nat where
-  equalOr xs (Nat (List c1 t1)) (Nat (List c2 t2)) =
-    if c1 == ff && c2 == ff then
-      return ()
-     else
-      do p1 <- div2 c1 t1
-         p2 <- div2 c2 t2
-         equalOr xs p1 p2
-   where
-    div2 c t =
-      do (a,as) <- new
-         
-         inContext (nt c) $
-           do addClause (nt a : c : xs)
-              equalOr (c:xs) as nil
+ifZero :: Nat -> H () -> H ()
+ifZero (Nat c _) h =
+  do inContext (nt c) h
 
-         inContext c $
-           do (b,bs) <- force t
-              equalOr (nt c:xs) a b
-              equalOr (nt c:xs) as bs
-         
-         return (a,as)
-              
-  notEqualOr xs (Nat (List c1 t1)) (Nat (List c2 t2)) =
-    if c1 == ff && c2 == ff then
-      addClause xs
-     else
-      do p1 <- div2 c1 t1
-         p2 <- div2 c2 t2
-         notEqualOr xs p1 p2
-   where
-    div2 c t =
-      do (a,as) <- new
-         
-         inContext (nt c) $
-           do addClause (nt a : c : xs)
-              equalOr (c:xs) as nil
+ifSucc :: Nat -> (Nat -> H ()) -> H ()
+ifSucc (Nat c thk) h =
+  do block c thk h
 
-         inContext c $
-           do (b,bs) <- force t
-              equalOr (nt c:xs) a b
-              equalOr (nt c:xs) as bs
-         
-         return (a,as)
+isZero :: Nat -> H () -> H ()
+isZero (Nat c _) h =
+  do here [nt c]
+     inContext (nt c) h
 
---leqOr :: [Bit] -> Nat -> Nat -> H ()
---leqOr xs 
+isSucc :: Nat -> (Nat -> H ()) -> H ()
+isSucc (Nat c thk) h =
+  do here [c]
+     inContext c $
+       h =<< force thk
 
 instance Constructive Nat where
-  new = Nat `fmap` new
+  new = do c   <- new
+           thk <- new
+           return (Nat c thk)
+
+instance Equal Nat where
+  equalOr xs (Nat c1 t1) (Nat c2 t2) =
+    do equalOr xs c1 c2
+       if c1 == ff || c2 == ff then
+         return ()
+        else
+         equalOr (nt c1 : nt c2 : xs) t1 t2
+
+  notEqualOr xs (Nat c1 t1) (Nat c2 t2) =
+    do addClause (c1 : c2 : xs)
+       if c1 == ff || c2 == ff then
+         return ()
+        else
+         notEqualOr (nt c1 : nt c2 : xs) t1 t2
 
 instance Value Nat where
   type Type Nat = Integer
   
-  get (Nat xs) =
-    do bs <- get xs
-       return (val bs)
-   where
-    val []     = 0
-    val (b:bs) = (if b then 1 else 0) + 2 * val bs
+  get (Nat c thk) =
+    do b <- get c
+       if b then
+         do Just n <- get thk
+            return (n+1)
+        else
+         do return 0
 
 --------------------------------------------------------------------------------
 
 main = run $
   do io $ putStrLn "Generating problem..."
-     xs <- new :: H (List Nat)
-     ys <- new
+     --xs <- new :: H (List Nat)
+     --ys <- new
      --zs <- new
      --xs <- newList 50 new :: H (List Bit)
      --ys <- newList 50 new
@@ -540,12 +555,27 @@ main = run $
      --app xs ys zs
      --notEqualHere xs ys
      
+     xs <- new :: H (List Nat)
+     ys <- new
      snub xs xs
-     rev xs ys
-     notEqualHere xs ys
-     ifCons xs $ \a as ->
-       ifCons as $ \b bs ->
-         notEqualHere ys (cons b (cons a bs))
+     f <- new
+     smap f xs ys
+     equalHere ys (cons (nat 1) (cons (nat 2) (cons (nat 3) nil)))
+     let see = ((xs, ys), f)
+     
+     --xs <- new :: H (List Nat)
+     --snub xs xs
+     --isCons xs $ \_ as ->
+     --  isCons as $ \_ bs ->
+     --    isCons bs $ \_ cs ->
+     --      isCons cs $ \_ _ -> return ()
+     --let see = xs
+     
+     --n <- new :: H Nat
+     --m <- new
+     --notEqualHere n m
+     --equalHere n m
+     --let see = (n,m)
      
      --rs <- new
      --ssort xs rs
@@ -560,9 +590,7 @@ main = run $
      b <- solve
      io $ print b
      if b then
-       do as <- get xs
-          bs <- get ys
-          io $ print (as,bs)
+       do get see >>= (io . print)
       else
        do return ()
 
@@ -646,9 +674,7 @@ sdelete x xs zs =
 p 0 l xs = isNil xs $ return ()
 p k l xs = ifCons xs $ \y ys -> do l y; p (k-1) l ys
 
-{-
-map :: Fun a b -> List a -> List b -> H ()
-map f xs zs =
+smap f xs zs =
   do ifNil xs $
        isNil zs $
          return ()
@@ -656,6 +682,5 @@ map f xs zs =
      ifCons xs $ \y ys ->
        isCons zs $ \v vs ->
          do apply f y v
-            map f ys vs
--}
+            smap f ys vs
 
