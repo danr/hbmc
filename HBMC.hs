@@ -441,6 +441,11 @@ instance Value a => Value (List a) where
 --------------------------------------------------------------------------------
 
 data Fun a b = Fun (List (a,b)) b
+data Table a b = Table [(a,b)] b
+
+instance (Show a, Show b) => Show (Table a b) where
+  show (Table xys d) = "{" ++ concat (intersperse "," ([ show x ++ "->" ++ show y | (x,y) <- xys ]
+                           ++ ["_->" ++ show d])) ++ "}"
 
 apply :: (Equal a, Equal b) => Fun a b -> a -> b -> H ()
 apply (Fun xys d) x y =
@@ -460,9 +465,12 @@ instance (Constructive a, Constructive b) => Constructive (Fun a b) where
        return (Fun xys d)
 
 instance (Value a, Value b) => Value (Fun a b) where
-  type Type (Fun a b) = ([(Type a, Type b)], Type b)
+  type Type (Fun a b) = Table (Type a) (Type b)
 
-  get (Fun xys y) = get (xys,y)
+  get (Fun xys y) =
+    do abs <- get xys
+       d <- get y
+       return (Table abs d)
 
 --------------------------------------------------------------------------------
 
@@ -517,8 +525,10 @@ instance Value Nat where
   get (Nat c thk) =
     do b <- get c
        if b then
-         do Just n <- get thk
-            return (n+1)
+         do mn <- get thk
+            case mn of
+              Just n  -> return (n+1)
+              Nothing -> return 1
         else
          do return 0
 
@@ -526,11 +536,11 @@ instance Value Nat where
 
 main = run $
   do io $ putStrLn "Generating problem..."
-     --xs <- new :: H (List Nat)
+     xs <- new :: H (List Bit)
      --ys <- new
      --zs <- new
-     --xs <- newList 50 new :: H (List Bit)
-     --ys <- newList 50 new
+     --xs <- newList 20 new :: H (List Bit)
+     --ys <- newList 20 new
      --zs <- newList 20 new
      --xys <- new
      --yzs <- new
@@ -541,9 +551,9 @@ main = run $
      --p 10 (p 1 (\_ -> return ()) . bits) ys
      --p 10 (p 1 (\_ -> return ()) . bits) zs
 
-     --p 10 (\_ -> return ()) xs
-     --p 10 (\_ -> return ()) ys
-     --p 10 (\_ -> return ()) zs
+     --p 20 (\_ -> return ()) xs
+     --p 20 (\_ -> return ()) ys
+     --p 20 (\_ -> return ()) zs
      
      --app xs ys xys
      --app xys zs xyzs
@@ -555,21 +565,40 @@ main = run $
      --app xs ys zs
      --notEqualHere xs ys
      
-     xs <- new :: H (List Nat)
-     ys <- new
-     snub xs xs
-     f <- new
-     smap f xs ys
-     equalHere ys (cons (nat 1) (cons (nat 2) (cons (nat 3) nil)))
-     let see = ((xs, ys), f)
-     
      --xs <- new :: H (List Nat)
+     --ys <- new
      --snub xs xs
+     --f <- new
+     --smap f xs ys
+     --rev xs ys
+     --let see = ((xs, ys), f)
+     
+     --f <- new
+     --p <- new
+     --xs <- new :: H (List Nat)
      --isCons xs $ \_ as ->
      --  isCons as $ \_ bs ->
      --    isCons bs $ \_ cs ->
      --      isCons cs $ \_ _ -> return ()
-     --let see = xs
+     --snub xs xs
+     --fxs <- new
+     --smap f xs fxs
+     --rs1 <- new
+     --sfilter p fxs rs1
+     --pxs <- new
+     --sfilter p xs pxs
+     --rs2 <- new
+     --smap f pxs rs2
+     --notEqualHere rs1 rs2
+     --let see = ((f,p),xs)
+     
+     xs <- new :: H (List Bit)
+     snub xs xs
+     isCons xs $ \_ as ->
+       isCons as $ \_ bs ->
+         isCons bs $ \_ cs -> return ()
+     --      isCons cs $ \_ _ -> return ()
+     let see = xs
      
      --n <- new :: H Nat
      --m <- new
@@ -683,4 +712,23 @@ smap f xs zs =
        isCons zs $ \v vs ->
          do apply f y v
             smap f ys vs
+
+sfilter p xs zs =
+  do ifNil xs $
+       isNil zs $
+         return ()
+     
+     ifCons xs $ \a as ->
+       do q <- new
+          apply p a q
+          rs <- new
+          sfilter p as rs
+          inContext (nt q) $
+            equalHere rs zs
+          inContext q $
+            isCons zs $ \b bs ->
+              do equalHere a b
+                 equalHere bs rs 
+
+
 
