@@ -44,7 +44,7 @@ trySolve :: H (Maybe Bool)
 trySolve =
   H $ \env -> 
     do ps <- readIORef (posts env)
-       putStrLn ("Trysolve: " ++ show (length ps) ++ " " ++ show (map fst (reverse ps)) ++ "...")
+       putStrLn ("==> Try solve with " ++ show (length ps) ++ " points...")
        putStrLn "Searching for real counter example..."
        b <- solveBit (sat env) ([ nt b | (b, _) <- ps ] ++ ctx env)
        if b then
@@ -55,52 +55,28 @@ trySolve =
             if not b then
               do return (Just False)
              else
-              let ws = nub [ b | (b,_) <- ps ]
-              
-                  localMin a ws =
-                    do bws <- sequence [ do b <- modelValue' (sat env) w; return (b,w) | w <- ws ]
-                       sequence_ [ addClause' (sat env) [nt a, nt w] | (False,w) <- bws ]
-                       let ws' = [ w | (True,w) <- bws ]
-                       addClause' (sat env) (nt a : map nt ws')
-                       b <- solveBit (sat env) (a : ctx env)
-                       if b then localMin a ws' else return ws'
-               
-               in do a <- Lit `fmap` M.newLit (sat env)
-                     putStrLn "Finding expansion points..."
-                     ws' <- localMin a ws
-                     writeIORef (posts env) [ p | p@(b,_) <- ps, b `notElem` ws' ]
-                     sequence_ [ m (Env (sat env) [] (posts env)) | (b,H m) <- ps, b `elem` ws' ]
-                     putStrLn ("Expanded " ++ show (length ws') ++ " points.")
-                     return Nothing
-              
-              {-
-              do bps <- sequence [ do b <- modelValue' (sat env) l; return (b,p) | p@(l,_) <- reverse ps ]
-                 let ps1 = map snd $ takeWhile (not . fst) bps
-                     ps2 = map snd $ dropWhile (not . fst) bps
-                     (_,H m) = head ps2
-                 writeIORef (posts env) (reverse (ps1 ++ tail ps2))
-                 m (Env (sat env) [] (posts env))
-                 return Nothing
-              -}
-              {-
-              let find qs (p@(a,H m):ps) =
-                    do b <- solveBit (sat env) (nt a : [ nt b | (b,_) <- qs ] ++ ctx env)
-                       if b then
-                         do find (p:qs) ps
-                        else
-                         do writeIORef (posts env) (reverse ps ++ qs)
-                            m (Env (sat env) [] (posts env))
-                            return Nothing
-
-               in find [] (reverse ps)
-               -}
- where
-  modelValue' s (Bool b) = return b
-  modelValue' s (Lit x)  = do Just b <- M.modelValue s x
-                              return b
-  
-  addClause' s xs | tt `elem` xs = return ()
-                  | otherwise    = M.addClause s [ x | Lit x <- xs ] >> return ()
+              do putStrLn "Finding expansion points..."
+                 let find (w:ws) =
+                       do b <- solveBit (sat env) [w]
+                          if not b then
+                            do putStrLn "Thrown away a point!"
+                               find ws
+                           else
+                            let musts w ws =
+                                  do b <- solveBit (sat env) (w : [ nt w | w <- ws ])
+                                     if b then
+                                       do return []
+                                      else
+                                       do cfl <- M.conflict (sat env)
+                                          let v = Lit $ head [ w | Lit w <- ws, w `elem` cfl ]
+                                          vs <- musts w (filter (/=v) ws)
+                                          return (v:vs)
+                             in do vs <- musts w ws
+                                   putStrLn ("Expanding " ++ show (length (w:vs)) ++ " points.")
+                                   writeIORef (posts env) [ p | p@(l,_) <- ps, l `notElem` (w:vs) ]
+                                   sequence_ [ m (env{ ctx = [] }) | (l,H m) <- ps, l `elem` (w:vs) ]
+                                   return Nothing
+                  in find (map fst (reverse ps))
   
 solve :: H Bool
 solve =
@@ -110,6 +86,7 @@ solve =
        Just b  -> return b
 
 postpone :: Bit -> H () -> H ()
+postpone b m | b == tt = io (putStrLn "Ha, postpone my ass!") >> m
 postpone b (H m) =
   inContext b $
     H $ \env ->
@@ -185,10 +162,6 @@ instance Equal Bit where
   equalOr xs x y
     | x == y    = return ()
     | x == nt y = addClause xs
-    | x == tt   = addClause (y:xs)
-    | x == ff   = addClause (nt y:xs)
-    | y == tt   = addClause (x:xs)
-    | y == ff   = addClause (nt x:xs)
     | otherwise = do addClause ([nt x, y] ++ xs)
                      addClause ([nt y, x] ++ xs)
 
@@ -339,73 +312,30 @@ instance Constructive a => Constructive (Thunk a) where
   new = delay new
 
 instance Equal a => Equal (Thunk a) where
--- {-
-  equalOr xs t1 t2 =
-    do ma <- peek t1
-       mb <- peek t2
-       case (ma, mb) of
-         (Nothing, Nothing) ->
-           do l <- newBit
-              addClause (l:xs)
-              postpone l $
-                do a <- force t1
-                   b <- force t2
-                   equalOr xs a b
-         
-         _ ->
-           do a <- force t1
-              b <- force t2
-              equalOr xs a b
+  equalOr    xs = zipThunk (newImpl xs) (equalOr xs)
+  notEqualOr xs = zipThunk (newImpl xs) (notEqualOr xs)
 
-  notEqualOr xs t1 t2 =
-    do ma <- peek t1
-       mb <- peek t2
-       case (ma, mb) of
-         (Nothing, Nothing) ->
-           do l <- newBit
-              addClause (l:xs)
-              postpone l $
-                do a <- force t1
-                   b <- force t2
-                   notEqualOr xs a b
-         
-         _ ->
-           do a <- force t1
-              b <- force t2
-              notEqualOr xs a b
--- -}
+newImpl [] = return tt
+newImpl xs = do l <- newBit
+                addClause (l:xs)
+                return l
 
-{-
-  equalOr xs t1 t2 =
-    do ma <- peek t1
-       mb <- peek t2
-       case (ma, mb) of
-         (Just a, Just b) ->
-           do equalOr xs a b
-         
-         _ ->
-           do l <- newBit
-              addClause (l:xs)
-              postpone l $
-                do a <- force t1
-                   b <- force t2
-                   equalOr xs a b
-
-  notEqualOr xs t1 t2 =
-    do ma <- peek t1
-       mb <- peek t2
-       case (ma, mb) of
-         (Just a, Just b) ->
-           do notEqualOr xs a b
-         
-         _ ->
-           do l <- newBit
-              addClause (l:xs)
-              postpone l $
-                do a <- force t1
-                   b <- force t2
-                   notEqualOr xs a b
--}
+zipThunk :: H Bit -> (a -> b -> H ()) -> Thunk a -> Thunk b -> H ()
+zipThunk cond f t1 t2 =
+  do ma <- peek t1
+     mb <- peek t2
+     case (ma, mb) of
+       (Nothing, Nothing) ->
+         do l <- cond
+            postpone l $
+              do a <- force t1
+                 b <- force t2
+                 f a b
+       
+       _ ->
+         do a <- force t1
+            b <- force t2
+            f a b
 
 instance Value a => Value (Thunk a) where
   type Type (Thunk a) = Maybe (Type a)
@@ -510,11 +440,80 @@ instance Value a => Value (List a) where
 
 --------------------------------------------------------------------------------
 
+newtype Nat = Nat{ bits :: List Bit }
+
+nat :: Integer -> Nat
+nat 0 = Nat nil
+nat n = Nat (cons (if even n then ff else tt) (bits (nat (n `div` 2))))
+
+instance Equal Nat where
+  equalOr xs (Nat (List c1 t1)) (Nat (List c2 t2)) =
+    if c1 == ff && c2 == ff then
+      return ()
+     else
+      do p1 <- div2 c1 t1
+         p2 <- div2 c2 t2
+         equalOr xs p1 p2
+   where
+    div2 c t =
+      do (a,as) <- new
+         
+         inContext (nt c) $
+           do addClause (nt a : c : xs)
+              equalOr (c:xs) as nil
+
+         inContext c $
+           do (b,bs) <- force t
+              equalOr (nt c:xs) a b
+              equalOr (nt c:xs) as bs
+         
+         return (a,as)
+              
+  notEqualOr xs (Nat (List c1 t1)) (Nat (List c2 t2)) =
+    if c1 == ff && c2 == ff then
+      addClause xs
+     else
+      do p1 <- div2 c1 t1
+         p2 <- div2 c2 t2
+         notEqualOr xs p1 p2
+   where
+    div2 c t =
+      do (a,as) <- new
+         
+         inContext (nt c) $
+           do addClause (nt a : c : xs)
+              equalOr (c:xs) as nil
+
+         inContext c $
+           do (b,bs) <- force t
+              equalOr (nt c:xs) a b
+              equalOr (nt c:xs) as bs
+         
+         return (a,as)
+
+--leqOr :: [Bit] -> Nat -> Nat -> H ()
+--leqOr xs 
+
+instance Constructive Nat where
+  new = Nat `fmap` new
+
+instance Value Nat where
+  type Type Nat = Integer
+  
+  get (Nat xs) =
+    do bs <- get xs
+       return (val bs)
+   where
+    val []     = 0
+    val (b:bs) = (if b then 1 else 0) + 2 * val bs
+
+--------------------------------------------------------------------------------
+
 main = run $
   do io $ putStrLn "Generating problem..."
-     xs <- new :: H (List Bit)
+     xs <- new :: H (List Nat)
      ys <- new
-     zs <- new
+     --zs <- new
      --xs <- newList 50 new :: H (List Bit)
      --ys <- newList 50 new
      --zs <- newList 20 new
@@ -523,9 +522,13 @@ main = run $
      --xyzs <- new
      --xyzs' <- new
      
-     p 50 xs
-     p 50 ys
-     --p 20 zs
+     --p 10 (p 1 (\_ -> return ()) . bits) xs
+     --p 10 (p 1 (\_ -> return ()) . bits) ys
+     --p 10 (p 1 (\_ -> return ()) . bits) zs
+
+     --p 10 (\_ -> return ()) xs
+     --p 10 (\_ -> return ()) ys
+     --p 10 (\_ -> return ()) zs
      
      --app xs ys xys
      --app xys zs xyzs
@@ -533,12 +536,25 @@ main = run $
      --app xs yzs xyzs'
      --notEqualHere xyzs xyzs'
      
-     rs <- new
-     ssort xs rs
-     ssort ys rs
+     --rev xs ys
+     --app xs ys zs
+     --notEqualHere xs ys
+     
+     snub xs xs
+     rev xs ys
      notEqualHere xs ys
-     rev xs zs
-     notEqualHere zs ys
+     ifCons xs $ \a as ->
+       ifCons as $ \b bs ->
+         notEqualHere ys (cons b (cons a bs))
+     
+     --rs <- new
+     --ssort xs rs
+     --ssort ys rs
+     --notEqualHere xs ys
+     --notEqualHere xs rs
+     --notEqualHere ys rs
+     --rev xs zs
+     --notEqualHere zs ys
      
      io $ putStrLn "Solving..."
      b <- solve
@@ -547,7 +563,6 @@ main = run $
        do as <- get xs
           bs <- get ys
           io $ print (as,bs)
-          io $ print (as == bs)
       else
        do return ()
 
@@ -586,9 +601,9 @@ sinsert x xs zs =
           inContext leq $
             equalHere (cons x xs) zs
           inContext (nt leq) $
-            do ws <- new
-               sinsert x as ws
-               equalHere (cons a ws) zs
+            isCons zs $ \b bs ->
+              do sinsert x as bs
+                 equalHere a b
 
 ssort xs zs =
   do ifNil xs $
@@ -600,8 +615,36 @@ ssort xs zs =
           ssort as ws
           sinsert a ws zs
 
-p 0 xs = isNil xs $ return ()
-p k xs = ifCons xs $ \_ ys -> p (k-1) ys
+snub xs zs =
+  do ifNil xs $
+       isNil zs $
+         return ()
+     
+     ifCons xs $ \a as ->
+       isCons zs $ \b bs ->
+         do cs <- new
+            sdelete a as cs
+            snub cs bs
+            equalHere a b
+
+sdelete x xs zs =
+  do ifNil xs $
+       isNil zs $
+         return ()
+     
+     ifCons xs $ \a as ->
+       do q <- equal x a
+          rs <- new
+          sdelete x as rs
+          inContext q $
+            equalHere rs zs
+          inContext (nt q) $
+            isCons zs $ \b bs ->
+              do equalHere a b
+                 equalHere bs rs 
+
+p 0 l xs = isNil xs $ return ()
+p k l xs = ifCons xs $ \y ys -> do l y; p (k-1) l ys
 
 {-
 map :: Fun a b -> List a -> List b -> H ()
