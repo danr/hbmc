@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances #-}
 module Main where
 
 import Control.Applicative
@@ -342,180 +342,256 @@ instance Value a => Value (Thunk a) where
 
 --------------------------------------------------------------------------------
 
-type List a = Thunk (L a)
-data L a    = L Bit (a, List a)
+newtype Val a = Val [(Bit,a)] -- sorted on a
+ deriving ( Eq, Ord )
 
-nil :: List a
-nil = this (L ff (error "nil"))
+instance Show a => Show (Val a) where
+  show (Val xs) = concat (intersperse "|" [ show x | (_,x) <- xs ])
 
-cons :: a -> List a -> List a
-cons x xs = this (L tt (x,xs))
+val :: a -> Val a
+val x = Val [(tt,x)]
 
-isNil :: List a -> H () -> H ()
-isNil xs h =
-  do L c _ <- force xs
-     must (nt c) $ h
+(=?) :: Eq a => Val a -> a -> Bit
+Val []         =? x  = ff
+Val ((a,y):xs) =? x
+  | x == y      = a
+  | otherwise   = Val xs =? x
 
-isCons :: List a -> (a -> List a -> H ()) -> H ()
-isCons xs h =
-  do L c ~(y,ys) <- force xs
-     must c $ h y ys
+domain :: Val a -> [a]
+domain (Val xs) = map snd xs
 
-instance Constructive a => Constructive (L a) where
-  new = do c   <- new
-           xxs <- new
-           return (L c xxs)
+newVal :: Ord a => [a] -> H (Val a)
+newVal xs =
+  do as <- lits (length ys)
+     return (Val (as `zip` ys))
+ where
+  ys = map head . group . sort $ xs
 
-instance Equal a => Equal (L a) where
-  equalHere (L c1 t1) (L c2 t2) =
-    do equalHere c1 c2
-       if c1 == ff || c2 == ff then
-         return ()
-        else
-         do x <- new
-            addClauseHere [nt c1, nt c2, x]
-            inContext x $ equalHere t1 t2
+  lits 1 =
+    do return [tt]
+
+  lits 2 =
+    do a <- newBit
+       return [a,nt a]
+
+  lits n =
+    do as <- sequence [ newBit | i <- [1..n] ]
+       addClause as
+       atMostOne n as
+       return as
+
+  atMostOne n as | n <= 5 =
+    do sequence_ [ addClause [nt x, nt y] | (x,y) <- pairs as ]
+   where
+    pairs (x:xs) = [ (x,y) | y <- xs ] ++ pairs xs
+    pairs _      = []
+
+  atMostOne n as =
+    do a <- newBit
+       atMostOne (k+1) (a : take k as)
+       atMostOne (n-k+1) (nt a : drop k as)
+   where
+    k = n `div` 2
+
+instance Ord a => Equal (Val a) where
+  equalHere (Val xs) (Val ys) = eq xs ys
+   where
+    eq [] ys = sequence_ [ addClauseHere [nt y] | (y,_) <- ys ]
+    eq xs [] = sequence_ [ addClauseHere [nt x] | (x,_) <- xs ]
+    eq ((x,a):xs) ((y,b):ys) =
+      case a `compare` b of
+        LT -> do addClauseHere [nt x]
+                 eq xs ((y,b):ys)
+        EQ -> do equalHere x y
+                 eq xs ys
+        GT -> do addClauseHere [nt y]
+                 eq ((x,a):xs) ys
   
-  notEqualHere (L c1 t1) (L c2 t2) =
-    do addClauseHere [c1, c2]
-       if c1 == ff || c2 == ff then
-         return ()
-        else
-         do x <- new
-            addClauseHere [nt c1, nt c2, x]
-            inContext x $ notEqualHere t1 t2
+  notEqualHere (Val xs) (Val ys) = neq xs ys
+   where
+    neq [] ys = return ()
+    neq xs [] = return ()
+    neq ((x,a):xs) ((y,b):ys) =
+      case a `compare` b of
+        LT -> do neq xs ((y,b):ys)
+        EQ -> do addClauseHere [nt x, nt y]
+                 neq xs ys
+        GT -> do neq ((x,a):xs) ys
   
-instance Value a => Value (L a) where
-  type Type (L a) = [Type a]
+instance Value (Val a) where
+  type Type (Val a) = a
   
-  dflt _ = []
+  dflt _ = error "no default value for Val" -- URK
   
-  get (L c xxs) =
-    do b <- get c
-       if b then
-         do (x,xs) <- get xxs
-            return (x:xs)
-        else
-         do return []
+  get (Val xs) =
+    do bs <- sequence [ get x | (x,_) <- xs ]
+       return (head [ a | (True,(_,a)) <- bs `zip` xs ])
 
 --------------------------------------------------------------------------------
 
-data N = N Bit Nat
-type Nat = Thunk N
+data Data c a = Con (Val c) a
 
-nat :: Integer -> Nat
-nat 0 = this (N ff undefined)
-nat n = this (N tt (nat (n-1)))
+con :: Ord c => c -> a -> Thunk (Data c a)
+con c a = this (Con (val c) a)
 
-isZero :: Nat -> H () -> H ()
-isZero n h =
-  do N c _ <- force n
-     must (nt c) $ h
+unr :: a 
+unr = error "UNR"
 
-isSucc :: Nat -> (Nat -> H ()) -> H ()
-isSucc n h =
-  do N c ~n' <- force n
-     must c $ h n'
+isCon :: Ord c => c -> Thunk (Data c a) -> (a -> H ()) -> H ()
+isCon c t h =
+  do Con vc a <- force t
+     let x = vc =? c
+     addClauseHere [x]
+     must x $ h a
 
-instance Constructive N where
-  new = do c <- new
-           n <- new
-           return (N c n)
+class Ord c => DataCon c where
+  constrs :: [c]
 
-instance Equal N where
-  equalHere (N c1 t1) (N c2 t2) =
+instance (DataCon c, Constructive a) => Constructive (Data c a) where
+  new = do vc <- newVal constrs
+           a  <- new
+           return (Con vc a)
+
+class DataCon c => DataEq c a where
+  equalCon    :: c -> a -> a -> H ()
+  notEqualCon :: c -> a -> a -> H ()
+
+instance DataEq c a => Equal (Data c a) where
+  equalHere (Con c1 x1) (Con c2 x2) =
     do equalHere c1 c2
-       if c1 == ff || c2 == ff then
-         return ()
-        else
-         do x <- new
-            addClauseHere [nt c1, nt c2, x]
-            inContext x $ equalHere t1 t2
-  
-  notEqualHere (N c1 t1) (N c2 t2) =
-    do addClauseHere [c1, c2]
-       if c1 == ff || c2 == ff then
-         return ()
-        else
-         do x <- new
-            addClauseHere [nt c1, nt c2, x]
-            inContext x $ notEqualHere t1 t2
-  
-instance Value N where
-  type Type N = Integer
+       choice
+         [ do addClauseHere [l1]
+              --addClauseHere [l2]
+              equalCon c x1 x2
+         | c <- constrs
+         , let l1 = c1 =? c
+               l2 = c2 =? c
+         , l1 /= ff
+         , l2 /= ff
+         ]
 
-  dflt _ = 0
-  
-  get (N c n) =
-    do b <- get c
-       if b then
-         do n' <- get n
-            return (n'+1)
-        else
-         do return 0
+  notEqualHere (Con c1 x1) (Con c2 x2) =
+    choice $
+      notEqualHere c1 c2
+    : [ do addClauseHere [l1]
+           addClauseHere [l2]
+           notEqualCon c x1 x2
+      | c <- constrs
+      , let l1 = c1 =? c
+            l2 = c2 =? c
+      , l1 /= ff
+      , l2 /= ff
+      ]
+
+getData :: (c -> a -> H b) -> b -> Thunk (Data c a) -> H b
+getData f d t =
+  do md <- peek t
+     case md of
+       Nothing -> return d
+       Just (Con c a) ->
+         do x <- get c
+            f x a
 
 --------------------------------------------------------------------------------
 
-data Tree a = Node a (Tree a) (Tree a) | Empty
+newtype List a = List (Thunk (Data L (a, List a)))
+ deriving ( Constructive, Equal )
+data L = Nil | Cons
  deriving ( Eq, Ord, Show )
 
-data T a = T Bit (a, (TREE a, TREE a))
-type TREE a = Thunk (T a)
+nil       = List (con Nil unr)
+cons x xs = List (con Cons (x, xs))
 
-empty :: TREE a
-empty = this (T ff undefined)
+isNil  (List xs) h = isCon Nil  xs $ \_ -> h
+isCons (List xs) h = isCon Cons xs $ \(a,as) -> h a as
 
-node :: a -> TREE a -> TREE a -> TREE a
-node x p q = this (T tt (x, (p, q)))
+instance DataCon L where
+  constrs = [Nil, Cons]
 
-isEmpty :: TREE a -> H () -> H ()
-isEmpty t h =
-  do T c _ <- force t
-     must (nt c) $ h
+instance Equal a => DataEq L (a, List a) where
+  equalCon Nil  _  _  = return ()
+  equalCon Cons a1 a2 = equalHere a1 a2
 
-isNode :: TREE a -> (a -> TREE a -> TREE a -> H ()) -> H ()
-isNode t h =
-  do T c ~(x,(p,q)) <- force t
-     must c $ h x p q
+  notEqualCon Nil  _  _  = addClauseHere []
+  notEqualCon Cons a1 a2 = notEqualHere a1 a2
 
-instance Constructive a => Constructive (T a) where
-  new = do c <- new
-           t <- new
-           return (T c t)
-
-instance Equal a => Equal (T a) where
-  equalHere (T c1 t1) (T c2 t2) =
-    do equalHere c1 c2
-       if c1 == ff || c2 == ff then
-         return ()
-        else
-         do x <- new
-            addClauseHere [nt c1, nt c2, x]
-            inContext x $ equalHere t1 t2
+instance Value a => Value (List a) where
+  type Type (List a) = [Type a]
   
-  notEqualHere (T c1 t1) (T c2 t2) =
-    do addClauseHere [c1, c2]
-       if c1 == ff || c2 == ff then
-         return ()
-        else
-         do x <- new
-            addClauseHere [nt c1, nt c2, x]
-            inContext x $ notEqualHere t1 t2
-  
-instance Value a => Value (T a) where
-  type Type (T a) = Tree (Type a)
+  dflt _ = []
 
-  dflt _ = Empty
+  get (List t) = getData f [] t
+   where
+    f Nil  _ = return []
+    f Cons a = do (x,xs) <- get a; return (x:xs)
+
+--------------------------------------------------------------------------------
+
+newtype Nat = Nat (Thunk (Data N Nat))
+ deriving ( Constructive, Equal )
+data N = Zero | Succ
+ deriving ( Eq, Ord, Show )
+
+nat 0 = Nat (con Zero unr)
+nat i = Nat (con Succ (nat (i-1)))
+
+isZero (Nat n) h = isCon Zero n $ \_ -> h
+isSucc (Nat n) h = isCon Succ n $ \n' -> h n'
+
+instance DataCon N where
+  constrs = [Zero, Succ]
+
+instance DataEq N Nat where
+  equalCon Zero _  _  = return ()
+  equalCon Succ n1 n2 = equalHere n1 n2
+
+  notEqualCon Zero _  _  = addClauseHere []
+  notEqualCon Succ n1 n2 = notEqualHere n1 n2
+
+instance Value Nat where
+  type Type Nat = Integer
   
-  get (T c ~(x,(p,q))) =
-    do b <- get c
-       if b then
-         do a <- get x
-            s <- get p
-            t <- get q
-            return (Node a s t)
-        else
-         do return Empty
+  dflt _ = 0
+
+  get (Nat t) = getData f 0 t
+   where
+    f Zero _ = return 0
+    f Succ a = do n <- get a; return (n+1)
+
+--------------------------------------------------------------------------------
+
+newtype Tree a = Tree (Thunk (Data T (a, (Tree a, Tree a))))
+ deriving ( Constructive, Equal )
+data T = Empty | Node
+ deriving ( Eq, Ord, Show )
+
+empty      = Tree (con Empty unr)
+node x p q = Tree (con Node (x, (p,q)))
+
+isEmpty (Tree t) h = isCon Empty t $ \_ -> h
+isNode  (Tree t) h = isCon Node  t $ \(a,(p,q)) -> h a p q
+
+instance DataCon T where
+  constrs = [Empty, Node]
+
+instance Equal a => DataEq T (a, (Tree a, Tree a)) where
+  equalCon Empty _  _  = return ()
+  equalCon Node  a1 a2 = equalHere a1 a2
+
+  notEqualCon Empty _  _  = addClauseHere []
+  notEqualCon Node  a1 a2 = notEqualHere a1 a2
+
+data Tr a = Emp | Nod a (Tr a) (Tr a) deriving ( Eq, Ord, Show )
+
+instance Value a => Value (Tree a) where
+  type Type (Tree a) = Tr (Type a)
+  
+  dflt _ = Emp
+
+  get (Tree t) = getData f Emp t
+   where
+    f Empty _ = return Emp
+    f Node  a = do (x,(p,q)) <- get a; return (Nod x p q)
 
 --------------------------------------------------------------------------------
 
@@ -545,7 +621,7 @@ main1 = run $
 
 main2 = run $
   do io $ putStrLn "Generating problem..."
-     t <- new :: H (TREE Nat)
+     t <- new :: H (Tree Nat)
      
      member (nat 5) t tt
      member (nat 17) t tt
