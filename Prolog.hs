@@ -123,6 +123,7 @@ addClauseHere xs =
      [c] ==> xs
 
 choice :: [H ()] -> H ()
+choice [h] = h
 choice hs =
   do xs <- sequence [ newBit | h <- hs ]
      addClauseHere xs
