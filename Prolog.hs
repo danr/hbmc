@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, RankNTypes #-}
 module Main where
 
 import Control.Applicative
@@ -163,6 +163,11 @@ class Equal a where
   notEqualHere x y =
     do q <- equal x y
        addClauseHere [nt q]
+
+equalPred :: Equal a => a -> a -> Bit -> H ()
+equalPred x y q =
+  do q' <- equal x y
+     equalHere q q'
 
 instance Equal () where
   equalHere    _ _ = return ()
@@ -403,7 +408,7 @@ instance Ord a => Equal (Val a) where
       case a `compare` b of
         LT -> do addClauseHere [nt x]
                  eq xs ((y,b):ys)
-        EQ -> do equalHere x y
+        EQ -> do addClauseHere [nt x, y]
                  eq xs ys
         GT -> do addClauseHere [nt y]
                  eq ((x,a):xs) ys
@@ -445,44 +450,48 @@ isCon c t h =
      addClauseHere [x]
      must x $ h a
 
-class Ord c => DataCon c where
+class Ord c => ConstructiveData c where
   constrs :: [c]
 
-instance (DataCon c, Constructive a) => Constructive (Data c a) where
+instance (ConstructiveData c, Constructive a) => Constructive (Data c a) where
   new = do vc <- newVal constrs
            a  <- new
            return (Con vc a)
 
-class DataCon c => DataEq c a where
-  equalCon    :: c -> a -> a -> H ()
-  notEqualCon :: c -> a -> a -> H ()
+class ConstructiveData c => EqualData c a where
+  equalData :: (forall x . Equal x => x -> x -> H ()) ->
+               [([c], a -> a -> H ())]
 
-instance DataEq c a => Equal (Data c a) where
+instance EqualData c a => Equal (Data c a) where
   equalHere (Con c1 x1) (Con c2 x2) =
     do equalHere c1 c2
-       choice
-         [ do addClauseHere [l1]
-              --addClauseHere [l2]
-              equalCon c x1 x2
-         | c <- constrs
-         , let l1 = c1 =? c
-               l2 = c2 =? c
-         , l1 /= ff
-         , l2 /= ff
+       sequence_
+         [ do x <- new
+              sequence_ [ addClauseHere [nt (c1 =? c), x] | c <- cs ]
+              inContext x (f x1 x2)
+         | (cs, f) <- equalData equalHere
+         , any (`elem` allcs) cs
          ]
+   where
+    allcs = domain c1 `intersect` domain c2
 
   notEqualHere (Con c1 x1) (Con c2 x2) =
-    choice $
-      notEqualHere c1 c2
-    : [ do addClauseHere [l1]
-           addClauseHere [l2]
-           notEqualCon c x1 x2
-      | c <- constrs
-      , let l1 = c1 =? c
-            l2 = c2 =? c
-      , l1 /= ff
-      , l2 /= ff
-      ]
+    choice
+    [ do notEqualHere c1 c2
+    , do equalHere c1 c2
+         let cases = [ (cs,f)
+                     | (cs, f) <- equalData notEqualHere
+                     , any (`elem` allcs) cs
+                     ]
+         xs <- sequence [ new | _ <- cases ]
+         sequence_ [ inContext x (f x1 x2) | (x,(_,f)) <- xs `zip` cases ]
+         sequence_
+           [ addClauseHere (nt (c1 =? c) : [ x | (x,(cs,_)) <- xs `zip` cases, c `elem` cs ]) 
+           | c <- allcs
+           ]
+     ]
+   where
+    allcs = domain c1 `intersect` domain c2
 
 getData :: (c -> a -> H b) -> b -> Thunk (Data c a) -> H b
 getData f d t =
@@ -506,15 +515,11 @@ cons x xs = List (con Cons (x, xs))
 isNil  (List xs) h = isCon Nil  xs $ \_ -> h
 isCons (List xs) h = isCon Cons xs $ \(a,as) -> h a as
 
-instance DataCon L where
+instance ConstructiveData L where
   constrs = [Nil, Cons]
 
-instance Equal a => DataEq L (a, List a) where
-  equalCon Nil  _  _  = return ()
-  equalCon Cons a1 a2 = equalHere a1 a2
-
-  notEqualCon Nil  _  _  = addClauseHere []
-  notEqualCon Cons a1 a2 = notEqualHere a1 a2
+instance Equal a => EqualData L (a, List a) where
+  equalData h = [([Cons], \t1 t2 -> h t1 t2)]
 
 instance Value a => Value (List a) where
   type Type (List a) = [Type a]
@@ -539,15 +544,11 @@ nat i = Nat (con Succ (nat (i-1)))
 isZero (Nat n) h = isCon Zero n $ \_ -> h
 isSucc (Nat n) h = isCon Succ n $ \n' -> h n'
 
-instance DataCon N where
+instance ConstructiveData N where
   constrs = [Zero, Succ]
 
-instance DataEq N Nat where
-  equalCon Zero _  _  = return ()
-  equalCon Succ n1 n2 = equalHere n1 n2
-
-  notEqualCon Zero _  _  = addClauseHere []
-  notEqualCon Succ n1 n2 = notEqualHere n1 n2
+instance EqualData N Nat where
+  equalData h = [([Succ], \t1 t2 -> h t1 t2)]
 
 instance Value Nat where
   type Type Nat = Integer
@@ -572,15 +573,11 @@ node x p q = Tree (con Node (x, (p,q)))
 isEmpty (Tree t) h = isCon Empty t $ \_ -> h
 isNode  (Tree t) h = isCon Node  t $ \(a,(p,q)) -> h a p q
 
-instance DataCon T where
+instance ConstructiveData T where
   constrs = [Empty, Node]
 
-instance Equal a => DataEq T (a, (Tree a, Tree a)) where
-  equalCon Empty _  _  = return ()
-  equalCon Node  a1 a2 = equalHere a1 a2
-
-  notEqualCon Empty _  _  = addClauseHere []
-  notEqualCon Node  a1 a2 = notEqualHere a1 a2
+instance Equal a => EqualData T (a, (Tree a, Tree a)) where
+  equalData h = [([Node], \t1 t2 -> h t1 t2)]
 
 data Tr a = Emp | Nod a (Tr a) (Tr a) deriving ( Eq, Ord, Show )
 
@@ -596,7 +593,45 @@ instance Value a => Value (Tree a) where
 
 --------------------------------------------------------------------------------
 
-main = main2
+newtype Expr = Expr (Thunk (Data E (Nat,(Expr,Expr))))
+ deriving ( Constructive, Equal )
+data E = Var | App | Lam
+ deriving ( Eq, Ord, Show )
+
+var x = Expr (con Var (x,unr))
+lam e = Expr (con Lam (unr,(e,unr)))
+p @ q = Expr (con App (unr,(p,q)))
+
+isVar (Expr t) h = isCon Var t $ \(x,_)     -> h x
+isLam (Expr t) h = isCon Lam t $ \(_,(e,_)) -> h e
+isApp (Expr t) h = isCon App t $ \(_,(p,q)) -> h p q
+
+instance ConstructiveData E where
+  constrs = [Var,App,Lam]
+
+instance EqualData E (Nat,(Expr,Expr)) where
+  equalData h =
+    [ ([Var],     \(x1,_)     (x2,_)     -> h x1 x2)
+    , ([Lam,App], \(_,(p1,_)) (_,(p2,_)) -> h p1 p2)
+    , ([App],     \(_,(_,q1)) (_,(_,q2)) -> h q1 q2)
+    ]
+
+data Exp = Vr Integer | Ap Exp Exp | Lm Exp deriving ( Eq, Ord, Show )
+
+instance Value Expr where
+  type Type Expr = Exp
+  
+  dflt _ = Vr 0
+
+  get (Expr t) = getData f (Vr 0) t
+   where
+    f Var (x,_)     = do n <- get x; return (Vr n)
+    f Lam (_,(e,_)) = do a <- get e; return (Lm a)
+    f App (_,(p,q)) = do (a,b) <- get (p,q); return (Ap a b)
+
+--------------------------------------------------------------------------------
+
+main = main1
 
 main1 = run $
   do io $ putStrLn "Generating problem..."
@@ -750,4 +785,5 @@ member x t w =
              ]
       ]
   ]
+
 
