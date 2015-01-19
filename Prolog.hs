@@ -55,29 +55,32 @@ trySolve =
             if not b then
               do return (Just False)
              else
-              do -- QUESTION: Should "here env" be assumed in the below calls to solve??
-                 putStrLn "Finding expansion points..."
-                 let find (w:ws) =
-                       do b <- solveBit (sat env) [w]
+              do putStrLn "Finding expansion points..."
+                 let find thr (w:ws) =
+                       do b <- solveBit (sat env) [here env, w]
                           if not b then
-                            do putStrLn "Thrown away a point!"
-                               find ws
+                            do find (thr+1) ws
                            else
                             let musts w ws =
-                                  do b <- solveBit (sat env) (w : [ nt w | w <- ws ])
+                                  do b <- solveBit (sat env) (here env : w : [ nt w | w <- ws ])
                                      if b then
                                        do return []
                                       else
                                        do cfl <- M.conflict (sat env)
-                                          let v = head [ w | w <- ws, w `elem` map Lit cfl || w == tt ]
-                                          vs <- musts w (filter (/=v) ws)
-                                          return (v:vs)
-                             in do vs <- musts w ws
+                                          let vs1 = [ w | w <- ws, w `elem` map Lit cfl || w == tt ]
+                                          vs2 <- musts w (filter (`notElem` vs1) ws)
+                                          return (vs1 ++ vs2)
+                             in do if thr > 0 then
+                                     putStrLn ("Thrown away " ++ show thr ++ " points.")
+                                    else
+                                     return ()
+                                   putStrLn "Found point; finding friends..."
+                                   vs <- musts w ws
                                    putStrLn ("Expanding " ++ show (length (w:vs)) ++ " points.")
-                                   writeIORef (posts env) [ p | p@(l,_) <- ps, l `notElem` (w:vs) ]
+                                   writeIORef (posts env) [ p | p@(l,_) <- ps, l `elem` ws, l `notElem` (w:vs) ]
                                    sequence_ [ m (env{ here = l }) | (l,H m) <- ps, l `elem` (w:vs) ]
                                    return Nothing
-                  in find (map fst (reverse ps))
+                  in find 0 (map fst (reverse ps))
   
 solve :: H Bool
 solve =
@@ -112,11 +115,6 @@ inContext :: Bit -> H () -> H ()
 inContext c _ | c == ff = return ()
 inContext c (H m) = H (\env -> m env{ here = c })
 
-must :: Bit -> H () -> H ()
-must x h =
-  do addClauseHere [x]
-     if x == ff then return () else h
-
 addClauseHere :: [Bit] -> H ()
 addClauseHere xs =
   do c <- context
@@ -127,7 +125,12 @@ choice [h] = h
 choice hs =
   do xs <- sequence [ newBit | h <- hs ]
      addClauseHere xs
-     sequence_ [ inContext x h | (x,h) <- xs `zip` hs ]
+     a <- context
+     sequence_ [ do inContext x (do addClauseHere [a]; h) | (x,h) <- xs `zip` hs ]
+
+ifThenElse :: Bit -> (H (), H ()) -> H ()
+ifThenElse b (yes,no) =
+  choice [ do addClauseHere [b]; yes, do addClauseHere [nt b]; no ]
 
 --------------------------------------------------------------------------------
 
@@ -204,6 +207,11 @@ instance Value () where
   type Type () = ()
   dflt _ = ()
   get  _ = return ()
+
+instance Value a => Value [a] where
+  type Type [a] = [Type a]
+  dflt _ = []
+  get xs = sequence [ get x | x <- xs ]
 
 instance (Value a, Value b) => Value (a,b) where
   type Type (a,b) = (Type a, Type b)
@@ -448,9 +456,9 @@ isCon c t h =
   do Con vc a <- force t
      let x = vc =? c
      addClauseHere [x]
-     must x $ h a
+     if x == ff then return () else h a
 
-class Ord c => ConstructiveData c where
+class (Show c, Ord c) => ConstructiveData c where
   constrs :: [c]
 
 instance (ConstructiveData c, Constructive a) => Constructive (Data c a) where
