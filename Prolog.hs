@@ -69,16 +69,19 @@ trySolve =
                                        do return []
                                       else
                                        do cfl <- M.conflict (sat env)
-                                          let v = head [ w | w <- ws, w `elem` map Lit cfl || w == tt ]
-                                          vs <- musts w (filter (/=v) ws)
-                                          return (v:vs)
+                                          let vs1 = [ w | w <- ws, w `elem` map Lit cfl || w == tt ]
+                                          vs2 <- musts w (filter (`notElem` vs1) ws)
+                                          return (vs1++vs2)
                              in do vs <- musts w ws
                                    putStrLn ("Expanding " ++ show (length (w:vs)) ++ " points.")
-                                   writeIORef (posts env) [ p | p@(l,_) <- ps, l `notElem` (w:vs) ]
-                                   sequence_ [ m (env{ here = l }) | (l,H m) <- ps, l `elem` (w:vs) ]
+                                   let rem = [ p | p@(l,_) <- ps, l `elem` ws, l `notElem` (w:vs) ]
+                                   writeIORef (posts env) rem
+                                   -- putStrLn ("Remaining points: " ++ show (length rem))
+                                   let expand = [ m (env{ here = l }) | (l,H m) <- ps, l `elem` (w:vs) ]
+                                   sequence_ expand
                                    return Nothing
                   in find (map fst (reverse ps))
-  
+
 solve :: H Bool
 solve =
   do mb <- trySolve
