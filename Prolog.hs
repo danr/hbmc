@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, RankNTypes #-}
-module Main where
+module Prolog where
 
 import Control.Applicative
 import Control.Monad
@@ -122,12 +122,19 @@ addClauseHere xs =
   do c <- context
      [c] ==> xs
 
+impossible :: H ()
+impossible = addClauseHere []
+
+noop :: a -> H ()
+noop _ = return ()
+
 choice :: [H ()] -> H ()
 choice [h] = h
 choice hs =
   do xs <- sequence [ newBit | h <- hs ]
      addClauseHere xs
-     sequence_ [ inContext x h | (x,h) <- xs `zip` hs ]
+     a <- context
+     sequence_ [ inContext x (do addClauseHere [a]; h) | (x,h) <- xs `zip` hs ]
 
 --------------------------------------------------------------------------------
 
@@ -306,6 +313,23 @@ instance Equal a => Equal (Thunk a) where
   equalHere    = zipThunk equalHere
   notEqualHere = zipThunk notEqualHere
 
+{-
+zipThunk :: (a -> b -> H ()) -> Thunk a -> Thunk b -> H ()
+zipThunk f t1 t2 =
+  do ma <- peek t1
+     mb <- peek t2
+     case (ma, mb) of
+       (Just a, Just b) ->
+         do f a b
+
+       _ ->
+         postpone $
+           do a <- force t1
+              b <- force t2
+              f a b
+              -}
+
+{-
 zipThunk :: (a -> b -> H ()) -> Thunk a -> Thunk b -> H ()
 zipThunk f t1 t2 =
   do ma <- peek t1
@@ -316,29 +340,27 @@ zipThunk f t1 t2 =
            do a <- force t1
               b <- force t2
               f a b
-       
+
        _ ->
          do a <- force t1
             b <- force t2
             f a b
+    -}
 
-{-
 zipThunk :: (a -> b -> H ()) -> Thunk a -> Thunk b -> H ()
 zipThunk f t1 t2 =
-  postpone $
     do a <- force t1
        b <- force t2
        f a b
--}
 
 instance Value a => Value (Thunk a) where
   type Type (Thunk a) = Type a
-  
+
   dflt x = dflt (unThunk x)
    where
     unThunk :: Thunk a -> a
     unThunk ~(This x) = x
-  
+
   get (This x)    = get x
   get (Delay ref) =
     do ema <- io $ readIORef ref
@@ -440,7 +462,7 @@ data Data c a = Con (Val c) a
 con :: Ord c => c -> a -> Thunk (Data c a)
 con c a = this (Con (val c) a)
 
-unr :: a 
+unr :: a
 unr = error "UNR"
 
 isCon :: Ord c => c -> Thunk (Data c a) -> (a -> H ()) -> H ()
