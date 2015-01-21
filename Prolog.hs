@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, RankNTypes #-}
-module Prolog where
+module Main where
 
 import Control.Applicative
 import Control.Monad
@@ -90,17 +90,14 @@ solve =
        Just b  -> return b
 
 postpone :: H () -> H ()
-postpone m =
+postpone h = h
+
+postponeReal :: H () -> H ()
+postponeReal m =
   H $ \env ->
     do ps <- readIORef (posts env)
        let p = (here env, m)
        writeIORef (posts env) (p:ps)
-
-check :: H () -> H ()
-check h =
-  do c <- context
-     b <- withSolver (\s -> solveBit s [c])
-     if b then h else return ()
 
 io :: IO a -> H a
 io m = H (\_ -> m)
@@ -284,7 +281,7 @@ solveBit s xs =
 
 --------------------------------------------------------------------------------
 
-data Thunk a = This a | Delay (IORef (Either (H a) a))
+data Thunk a = This a | Delay (IORef (Either (H ()) a))
 
 this :: a -> Thunk a
 this x = This x
@@ -292,8 +289,17 @@ this x = This x
 delay :: H a -> H (Thunk a)
 delay (H m) =
   do c <- context
-     ref <- io $ newIORef (Left (H (\env -> m (env{ here = c }))))
+     ref <- io $ newIORef undefined
+     io $ writeIORef ref (Left (H (\env -> m (env{ here = c }) >>= (writeIORef ref . Right))))
      return (Delay ref)
+
+poke :: Thunk a -> H ()
+poke (This _)    = do return ()
+poke (Delay ref) =
+  do ema <- io $ readIORef ref
+     case ema of
+       Left m  -> m
+       Right _ -> return ()
 
 peek :: Thunk a -> H (Maybe a)
 peek (This x)    = return (Just x)
@@ -304,14 +310,23 @@ peek (Delay ref) =
        Right a -> Just a
 
 force :: Thunk a -> H a
-force (This x)    = return x
-force (Delay ref) =
+force th =
+  do poke th
+     Just x <- peek th
+     return x
+
+ifForce :: Thunk a -> (a -> H ()) -> H ()
+ifForce (This x)       h = h x
+ifForce th@(Delay ref) h =
   do ema <- io $ readIORef ref
      case ema of
-       Left m  -> do a <- m -- uses the context of the delay
-                     io $ writeIORef ref (Right a)
-                     return a
-       Right a -> do return a
+       Left m  -> do c <- context
+                     io $ writeIORef ref $ Left $
+                       do m
+                          Just a <- peek th
+                          inContext c (h a)
+                     postponeReal (poke th)
+       Right a -> h a
 
 instance Constructive a => Constructive (Thunk a) where
   new = delay new
@@ -356,9 +371,9 @@ zipThunk f t1 t2 =
 
 zipThunk :: (a -> b -> H ()) -> Thunk a -> Thunk b -> H ()
 zipThunk f t1 t2 =
-    do a <- force t1
-       b <- force t2
-       f a b
+  ifForce t1 $ \a ->
+    ifForce t2 $ \b ->
+      f a b
 
 instance Value a => Value (Thunk a) where
   type Type (Thunk a) = Type a
@@ -474,10 +489,10 @@ unr = error "UNR"
 
 isCon :: Ord c => c -> Thunk (Data c a) -> (a -> H ()) -> H ()
 isCon c t h =
-  do Con vc a <- force t
-     let x = vc =? c
-     addClauseHere [x]
-     if x == ff then return () else h a
+  ifForce t $ \(Con vc a) ->
+    do let x = vc =? c
+       addClauseHere [x]
+       if x == ff then return () else h a
 
 class (Show c, Ord c) => ConstructiveData c where
   constrs :: [c]
@@ -508,15 +523,11 @@ instance EqualData c a => Equal (Data c a) where
     choice
     [ do notEqualHere c1 c2
     , do equalHere c1 c2
-         let cases = [ (cs,f)
-                     | (cs, f) <- equalData notEqualHere
-                     , any (`elem` allcs) cs
-                     ]
-         xs <- sequence [ new | _ <- cases ]
-         sequence_ [ inContext x (f x1 x2) | (x,(_,f)) <- xs `zip` cases ]
-         sequence_
-           [ addClauseHere (nt (c1 =? c) : [ x | (x,(cs,_)) <- xs `zip` cases, c `elem` cs ]) 
-           | c <- allcs
+         choice
+           [ do addClauseHere [ c1 =? c | c <- cs ]
+                f x1 x2
+           | (cs, f) <- equalData notEqualHere
+           , any (`elem` allcs) cs
            ]
      ]
    where
@@ -533,6 +544,7 @@ getData f d t =
 
 --------------------------------------------------------------------------------
 
+{-
 newtype List a = List (Thunk (Data L (a, List a)))
  deriving ( Constructive, Equal )
 data L = Nil | Cons
@@ -548,7 +560,9 @@ instance ConstructiveData L where
   constrs = [Nil, Cons]
 
 instance Equal a => EqualData L (a, List a) where
-  equalData h = [([Cons], \t1 t2 -> h t1 t2)]
+  equalData h = [ ([Cons], \(x,_)  (y,_)  -> h x y)
+                , ([Cons], \(_,xs) (_,ys) -> postpone $ h xs ys)
+                ]
 
 instance Value a => Value (List a) where
   type Type (List a) = [Type a]
@@ -577,7 +591,7 @@ instance ConstructiveData N where
   constrs = [Zero, Succ]
 
 instance EqualData N Nat where
-  equalData h = [([Succ], \t1 t2 -> h t1 t2)]
+  equalData h = [([Succ], \t1 t2 -> postpone $ h t1 t2)]
 
 instance Value Nat where
   type Type Nat = Integer
@@ -606,7 +620,9 @@ instance ConstructiveData T where
   constrs = [Empty, Node]
 
 instance Equal a => EqualData T (a, (Tree a, Tree a)) where
-  equalData h = [([Node], \t1 t2 -> h t1 t2)]
+  equalData h = [ ([Node], \(x,_)  (y,_)  -> h x y)
+                , ([Node], \(_,pp) (_,qq) -> postpone $ h pp qq)
+                ]
 
 data Tr a = Emp | Nod a (Tr a) (Tr a) deriving ( Eq, Ord, Show )
 
@@ -619,200 +635,7 @@ instance Value a => Value (Tree a) where
    where
     f Empty _ = return Emp
     f Node  a = do (x,(p,q)) <- get a; return (Nod x p q)
+-}
 
 --------------------------------------------------------------------------------
-
-newtype Expr = Expr (Thunk (Data E (Nat,(Expr,Expr))))
- deriving ( Constructive, Equal )
-data E = Var | App | Lam
- deriving ( Eq, Ord, Show )
-
-var x = Expr (con Var (x,unr))
-lam e = Expr (con Lam (unr,(e,unr)))
-p @ q = Expr (con App (unr,(p,q)))
-
-isVar (Expr t) h = isCon Var t $ \(x,_)     -> h x
-isLam (Expr t) h = isCon Lam t $ \(_,(e,_)) -> h e
-isApp (Expr t) h = isCon App t $ \(_,(p,q)) -> h p q
-
-instance ConstructiveData E where
-  constrs = [Var,App,Lam]
-
-instance EqualData E (Nat,(Expr,Expr)) where
-  equalData h =
-    [ ([Var],     \(x1,_)     (x2,_)     -> h x1 x2)
-    , ([Lam,App], \(_,(p1,_)) (_,(p2,_)) -> h p1 p2)
-    , ([App],     \(_,(_,q1)) (_,(_,q2)) -> h q1 q2)
-    ]
-
-data Exp = Vr Integer | Ap Exp Exp | Lm Exp deriving ( Eq, Ord, Show )
-
-instance Value Expr where
-  type Type Expr = Exp
-  
-  dflt _ = Vr 0
-
-  get (Expr t) = getData f (Vr 0) t
-   where
-    f Var (x,_)     = do n <- get x; return (Vr n)
-    f Lam (_,(e,_)) = do a <- get e; return (Lm a)
-    f App (_,(p,q)) = do (a,b) <- get (p,q); return (Ap a b)
-
---------------------------------------------------------------------------------
-
-main = main1
-
-main1 = run $
-  do io $ putStrLn "Generating problem..."
-     xs <- new :: H (List Nat)
-     ys <- new
-     zs <- new
-     isort xs zs
-     isort ys zs
-     
-     notEqualHere xs zs
-     notEqualHere ys zs
-     notEqualHere xs ys
-     
-     let see = (xs,ys)
-
-     io $ putStrLn "Solving..."
-     b <- solve
-     io $ print b
-     if b then
-       do get see >>= (io . print)
-      else
-       do return ()
-
-main2 = run $
-  do io $ putStrLn "Generating problem..."
-     t <- new :: H (Tree Nat)
-     
-     member (nat 5) t tt
-     member (nat 17) t tt
-     member (nat 3) t tt
-     member (nat 0) t ff
-     
-     let see = t
-
-     io $ putStrLn "Solving..."
-     b <- solve
-     io $ print b
-     if b then
-       do get see >>= (io . print)
-      else
-       do return ()
-
-app xs ys zs =
-  choice
-  [ isNil xs $
-      equalHere ys zs
-
-  , isCons xs $ \a as ->
-      isCons zs $ \b bs ->
-        do equalHere a b
-           postpone $ app as ys bs
-  ]
-            
-rev xs ys =
-  choice
-  [ isNil xs $
-      isNil ys $
-        return ()
-
-  , isCons xs $ \a as ->
-      do bs <- new
-         postpone $ rev as bs
-         app bs (cons a nil) ys
-  ]
-
-leq a b q =
-  choice
-  [ isZero a $
-      addClauseHere [q]
-  , isSucc a $ \a' ->
-      choice
-      [ isZero b $
-          addClauseHere [nt q]
-      , isSucc b $ \b' ->
-          postpone $ leq a' b' q
-      ]
-  ]
-
-sorted xs q =
-  choice
-  [ isNil xs $
-      addClauseHere [q]
-  , isCons xs $ \a as ->
-      sorted' a as q
-  ]
-
-sorted' x xs q =
-  choice
-  [ isNil xs $
-      addClauseHere [q]
-  , isCons xs $ \a as ->
-      do (q1,q2) <- new
-         leq x a q1
-         postpone $ sorted' a as q2
-         addClauseHere [nt q1, nt q2, q]
-         addClauseHere [nt q, q1]
-         addClauseHere [nt q, q2]
-  ]
-
-sinsert x xs zs =
-  choice
-  [ isNil xs $
-      isCons zs $ \b bs ->
-        do equalHere x b
-           isNil bs $
-             return ()
-  , isCons xs $ \a as ->
-      do q <- new
-         leq x a q
-         choice
-           [ do addClauseHere [q]
-                isCons zs $ \b bs ->
-                  do equalHere x b
-                     equalHere xs bs
-           , do addClauseHere [nt q]
-                ys <- new
-                postpone $ sinsert x as ys
-                equalHere zs (cons a ys)
-           ]
-  ]
-
-isort xs zs =
-  choice
-  [ isNil xs $
-      isNil zs $
-        return ()
-  , isCons xs $ \a as ->
-      do bs <- new
-         postpone $ isort as bs
-         sinsert a bs zs  
-  ]
-
-member x t w =
-  choice
-  [ isEmpty t $
-      addClauseHere [nt w]
-  , isNode t $ \a p q ->
-      choice
-      [ do equalHere x a
-           addClauseHere [w]
-      , do notEqualHere x a
-           d <- new
-           leq x a d
-           pq <- new
-           postpone $ member x pq w
-           choice
-             [ do addClauseHere [d]
-                  equalHere pq p
-             , do addClauseHere [nt d]
-                  equalHere pq q
-             ]
-      ]
-  ]
-
 
