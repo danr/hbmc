@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, RankNTypes #-}
-module Main where
+module Prolog where
 
 import Control.Applicative
 import Control.Monad
@@ -15,6 +15,7 @@ data Env =
   { sat   :: Solver
   , here  :: Bit
   , posts :: IORef [(Bit,H ())] -- reversed queue
+  , aggr  :: Bool
   }
 
 newtype H a = H (Env -> IO a)
@@ -38,56 +39,110 @@ run :: H a -> IO a
 run (H m) =
   M.withNewSolver $ \s ->
     do ref <- newIORef []
-       m (Env s tt ref)
+       m (Env s tt ref True)
 
 trySolve :: H (Maybe Bool)
 trySolve =
   H $ \env -> 
-    do ps <- readIORef (posts env)
-       putStrLn ("==> Try solve with " ++ show (length ps) ++ " points...")
-       putStrLn "Searching for real counter example..."
-       b <- solveBit (sat env) (here env : [ nt b | (b, _) <- ps ])
-       if b then
-         do return (Just True)
+    do putStrLn ("==> Try solve")
+       ps <- readIORef (posts env)
+       putStrLn ("Found " ++ show (length ps) ++ " points.")
+       tryAll
+         [ findCounterExample env ps
+         , findContradiction env ps
+         , findMustExpansions env ps
+         , findMayExpansions env ps
+         ]
+ where
+  tryAll []     = return Nothing
+  tryAll (m:ms) = do ma <- m
+                     case ma of
+                       Nothing -> tryAll ms
+                       Just x  -> return x
+
+findCounterExample :: Env -> [(Bit,H())] -> IO (Maybe (Maybe Bool))
+findCounterExample env ps =
+  do putStrLn "Searching for real counter example..."
+     b <- solveBit (sat env) (here env : [ nt b | (b, _) <- ps ])
+     if b then
+       do return (Just (Just True))
+      else
+       do return Nothing
+
+findContradiction :: Env -> [(Bit,H())] -> IO (Maybe (Maybe Bool))
+findContradiction env ps =
+  do putStrLn "Searching for contradiction..."
+     b <- solveBit (sat env) [here env]
+     if not b then
+       do return (Just (Just False))
+      else
+       do return Nothing
+
+findMustExpansions :: Env -> [(Bit,H())] -> IO (Maybe (Maybe Bool))
+findMustExpansions env ps =
+  do putStrLn "Finding necessary expansion points..."
+     vs <- find ps
+     let n = length vs
+     if n > 0 then
+       do putStrLn ("Expanding " ++ show n ++ " necessary points...")
+          writeIORef (posts env) [ p | p@(w,_) <- ps, w `notElem` vs ]
+          sequence_ [ m env{ here = w } | (w,H m) <- ps, w `elem` vs ]
+          return (Just Nothing)
+      else
+       do return Nothing
+ where
+  find (p@(w,H m):ps) =
+    do b <- solveBit (sat env) [here env, nt w]
+       if not b then
+         do vs <- find ps
+            return (w:vs)
         else
-         do putStrLn "Searching for contradiction..."
-            b <- solveBit (sat env) [here env]
-            if not b then
-              do return (Just False)
-             else
-              do putStrLn "Finding expansion points..."
-                 let find thr (w:ws) =
-                       do b <- solveBit (sat env) [here env, w]
-                          if not b then
-                            do find (thr+1) ws
-                           else
-                            let musts w ws =
-                                  do b <- solveBit (sat env) (here env : w : [ nt w | w <- ws ])
-                                     if b then
-                                       do return []
-                                      else
-                                       do cfl <- M.conflict (sat env)
-                                          let vs1 = [ w | w <- ws, w `elem` map Lit cfl || w == tt ]
-                                          vs2 <- musts w (filter (`notElem` vs1) ws)
-                                          return (vs1 ++ vs2)
-                             in do if thr > 0 then
-                                     putStrLn ("Thrown away " ++ show thr ++ " points.")
-                                    else
-                                     return ()
-                                   putStrLn "Found point; finding friends..."
-                                   vs <- musts w ws
-                                   putStrLn ("Expanding " ++ show (length (w:vs)) ++ " points.")
-                                   writeIORef (posts env) [ p | p@(l,_) <- ps, l `elem` ws, l `notElem` (w:vs) ]
-                                   sequence_ [ m (env{ here = l }) | (l,H m) <- ps, l `elem` (w:vs) ]
-                                   return Nothing
-                  in find 0 (map fst (reverse ps))
+         do bs <- sequence [ let H m = get w in m env | (w,_) <- ps ]
+            find [ p | (True, p) <- bs `zip` ps ]
+  
+  find [] =
+    do return []
+
+findMayExpansions :: Env -> [(Bit,H())] -> IO (Maybe (Maybe Bool))
+findMayExpansions env ps =
+  do putStrLn "Finding possible expansion points..."
+     find 0 (map fst (reverse ps))
+ where
+  find thr (w:ws) =
+    do b <- solveBit (sat env) [here env, w]
+       if not b then
+         do find (thr+1) ws
+        else
+         let musts w ws =
+               do b <- solveBit (sat env) (here env : w : [ nt w | w <- ws ])
+                  if b then
+                    do return []
+                   else
+                    do cfl <- M.conflict (sat env)
+                       let vs1 = [ w | w <- ws, w `elem` map Lit cfl || w == tt ]
+                       vs2 <- musts w (filter (`notElem` vs1) ws)
+                       return (vs1 ++ vs2)
+          in do if thr > 0 then
+                  putStrLn ("Thrown away " ++ show thr ++ " points.")
+                 else
+                  return ()
+                putStrLn "Found point; finding friends..."
+                vs <- musts w ws
+                putStrLn ("Expanding " ++ show (length (w:vs)) ++ " points.")
+                writeIORef (posts env) [ p | p@(l,_) <- ps, l `elem` ws, l `notElem` (w:vs) ]
+                sequence_ [ m (env{ here = l }) | (l,H m) <- ps, l `elem` (w:vs) ]
+                return Nothing
+
+solve' :: H () -> H Bool
+solve' h =
+  do h
+     mb <- trySolve
+     case mb of
+       Nothing -> solve' h
+       Just b  -> return b
 
 solve :: H Bool
-solve =
-  do mb <- trySolve
-     case mb of
-       Nothing -> solve
-       Just b  -> return b
+solve = solve' (return ())
 
 postpone :: H () -> H ()
 postpone h = h
@@ -96,7 +151,7 @@ postponeReal :: H () -> H ()
 postponeReal m =
   H $ \env ->
     do ps <- readIORef (posts env)
-       let p = (here env, m)
+       let p = (here env, aggressive m)
        writeIORef (posts env) (p:ps)
 
 io :: IO a -> H a
@@ -129,11 +184,20 @@ choice hs =
   do xs <- sequence [ newBit | h <- hs ]
      addClauseHere xs
      a <- context
-     sequence_ [ do inContext x (do addClauseHere [a]; h) | (x,h) <- xs `zip` hs ]
+     sequence_ [ do inContext x (do addClauseHere [a]; calm h) | (x,h) <- xs `zip` hs ]
 
 ifThenElse :: Bit -> (H (), H ()) -> H ()
 ifThenElse b (yes,no) =
   choice [ do addClauseHere [b]; yes, do addClauseHere [nt b]; no ]
+
+calm, aggressive :: H a -> H a
+calm       (H h) = H (\env -> h (env{ aggr = False }))
+aggressive (H h) = H (\env -> h (env{ aggr = True }))
+
+ifAggressive :: H a -> H a -> H a
+ifAggressive (H yes) (H no) =
+  --H no
+  H (\env -> if aggr env then yes env else no env)
 
 --------------------------------------------------------------------------------
 
@@ -320,12 +384,15 @@ ifForce (This x)       h = h x
 ifForce th@(Delay ref) h =
   do ema <- io $ readIORef ref
      case ema of
-       Left m  -> do c <- context
-                     io $ writeIORef ref $ Left $
-                       do m
-                          Just a <- peek th
-                          inContext c (h a)
-                     postponeReal (poke th)
+       Left m  -> ifAggressive
+                    (do a <- force th
+                        h a)
+                    (do c <- context
+                        io $ writeIORef ref $ Left $
+                          do m
+                             Just a <- peek th
+                             inContext c (h a)
+                        postponeReal (poke th))
        Right a -> h a
 
 instance Constructive a => Constructive (Thunk a) where
@@ -492,7 +559,7 @@ isCon c t h =
   ifForce t $ \(Con vc a) ->
     do let x = vc =? c
        addClauseHere [x]
-       if x == ff then return () else h a
+       if x == ff then return () else aggressive (h a)
 
 class (Show c, Ord c) => ConstructiveData c where
   constrs :: [c]
@@ -509,10 +576,11 @@ class ConstructiveData c => EqualData c a where
 instance EqualData c a => Equal (Data c a) where
   equalHere (Con c1 x1) (Con c2 x2) =
     do equalHere c1 c2
+       c <- context
        sequence_
          [ do x <- new
               sequence_ [ addClauseHere [nt (c1 =? c), x] | c <- cs ]
-              inContext x (f x1 x2)
+              inContext x (do addClauseHere [c]; calm $ f x1 x2)
          | (cs, f) <- equalData equalHere
          , any (`elem` allcs) cs
          ]
