@@ -103,6 +103,54 @@ add x y z =
                 add a y c
     ]
 
+minn x y z =
+  caseNat x $ \(Con cx ax) ->
+    choice
+    [ must (cx =? Zero) $
+        makeNat z $ \(Con cz az) ->
+          must (cz =? Zero) $
+            return ()
+                
+    , must (cx =? Succ) $
+        proj ax $ \a ->
+          caseNat y $ \(Con cy ay) ->
+            choice
+            [ must (cy =? Zero) $
+                makeNat z $ \(Con cz az) ->
+                  must (cz =? Zero) $
+                    return ()
+                        
+            , must (cy =? Succ) $
+                proj ay $ \b ->
+                  makeNat z $ \(Con cz az) ->
+                    must (cz =? Succ) $
+                      proj az $ \c ->
+                        minn a b c
+            ]
+    ]
+
+maxx x y z =
+  caseNat x $ \(Con cx ax) ->
+    choice
+    [ must (cx =? Zero) $
+        equalHere y z
+                
+    , must (cx =? Succ) $
+        proj ax $ \a ->
+          caseNat y $ \(Con cy ay) ->
+            choice
+            [ must (cy =? Zero) $
+                equalHere x z
+                        
+            , must (cy =? Succ) $
+                proj ay $ \b ->
+                  makeNat z $ \(Con cz az) ->
+                    must (cz =? Succ) $
+                      proj az $ \c ->
+                        maxx a b c
+            ]
+    ]
+
 --------------------------------------------------------------------------------
 
 newtype RE a = RE (Thunk (Data R (Maybe a, (Maybe (RE a), (Maybe (RE a), ())))))
@@ -152,6 +200,79 @@ instance Value a => Value (RE a) where
     get' (Just p, (Just q, _)) = get (p,q)
 
 --------------------------------------------------------------------------------
+
+rep i p r =  
+  caseNat i $ \(Con ci ai) ->
+    choice
+    [ must (ci =? Zero) $
+        equalHere reps r
+                
+    , must (ci =? Succ) $
+        proj ai $ \a ->
+          makeRE r $ \(Con cr ar) ->
+            must (cr =? RSeq) $
+              proj2 ar $ \r1 ->
+                do equalHere p r1
+                   proj3 ar $ \r2 ->
+                     rep a p r2
+    ]
+
+repp i j p r =  
+  caseNat i $ \(Con ci ai) ->
+    do c <- context
+       rec <- new
+       ri <- new
+       rr <- new
+       inContext rec $
+         do addClauseHere [c]
+            caseNat j $ \(Con cj aj) ->
+              proj aj $ \j' -> repp ri j' p rr
+    
+       choice
+         [ must (ci =? Zero) $
+             caseNat j $ \(Con cj aj) ->
+               choice
+               [ must (cj =? Zero) $
+                   do addClauseHere [nt rec]
+                      equalHere reps r
+               
+               , must (cj =? Succ) $
+                   makeRE r $ \(Con cr ar) ->
+                    must (cr =? RPlus) $
+                      proj2 ar $ \r1 ->
+                        do equalHere reps r1
+                           proj3 ar $ \r2' ->
+                             makeRE r2' $ \(Con cr2' ar2') ->
+                               must (cr2' =? RSeq) $
+                                 proj2 ar2' $ \r2 ->
+                                   do equalHere p r2
+                                      proj3 ar2' $ \r3 ->
+                                        do equalHere zer ri
+                                           equalHere rr r3
+                                           addClauseHere [rec]
+                                           --repp zer j' p r3
+               ]
+                     
+         , must (ci =? Succ) $
+             proj ai $ \a ->
+               caseNat j $ \(Con cj aj) ->
+                 choice
+                 [ must (cj =? Zero) $
+                     do addClauseHere [nt rec]
+                        equalHere rnil r
+                 
+                 , must (cj =? Succ) $
+                     makeRE r $ \(Con cr ar) ->
+                       must (cr =? RSeq) $
+                         proj2 ar $ \r1 ->
+                           do equalHere p r1
+                              proj3 ar $ \r2 ->
+                                do equalHere a ri
+                                   equalHere rr r2
+                                   addClauseHere [rec]
+                                   --repp a j' p r2
+                 ]
+         ]
 
 step p a r =
   caseRE p $ \(Con cp ap) ->
@@ -343,7 +464,9 @@ instance Value CHAR where
   get (CHAR v) = get v
 
 instance Constructive CHAR where
-  newPoint _ = CHAR `fmap` newVal "ABC"
+  newPoint _ = CHAR `fmap` newVal "A" -- "ABC"
+
+
 
 main = run $
   do p <- newInput :: H (RE CHAR)
@@ -359,17 +482,49 @@ main = run $
      --let p = ratom (CHAR (val 'A'))
      --let q = ratom (CHAR (val 'B'))
      
-     b <- new
-     rec (rstar p `rseq` rstar q) s b
-     rec (rstar (p `rplus` q)) s (nt b)
+     --b <- new
+     --rec (rstar p `rseq` rstar q) s b
+     --rec (rstar (p `rplus` q)) s (nt b)
      --rec2 (rstar p `rseq` rstar q) s ff
      --rec2 (rstar (p `rplus` q)) s tt
      --rec (rstar (p `rplus` q)) s
      --eps p ff
      --rec (p `rand` (p `rseq` p)) s tt
+
+{-     
+     eps p ff
+     pi1 <- new
+     i1 <- newInput
+     rep i1 p pi1
+     pi2 <- new
+     i2 <- newInput
+     rep i2 p pi2
+     notEqualHere i1 i2
+     rec (pi1 `rand` pi2) s tt
+-}
+   
+     --a <- newInput :: H CHAR
+     --let p = ratom a
      
+     eps p ff
+     (i1,j1) <- newInput
+     (i2,j2) <- newInput
+     (p1,p2) <- new
+     repp i1 j1 p p1
+     repp i2 j2 p p2
      
-     let see = ((p,q),s)
+     (i,j) <- new
+     maxx i1 i2 i
+     minn j1 j2 j
+     
+     p12 <- new
+     repp i j p p12
+     
+     b <- new
+     rec (p1 `rand` p2) s b
+     rec p12 s (nt b)
+
+     let see = (((i1,j1),(i2,j2)),(p,s))
      io $ putStrLn "Solving..."
      b <- solve
      io $ print b

@@ -63,6 +63,7 @@ trySolve = H (\env ->
                      if b then
                        do writeIORef (waits env) [ t | t@(_,unq',_) <- reverse ws, unq /= unq' ]
                           putStrLn "!"
+                          putStrLn "Expanding..."
                           h env{ here = p }
                           return Nothing
                       else
