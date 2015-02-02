@@ -5,6 +5,7 @@ import Control.Applicative
 import Control.Monad
 import Data.IORef
 import Data.List
+import Data.Unique
 import qualified MiniSat as M
 import MiniSat ( Solver, Lit )
 
@@ -14,7 +15,7 @@ data Env =
   Env
   { sat   :: Solver
   , here  :: Bit
-  , waits :: IORef [(Bit,H Bool)]
+  , waits :: IORef [(Bit,Unique,H ())]
   }
 
 newtype H a = H (Env -> IO a)
@@ -45,7 +46,7 @@ trySolve = H (\env ->
   do ws <- readIORef (waits env)
      putStrLn ("== Try solve with " ++ show (length ws) ++ " waits ==")
      putStrLn "Finding a counter example..."
-     b <- solveBit (sat env) (here env : [ nt p | (p,_) <- ws ])
+     b <- solveBit (sat env) (here env : [ nt p | (p,_,_) <- ws ])
      if b then
        return (Just True)
       else
@@ -57,18 +58,13 @@ trySolve = H (\env ->
             let find [] =
                   do return (error "shouldn't happen")
                 
-                find ((p,H h):ws) =
+                find ((p,unq,H h):ws) =
                   do b <- solveBit (sat env) [p]
                      if b then
-                       do chg <- h env{ here = p }
-                          if chg then
-                            do ws1 <- readIORef (waits env)
-                               writeIORef (waits env) (ws1 ++ reverse ws)
-                               putStrLn "!"
-                               return Nothing
-                           else
-                            do putStr "-"
-                               find ws
+                       do writeIORef (waits env) [ t | t@(_,unq',_) <- reverse ws, unq /= unq' ]
+                          putStrLn "!"
+                          h env{ here = p }
+                          return Nothing
                       else
                        do putStr "X"
                           find ws
@@ -110,10 +106,10 @@ inContext :: Bit -> H () -> H ()
 inContext c _ | c == ff = return ()
 inContext c (H m) = H (\env -> m env{ here = c })
 
-later :: H Bool -> H ()
-later h = H (\env ->
+later :: Unique -> H () -> H ()
+later unq h = H (\env ->
   do ws <- readIORef (waits env)
-     writeIORef (waits env) ((here env, h):ws)
+     writeIORef (waits env) ((here env, unq, h):ws)
   )
 
 check :: H () -> H ()
@@ -300,7 +296,7 @@ solveBit s xs =
 
 --------------------------------------------------------------------------------
 
-data Thunk a = This a | Delay Bool (IORef (Either (H ()) a))
+data Thunk a = This a | Delay Bool Unique (IORef (Either (H ()) a))
 
 this :: a -> Thunk a
 this x = This x
@@ -310,19 +306,20 @@ delay inp (H m) =
   do c <- context
      ref <- io $ newIORef undefined
      io $ writeIORef ref (Left (H (\env -> m (env{ here = c }) >>= (writeIORef ref . Right))))
-     return (Delay inp ref)
+     unq <- io $ newUnique
+     return (Delay inp unq ref)
 
 poke :: Thunk a -> H ()
-poke (This _)      = do return ()
-poke (Delay _ ref) =
+poke (This _)        = do return ()
+poke (Delay _ _ ref) =
   do ema <- io $ readIORef ref
      case ema of
        Left m  -> m
        Right _ -> return ()
 
 peek :: Thunk a -> H (Maybe a)
-peek (This x)      = return (Just x)
-peek (Delay _ ref) =
+peek (This x)        = return (Just x)
+peek (Delay _ _ ref) =
   do ema <- io $ readIORef ref
      return $ case ema of
        Left _  -> Nothing
@@ -335,8 +332,8 @@ force th =
      return x
 
 ifForce :: Thunk a -> (a -> H ()) -> H ()
-ifForce (This x)           h = h x
-ifForce th@(Delay inp ref) h =
+ifForce (This x)               h = h x
+ifForce th@(Delay inp unq ref) h =
   do ema <- io $ readIORef ref
      case ema of
        Left m  -> do c <- context
@@ -345,11 +342,7 @@ ifForce th@(Delay inp ref) h =
                           Just a <- peek th
                           inContext c (h a)
                      if inp then
-                       later $
-                         do ma <- peek th
-                            case ma of
-                              Nothing -> do poke th; return True
-                              _       -> do return False
+                       later unq $ poke th
                       else
                        return ()
        Right a -> h a
@@ -409,8 +402,8 @@ instance Value a => Value (Thunk a) where
     unThunk :: Thunk a -> a
     unThunk ~(This x) = x
 
-  get (This x)      = get x
-  get (Delay _ ref) =
+  get (This x)        = get x
+  get (Delay _ _ ref) =
     do ema <- io $ readIORef ref
        case ema of
          Left _  -> return (dflt (either undefined id ema))

@@ -359,13 +359,14 @@ main = run $
      --let p = ratom (CHAR (val 'A'))
      --let q = ratom (CHAR (val 'B'))
      
-     rec (rstar p `rseq` rstar q) s ff
-     rec (rstar (p `rplus` q)) s tt
+     b <- new
+     rec (rstar p `rseq` rstar q) s b
+     rec (rstar (p `rplus` q)) s (nt b)
      --rec2 (rstar p `rseq` rstar q) s ff
      --rec2 (rstar (p `rplus` q)) s tt
      --rec (rstar (p `rplus` q)) s
      --eps p ff
-     --rec (p `rand` (p `rseq` p)) s
+     --rec (p `rand` (p `rseq` p)) s tt
      
      
      let see = ((p,q),s)
