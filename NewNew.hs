@@ -5,9 +5,11 @@ import Control.Applicative
 import Control.Monad
 import Data.IORef
 import Data.List
+import qualified Data.Map as Mp
 import Data.Unique
 import qualified MiniSat as M
 import MiniSat ( Solver, Lit )
+import System.IO.Unsafe
 
 --------------------------------------------------------------------------------
 
@@ -43,13 +45,38 @@ run (H m) =
 
 trySolve :: H (Maybe Bool)
 trySolve = H (\env ->
-  do ws <- readIORef (waits env)
+  do ws <- reverse `fmap` readIORef (waits env)
      putStrLn ("== Try solve with " ++ show (length ws) ++ " waits ==")
-     putStrLn "Finding a counter example..."
-     b <- solveBit (sat env) (here env : [ nt p | (p,_,_) <- ws ])
+     putStrLn "Solve..."
+     b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws ])
      if b then
-       return (Just True)
+       do putStrLn "Counterexample!"
+          return (Just True)
       else
+        let mini =
+              do qs' <- M.conflict (sat env)
+                 let qs = [ Lit q | q <- qs' ] ++ [ p | (p,_,_) <- ws, p == tt ]
+                 if null qs then
+                   do putStrLn "Contradiction!"
+                      return (Just False)
+                  else
+                   let p:_ = [ p | (p,_,_) <- ws, p `elem` qs ] in
+                     do putStrLn ("Conflict: " ++ show (length qs))
+                        b <- solveBit (sat env) (here env : [ nt q | q <- qs, q /= p ])
+                        if b then
+                          let (p,unq,H h):_ = [ t | t@(p,_,_) <- ws, p `elem` qs ] in
+                            do let ws' = [ t | t@(_,unq',_) <- reverse ws, unq /= unq' ]
+                               putStrLn ( "Points: " ++ show (length ws')
+                                        )
+                               writeIORef (waits env) ws'
+                               putStrLn "Expanding..."
+                               h env{ here = p }
+                               return Nothing
+                        else
+                         do mini
+         in mini
+
+{-
        do putStrLn "Finding a contradiction..."
           b <- solveBit (sat env) [here env]
           if not b then
@@ -73,6 +100,7 @@ trySolve = H (\env ->
              in do writeIORef (waits env) []
                    putStrLn "Finding a point to expand..."
                    find (reverse ws)
+-}
   )
 
 solve' :: H () -> H Bool
@@ -131,6 +159,23 @@ impossible = addClauseHere []
 
 noop :: a -> H ()
 noop _ = return ()
+
+when :: Bit -> H () -> H ()
+when c h = whens [c] h
+
+whens :: [Bit] -> H () -> H ()
+whens cs h 
+  | null cs'  = return ()
+  | otherwise = 
+    do c0 <- context
+       c1 <- new
+       sequence_ [ addClauseHere [nt c, c1] | c <- cs' ]
+       inContext c1 $
+         do addClauseHere [c0]
+            addClauseHere cs'
+            h
+ where
+  cs' = filter (/=ff) cs
 
 choice :: [H ()] -> H ()
 choice [h] = h
@@ -281,7 +326,8 @@ orl xs = nt `fmap` andl (map nt xs)
 addClause :: [Bit] -> H ()
 addClause xs
   | tt `elem` xs = do return ()
-  | otherwise    = do withSolver (\s -> M.addClause s [ x | Lit x <- xs ])
+  | otherwise    = do --io $ putStrLn (show xs)
+                      withSolver (\s -> M.addClause s [ x | Lit x <- xs ])
                       return ()
 
 (==>) :: [Bit] -> [Bit] -> H ()
@@ -298,6 +344,11 @@ solveBit s xs =
 --------------------------------------------------------------------------------
 
 data Thunk a = This a | Delay Bool Unique (IORef (Either (H ()) a))
+
+instance Eq a => Eq (Thunk a) where
+  This x      == This y      = x == y
+  Delay _ p _ == Delay _ q _ = p == q
+  _           == _           = False
 
 this :: a -> Thunk a
 this x = This x
@@ -352,42 +403,44 @@ instance Constructive a => Constructive (Thunk a) where
   newPoint inp = delay inp (newPoint inp)
 
 instance Equal a => Equal (Thunk a) where
-  equalHere    = zipThunk equalHere
-  notEqualHere = zipThunk notEqualHere
+  equalHere t1 t2 = equalThunk t1 t2
 
-{-
-zipThunk :: (a -> b -> H ()) -> Thunk a -> Thunk b -> H ()
-zipThunk f t1 t2 =
-  do ma <- peek t1
-     mb <- peek t2
-     case (ma, mb) of
-       (Just a, Just b) ->
-         do f a b
+  notEqualHere t1 t2 =
+    ifForce t1 $ \a ->
+      do b <- force t2
+         notEqualHere a b
 
-       _ ->
-         postpone $
-           do a <- force t1
-              b <- force t2
-              f a b
-              -}
+equalThunk :: Equal a => Thunk a -> Thunk a -> H ()
+equalThunk x y =
+  case (x, y) of
+    (Delay _ u _, Delay _ v _) ->
+      do equalUnique u v (equalThunk' x y)
+    
+    _ ->
+      do equalThunk' x y
+ where
+  equalThunk' x y =
+    ifForce x $ \a ->
+      do b <- force y
+         equalHere a b
 
-{-
-zipThunk :: (a -> b -> H ()) -> Thunk a -> Thunk b -> H ()
-zipThunk f t1 t2 =
-  do ma <- peek t1
-     mb <- peek t2
-     case (ma, mb) of
-       (Nothing, Nothing) ->
-         postpone $
-           do a <- force t1
-              b <- force t2
-              f a b
-
-       _ ->
-         do a <- force t1
-            b <- force t2
-            f a b
-    -}
+equalUnique :: Unique -> Unique -> H () -> H ()
+equalUnique =
+  unsafePerformIO $
+    do ref <- newIORef Mp.empty
+       return $ \u v h ->
+         do uvs <- io $ readIORef ref
+            q <- case Mp.lookup (u,v) uvs of
+                   Nothing ->
+                      do q <- new
+                         io $ writeIORef ref (Mp.insert (u,v) q uvs)
+                         inContext q $ h
+                         return q
+                  
+                   Just q ->
+                      do --io $ putStrLn "equalHere duplicate!"
+                         return q
+            addClauseHere [q]
 
 zipThunk :: (a -> b -> H ()) -> Thunk a -> Thunk b -> H ()
 zipThunk f t1 t2 =
@@ -500,6 +553,7 @@ instance Value (Val a) where
 --------------------------------------------------------------------------------
 
 data Data c a = Con (Val c) a
+  deriving ( Eq )
 
 con :: Ord c => c -> a -> Thunk (Data c a)
 con c a = this (Con (val c) a)
