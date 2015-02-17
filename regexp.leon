@@ -1,0 +1,83 @@
+import leon.lang._
+import leon.annotation._
+
+object RegExp {
+  sealed abstract class S // Sigma
+  case object A extends S
+  case object B extends S
+  case object C extends S
+
+  sealed abstract class W // Word
+  case class Cons(x:S,xs:W) extends W
+  case object Nl extends W
+
+  sealed abstract class R // Regexp
+  case class Or(l:R,r:R) extends R
+  case class Seq(l:R,r:R) extends R
+  case class Star(r:R) extends R
+  case class Atom(s:S) extends R
+  case object Nil extends R
+  case object Eps extends R
+
+  def or(l:R,r:R): R = (l,r) match {
+    case (Nil, q) => q
+    case (p, Nil) => p
+    case (p, q)   => Or(p,q)
+  }
+
+  def seq(l:R,r:R): R = (l,r) match {
+    case (Nil, q) => Nil
+    case (p, Nil) => Nil
+    case (Eps, q) => q
+    case (p, Eps) => p
+    case (p, q)   => Seq(p,q)
+  }
+
+  def eps(r:R): Boolean = r match {
+    case Eps => true
+    case Or(p,q) => eps(p) || eps(q)
+    case Seq(p,q) => eps(p) && eps(q)
+    case Star(p) => true
+    case _ => false
+  }
+
+  def epsR(r:R): R = if (eps(r)) Eps else Nil
+
+  def step(r:R,x:S): R = r match {
+    case Atom(a)  => if (a == x) Eps else Nil
+    case Or(p,q)  => or(step(p,x),step(q,x))
+    case Seq(p,q) => or(seq(step(p,x),q),seq(epsR(p),step(q,x)))
+    case Star(p)  => seq(step(p,x),Star(p))
+    case _ => Nil
+  }
+
+  def rec(p:R,w:W): Boolean = w match {
+    case Nl => eps(p)
+    case Cons(x,xs) => rec(step(p,x),xs)
+  }
+
+  def seq_comm(p:R,q:R,s:W) : Boolean = {
+    rec(Seq(p,q),s) == rec(Seq(q,p),s)
+  } holds
+
+  def star_seq(p:R,q:R,s:W) : Boolean = {
+    rec(Star(Seq(p,q)),s) == rec(Seq(Star(p),Star(q)),s)
+  } holds
+
+  def switcheroo(p:R,q:R,s:W) : Boolean = {
+    rec(Seq(p,q),s) == rec(Or(p,q),s)
+  } holds
+
+  def star_plus(p:R,q:R,s:W) : Boolean = {
+    rec(Star(Or(p,q)),s) == rec(Or(Star(p),Star(q)),s)
+  } holds
+
+  def star_plus_easier(p:R,q:R,a:S,b:S) : Boolean = {
+    rec(Star(Or(p,q)),Cons(a,Cons(b,Nl))) == rec(Or(Star(p),Star(q)),Cons(a,Cons(b,Nl)))
+  } holds
+
+  def bad_assoc(p:R,q:R,r:R,s:W) : Boolean = {
+    rec(Or(p,Seq(q,r)),s) == rec(Seq(Or(p,q),r),s)
+  } holds
+
+}

@@ -1,0 +1,148 @@
+import leon.lang._
+import leon.annotation._
+
+object MergeSort {
+  sealed abstract class List
+  case class Cons(head:Int,tail:List) extends List
+  case object Nil extends List
+
+  def merge(xs0: List, ys0: List) : List = (xs0 match {
+    case Nil => ys0
+    case Cons(x,xs) => ys0 match {
+      case Nil => xs0
+      case Cons(y,ys) =>
+        if (x <= y) Cons(x,merge(xs,ys0))
+        else        Cons(y,merge(xs0,ys))
+    }
+  })
+
+  def mmerge(xs0: List, ys0: List) : List = (xs0 match {
+    case Nil => ys0
+    case Cons(x,xs) => ys0 match {
+      case Nil => xs0
+      case Cons(y,ys) =>
+        val h = if (x <= y) x   else y
+        val l = if (x <= y) xs  else xs0
+        val r = if (x <= y) ys0 else ys
+        Cons(h,merge(l,r))
+    }
+  })
+
+  def msort(xs0: List) : List = (xs0 match {
+    case Nil => Nil
+    case Cons(x,xs) => xs match {
+      case Nil => xs0
+      case Cons(y,ys) => split(xs0) match {
+        case Pair(l,r) => merge(msort(l),msort(r))
+      }
+    }
+  })
+
+  def mmsort(xs0: List) : List = (xs0 match {
+    case Nil => Nil
+    case Cons(x,xs) => xs match {
+      case Nil => xs0
+      case Cons(y,ys) => split(xs0) match {
+        case Pair(l,r) => mmerge(mmsort(l),mmsort(r))
+      }
+    }
+  })
+
+  def split(xs: List) : ListPair = (xs match {
+    case Nil => Pair(Nil,Nil)
+    case Cons(y,ys) => split(ys) match {
+      case Pair(l,r) => Pair(Cons(y,r),l)
+    }
+  })
+
+  sealed abstract class ListPair
+  case class Pair(left: List, right: List) extends ListPair
+
+  def size(l : List) : Int = (l match {
+    case Nil => 0
+    case Cons(_, xs) => 1 + size(xs)
+  }) ensuring(_ >= 0)
+
+  def p0(xs:List, ys:List) : Boolean = {
+    require(msort(xs) == msort(ys) && size(xs) >= 0)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def p1(xs:List, ys:List) : Boolean = {
+    require(msort(xs) == msort(ys) && size(xs) >= 1)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def p2(xs:List, ys:List) : Boolean = {
+    require(msort(xs) == msort(ys) && size(xs) >= 2)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def p3(xs:List, ys:List) : Boolean = {
+    require(msort(xs) == msort(ys) && size(xs) >= 3)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def p4(xs:List, ys:List) : Boolean = {
+    require(msort(xs) == msort(ys) && size(xs) >= 4)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def p5(xs:List, ys:List) : Boolean = {
+    require(msort(xs) == msort(ys) && size(xs) >= 5)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def p6(xs:List, ys:List) : Boolean = {
+    require(msort(xs) == msort(ys) && size(xs) >= 6)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def p7(xs:List, ys:List) : Boolean = {
+    require(msort(xs) == msort(ys) && size(xs) >= 7)
+    xs == ys
+
+  } ensuring (res => res == true)
+
+  def mp0(xs:List, ys:List) : Boolean = {
+    require(mmsort(xs) == mmsort(ys) && size(xs) >= 0)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def mp1(xs:List, ys:List) : Boolean = {
+    require(mmsort(xs) == mmsort(ys) && size(xs) >= 1)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def mp2(xs:List, ys:List) : Boolean = {
+    require(mmsort(xs) == mmsort(ys) && size(xs) >= 2)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def mp3(xs:List, ys:List) : Boolean = {
+    require(mmsort(xs) == mmsort(ys) && size(xs) >= 3)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def mp4(xs:List, ys:List) : Boolean = {
+    require(mmsort(xs) == mmsort(ys) && size(xs) >= 4)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def mp5(xs:List, ys:List) : Boolean = {
+    require(mmsort(xs) == mmsort(ys) && size(xs) >= 5)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def mp6(xs:List, ys:List) : Boolean = {
+    require(mmsort(xs) == mmsort(ys) && size(xs) >= 6)
+    xs == ys
+  } ensuring (res => res == true)
+
+  def mp7(xs:List, ys:List) : Boolean = {
+    require(mmsort(xs) == mmsort(ys) && size(xs) >= 7)
+    xs == ys
+
+  } ensuring (res => res == true)
+
+}
