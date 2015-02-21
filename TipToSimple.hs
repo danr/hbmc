@@ -45,36 +45,35 @@ collectLets :: T.Expr a -> ([(T.Local a,T.Expr a)],T.Expr a)
 collectLets (T.Let x ex e) = let (bs,e') = collectLets e in ((x,ex):bs,e')
 collectLets e              = ([],e)
 
-type Let a = (a,a,[Simple a])
+bindLets :: [(a,Let a)] -> S.Expr a -> S.Expr a
+bindLets = flip (foldr (\ (x,lt) e -> S.Let x lt e))
 
-bindLets :: [Let a] -> S.Expr a -> S.Expr a
-bindLets = flip (foldr (\ (x,f,ss) e -> S.Let x f ss e))
-
-toSimple :: (Proj a,Name a) => T.Expr a -> Fresh ([Let a],Simple a)
+toSimple :: (Proj a,Name a) => T.Expr a -> Fresh ([(a,Let a)],Simple a)
 toSimple e =
   do (s,w) <- runWriterT (toSimple' e)
      return (w,s)
 
-toSimple' :: (Proj a,Name a) => T.Expr a -> WriterT [Let a] Fresh (Simple a)
+toSimple' :: (Proj a,Name a) => T.Expr a -> WriterT [(a,Let a)] Fresh (Simple a)
 toSimple' e0 =
   case e0 of
     Lcl (Local x _) -> return (Var x)
 
-    Gbl hd :@: args ->
+    Gbl (Global f _ _ ns) :@: args ->
       do xn <- mapM toSimple' args
-         case hd of
-           Global k _ _ ConstructorNS -> do return (Con k xn)
-           Global f _ _ FunctionNS
-            | Just (tc,i) <- unproj f -> do return (Proj tc i xn)
-            | otherwise               -> do a <- lift fresh
-                                            tell [(a,f,xn)]
-                                            return (Var a)
-         -- TODO: projections
+         case ns of
+           ConstructorNS -> do return (Con f xn)
+           FunctionNS    -> do a <- lift fresh
+                               let lt = case unproj f of
+                                          Just (tc,i) -> let [x] = xn
+                                                         in  Proj tc i x
+                                          Nothing     -> Apply f xn
+                               tell [(a,lt)]
+                               return (Var a)
 
     T.Let (T.Local x _) e1 e2 ->
       do s1 <- toSimple' e1
          let subst = replace x s1
-         let subst_lets lets = [ (x,f,map (substSimple subst) args) | (x,f,args) <- lets ]
+         let subst_lets lets = [ (x,substLet subst lt) | (x,lt) <- lets ]
          fmap (substSimple subst) (censor subst_lets (toSimple' e2))
 
     _ -> error $ "toSimple': " ++ ppRender e0
