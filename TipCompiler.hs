@@ -26,7 +26,7 @@ import Tip.Utils.Renamer
 import Data.Generics.Geniplate
 
 import TipLift
--- import TipMonadic
+import TipMonadic
 import TipTarget
 import TipExample
 import TipToSimple
@@ -63,9 +63,10 @@ main = do
       \ Function{..} ->
           do ppp func_name
              putStrLn "="
-             ppp (toExpr `vifne` func_body)
+             let e = toExpr `vifne` func_body
+             ppp e
              putStrLn ""
-
+             ppp ((\ e' -> do { x <- fresh; trExpr e' x }) `vifne` e)
 
 vifne :: F.Foldable f => (f Var -> Fresh a) -> f Var -> a
 f `vifne` x = runFreshFrom (maximumOn varMax x) (f x)
@@ -85,6 +86,20 @@ instance Proj Var where
   proj = Proj
   unproj (Proj v i) = Just (v,i)
   unproj _          = Nothing
+
+instance Monadic Var where
+  memofun   f = Var $ "memo_" ++ ppRender f
+  construct f = Var $ "con_" ++ ppRender f
+  conLabel  f = Var $ "lbl_" ++ ppRender f
+  returnH   = Var $ "return"
+  newCall   = Var $ "newCall"
+  new       = Var $ "new"
+  waitCase  = Var $ "waitCase"
+  con       = Var $ "Con"
+  memcpy    = Var $ "memcpy"
+  whenH     = Var $ "when"
+  unlessH   = Var $ "unless"
+  (=?)      = Var $ "(=?)"
 
 varMax :: Var -> Int
 varMax Var{}         = 0
