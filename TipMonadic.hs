@@ -11,40 +11,54 @@ import TipLift
 
 import Control.Applicative
 
-class (Name a,TipLift.Call a,Proj a) => Monadic a where
-  memofun   :: a -> a
-  construct :: a -> a -- the translation of constructors
+class (Name a,TipLift.Call a,Proj a,H.Interface a) => Monadic a where
+--   memofun   :: a -> a
+--  construct :: a -> a -- the translation of constructors
   conLabel  :: a -> a -- the label for constructors
-  returnH   :: a
-  newCall   :: a
-  new       :: a
-  waitCase  :: a
-  con       :: a -- Con
-  memcpy    :: a
-  whenH     :: a
-  unlessH   :: a
-  (=?)      :: a
+--   returnH   :: a
+--   newCall   :: a
+--   new       :: a
+--   waitCase  :: a
+--   con       :: a -- Con
+--   memcpy    :: a
+--   whenH     :: a
+--   unlessH   :: a
+--   (=?)      :: a
 
 returnExpr :: Monadic a => H.Expr a -> H.Expr a
-returnExpr e = H.Apply returnH [e]
+returnExpr e = H.Apply (prelude "return") [e]
 
 newExpr :: Monadic a => H.Expr a
-newExpr = H.Apply new []
+newExpr = H.Apply (api "new") []
 
 thenReturn :: Monadic a => [H.Stmt a] -> a -> H.Expr a
 ss `thenReturn` x = mkDo ss (returnExpr (var x))
 
 (>>>) :: Monadic a => H.Expr a -> H.Expr a -> H.Expr a
-a >>> b = H.Apply memcpy [a,b]
+a >>> b = H.Apply (api "equalHere") [a,b]
 
 trExpr :: Monadic a => S.Expr a -> a -> Fresh (H.Expr a)
 trExpr e0 r =
   case e0 of
     S.Simple s -> return (trSimple s >>> var r)
-    S.Let x (S.Proj i t s) e -> do e' <- trExpr e r
-                                   return (H.Apply (proj i t) [trSimple s,H.Lam (VarPat x) e'])
-    S.Let x (S.Apply f ss) e -> mkDo [H.Bind x (H.Apply f (map trSimple ss))] <$> trExpr e r
-                            -- TODO: handle call/cancel appropriately
+    S.Let x (S.Proj i t s) e ->
+      do e' <- trExpr e r
+         return (H.Apply (proj i t) [trSimple s,H.Lam [VarPat x] e'])
+    S.Let x (S.Apply f ss) e
+      | f == callName, Var g:args <- ss
+        -> do e' <- trExpr e r
+              return
+                (H.Apply (api "call")
+                  [var g,H.Tup (map trSimple args),H.Lam [VarPat x] e'])
+      | f == cancelName, [Var g,y] <- ss
+        -> do e' <- trExpr e r
+              return $
+                mkDo
+                  [ H.Stmt (H.Apply (api "nocall") [var g])
+                  , H.Bind x (returnExpr (trSimple y))
+                  ]
+                  e'
+      | otherwise -> mkDo [H.Bind x (H.Apply f (map trSimple ss))] <$> trExpr e r
 
     S.Match s calls alts ->
       do calls' <- mapM trCall calls
@@ -60,7 +74,7 @@ trExpr e0 r =
          --        y >>> r
          --      ...
          return $
-           H.Apply waitCase [trSimple s,H.Lam (VarPat c)
+           H.Apply (api "caseData") [H.Apply (api "unwrap") [trSimple s],H.Lam [VarPat c]
              (mkDo (calls' ++ alts') Noop)
            ]
 
@@ -75,15 +89,16 @@ trCall (Call f args e) =
      -- x <- newCall $ \ (a1,..,an) -> \ r' -> e => r'
      return $
        H.Bind f
-         (H.Apply newCall
-           [H.Lam (H.TupPat (map H.VarPat args))
-             (H.Lam (H.VarPat r') e')])
+         (H.Apply (api "newCall")
+           [H.Lam [H.TupPat (map H.VarPat args), H.VarPat r'] e'])
 
 trAlt :: Monadic a => a -> a -> [a] -> S.Alt a -> Fresh (H.Stmt a)
 trAlt c r cons (pat S.:=> rhs) =
   do body <- trExpr rhs r
      return $ Stmt $
        case pat of
-         S.Default  -> H.Apply unlessH [List [H.Apply (=?) [var c,var (conLabel k)] | k <- cons],body]
-         S.ConPat k -> H.Apply whenH [H.Apply (=?) [var c,var (conLabel k)],body]
+         S.Default  -> H.Apply (api "unless") [List [H.Apply (=?) [var c,var (conLabel k)] | k <- cons],body]
+         S.ConPat k -> H.Apply (api "when") [H.Apply (=?) [var c,var (conLabel k)],body]
 
+ where
+  (=?) = api "=?"

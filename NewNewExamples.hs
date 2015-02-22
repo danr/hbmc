@@ -75,6 +75,9 @@ app xs ys zs =
 newtype Nat = Nat (Thunk (Data N (Maybe Nat)))
  deriving ( Constructive, Equal, Eq )
 
+instance Unwrap Nat (Thunk (Data N (Maybe Nat))) where
+  unwrap (Nat t) = t
+
 data N = Zero | Succ
  deriving ( Eq, Ord, Show )
 

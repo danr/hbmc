@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, RankNTypes #-}
+{-# LANGUAGE FunctionalDependencies, FlexibleContexts #-}
 module NewNew where
 
 import Control.Applicative
@@ -163,6 +164,36 @@ noop _ = return ()
 when :: Bit -> H () -> H ()
 when c h = whens [c] h
 
+
+-- happens when all of them are false, to deal with default patterns:
+--
+--   case c
+--     K1 -> ..
+--     K2 -> ..
+--     _  -> e
+--
+-- becomes:
+--
+--   unless [c =? K1, c =? K2] $ [[ e ]]
+unless :: [Bit] -> H () -> H ()
+unless cs h
+  | null cs'  = h
+  | otherwise =
+      do c0 <- context
+         c1 <- new
+         -- [a1,a2, .. ,aN] = cs'
+         -- ~a1 & ~a2 ... & ~aN => c1
+         -- a1 | a2 | .. | aN | c1
+         addClauseHere (c1:cs)
+         inContext c1 $
+           do addClauseHere [c0]
+              -- in this context, all of a1...aN are false
+              sequence_ [ addClauseHere [nt c] | c <- cs' ]
+              h
+ where
+  cs' = filter (/=ff) cs
+
+-- happens when one of them is true
 whens :: [Bit] -> H () -> H ()
 whens cs h 
   | null cs'  = return ()
@@ -188,6 +219,71 @@ choice hs =
 ifThenElse :: Bit -> (H (), H ()) -> H ()
 ifThenElse b (yes,no) =
   choice [ do addClauseHere [b]; yes, do addClauseHere [nt b]; no ]
+
+--[ call ]----------------------------------------------------------------------
+
+data Call a b =
+  Call
+  { doit   :: Bit
+  , invoke :: a -> (b -> H ()) -> H ()
+  }
+
+newCall :: (Constructive a, Constructive b, Equal a, Equal b)
+        => (a -> b -> H ()) -> H (Call a b)
+newCall h =
+  do b <- new
+     x <- new
+     y <- new
+     c <- context
+     inContext b $
+       do addClauseHere [c]
+          h x y
+     return $
+       Call{ doit   = b
+           , invoke = \x' k -> do equalHere x' x
+                                  k y
+           }
+
+call :: Call a b -> a -> (b -> H ()) -> H ()
+call cl x k =
+  do addClauseHere [doit cl]
+     invoke cl x k
+
+nocall :: Call a b -> H ()
+nocall cl =
+  do addClauseHere [nt (doit cl)]
+
+--[ memo ]----------------------------------------------------------------------
+
+{-# NOINLINE memo #-}
+memo :: (Eq a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> a -> H b
+memo tag =
+  unsafePerformIO $
+    do putStrLn ("Creating table for " ++ tag ++ "...")
+       ref <- newIORef []
+       return $
+         \h x -> do xys <- io $ readIORef ref
+                    --io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (length xys))
+                    (c,y) <- case [ (c,y) | (c,x',y) <- xys, x' == x ] of
+                               [] ->
+                                 do y <- new
+                                    c <- new
+                                    io $ writeIORef ref ((c,x,y):xys)
+                                    inContext c $ h x y
+                                    return (c,y)
+
+                               (c,y):_ ->
+                                 do --io $ putStrLn ("Duplicate call: " ++ tag)
+                                    return (c,y)
+
+                    addClauseHere [c]
+                    return y
+
+{-# NOINLINE nomemo #-}
+nomemo :: (Eq a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> a -> H b
+nomemo tag h t = do r <- new
+                    h t r
+                    return r
 
 --------------------------------------------------------------------------------
 
@@ -413,11 +509,12 @@ instance Equal a => Equal (Thunk a) where
 equalThunk :: Equal a => Thunk a -> Thunk a -> H ()
 equalThunk x y =
   case (x, y) of
-    (Delay _ u _, Delay _ v _) ->
-      do equalUnique u v (equalThunk' x y)
-    
-    _ ->
-      do equalThunk' x y
+    (Delay _ u _, Delay _ v _)
+      | u == v -> return ()
+      | otherwise ->
+         do equalUnique u v (equalThunk' x y)
+
+    _ -> do equalThunk' x y
  where
   equalThunk' x y =
     ifForce x $ \a ->
@@ -462,6 +559,14 @@ instance Value a => Value (Thunk a) where
        case ema of
          Left _  -> return (dflt (either undefined id ema))
          Right x -> get x
+
+--[ unwrapping ]------------------------------------------------------------------------------
+
+class Unwrap a b | a -> b, b -> a where
+  unwrap :: a -> b
+
+caseData :: Unwrap k (Thunk (Data lbl cons)) => k -> (Val lbl -> H ()) -> H ()
+caseData t h = ifForce (unwrap t) (\ (Con lbl _) -> h lbl)
 
 --------------------------------------------------------------------------------
 

@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleInstances, TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
 module Main where
@@ -74,8 +75,11 @@ f `vifne` x = runFreshFrom (maximumOn varMax x) (f x)
 maximumOn :: (F.Foldable f,Ord b) => (a -> b) -> f a -> b
 maximumOn f = f . F.maximumBy (comparing f)
 
-data Var = Var String | Refresh Var Int | Label | Skip | Call | Cancel | Proj Var Int
-  deriving (Show,Eq,Ord)
+data Var
+  = Var String | Refresh Var Int
+  | Api String | Prelude String
+  | Label | Skip | Call | Cancel | Proj Var Int
+ deriving (Show,Eq,Ord)
 
 instance Booly Var where
   true  = Var "True"
@@ -88,23 +92,16 @@ instance Proj Var where
   unproj _          = Nothing
 
 instance Monadic Var where
-  memofun   f = Var $ "memo_" ++ ppRender f
-  construct f = Var $ "con_" ++ ppRender f
-  conLabel  f = Var $ "lbl_" ++ ppRender f
-  returnH   = Var $ "return"
-  newCall   = Var $ "newCall"
-  new       = Var $ "new"
-  waitCase  = Var $ "waitCase"
-  con       = Var $ "Con"
-  memcpy    = Var $ "memcpy"
-  whenH     = Var $ "when"
-  unlessH   = Var $ "unless"
-  (=?)      = Var $ "(=?)"
+  conLabel f = Var $ "lbl_" ++ ppRender f
 
 varMax :: Var -> Int
 varMax Var{}         = 0
 varMax (Refresh v i) = varMax v `max` i
 varMax _             = 0
+
+instance Interface Var where
+  api     = Api
+  prelude = Prelude
 
 instance Pretty Var where
   pp x =
@@ -112,6 +109,9 @@ instance Pretty Var where
       Var ""      -> text "x"
       Var xs      -> text xs
       Refresh v i -> pp v <> int i
+      Proj x i    -> "proj" {- <> pp x <> "_" -} <> pp i
+      Api x       -> text x
+      Prelude x   -> text x
       _           -> text (show x)
 
 disambigId :: Id -> [Var]
