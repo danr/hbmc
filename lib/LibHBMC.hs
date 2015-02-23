@@ -15,9 +15,10 @@ import System.IO.Unsafe
 
 data Env =
   Env
-  { sat   :: Solver
-  , here  :: Bit
-  , waits :: IORef [(Bit,Unique,H ())]
+  { sat    :: Solver
+  , here   :: Bit
+  , checks :: IORef [(Bit, H ())]
+  , waits  :: IORef [(Bit,Unique,H ())]
   }
 
 newtype H a = H (Env -> IO a)
@@ -40,13 +41,45 @@ instance Monad H where
 run :: H a -> IO a
 run (H m) =
   M.withNewSolver $ \s ->
-    do ref <- newIORef []
-       m (Env s tt ref)
+    do refc <- newIORef []
+       refw <- newIORef []
+       m (Env s tt refc refw)
+
+tryChecks :: [Bit] -> H ()
+tryChecks as = H (\env ->
+  do cs <- readIORef (checks env)
+     writeIORef (checks env) []
+     if null cs then
+       do return ()
+      else
+       do putStrLn "Running checks..."
+          let checking [] =
+                do cs <- readIORef (checks env)
+                   if null cs then
+                     return []
+                    else
+                     checking cs                   
+              
+              checking ((c,m):cs) =
+                do b <- solveBit (sat env) (c : as)
+                   if b then
+                     do putStrLn "Running checked code..."
+                        let H m' = m in m' env
+                        checking cs
+                    else
+                     do cs' <- checking cs
+                        return ((c,m):cs')
+          
+          cs' <- checking cs
+          writeIORef (checks env) cs'
+  )
 
 trySolve :: H (Maybe Bool)
 trySolve = H (\env ->
   do ws <- reverse `fmap` readIORef (waits env)
      putStrLn ("== Try solve with " ++ show (length ws) ++ " waits ==")
+     let ass = (here env : reverse [ nt p | (p,_,_) <- ws ])
+     let H m = tryChecks ass in m env
      putStrLn "Solve..."
      b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws ])
      if b then
@@ -153,7 +186,13 @@ later unq h = H (\env ->
   )
 
 check :: H () -> H ()
-check h = undefined
+check h@(H m) = H (\env ->
+    if here env == tt then
+      m env
+    else
+      do cs <- readIORef (checks env)
+         writeIORef (checks env) ((here env, h):cs)
+  )
 
 must :: Bit -> H () -> H ()
 must c h =
