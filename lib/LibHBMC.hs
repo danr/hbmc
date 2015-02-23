@@ -1,5 +1,4 @@
-{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, RankNTypes #-}
-{-# LANGUAGE FunctionalDependencies, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, RankNTypes, FlexibleContexts #-}
 module LibHBMC where
 
 import Control.Applicative
@@ -142,7 +141,10 @@ withExtraContext c h =
 
 inContext :: Bit -> H () -> H ()
 inContext c _ | c == ff = return ()
-inContext c (H m) = H (\env -> m env{ here = c })
+inContext c h = inContext' c h
+
+inContext' :: Bit -> H a -> H a
+inContext' c (H m) = H (\env -> m env{ here = c })
 
 later :: Unique -> H () -> H ()
 later unq h = H (\env ->
@@ -265,23 +267,23 @@ nocall cl =
 --[ memo ]----------------------------------------------------------------------
 
 {-# NOINLINE memo #-}
-memo :: (Eq a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> (a -> H b)
+memo :: (Ord a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> (a -> H b)
 memo tag h =
   unsafePerformIO $
     do putStrLn ("Creating table for " ++ tag ++ "...")
-       ref <- newIORef []
+       ref <- newIORef Mp.empty
        return $
          \x -> do xys <- io $ readIORef ref
                   -- io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (length xys))
-                  (c,y) <- case [ (c,y) | (c,x',y) <- xys, x' == x ] of
-                             [] ->
+                  (c,y) <- case Mp.lookup x xys of
+                             Nothing ->
                                do y <- new
                                   c <- new
-                                  io $ writeIORef ref ((c,x,y):xys)
+                                  io $ writeIORef ref (Mp.insert x (c,y) xys)
                                   inContext c $ h x y
                                   return (c,y)
 
-                             (c,y):_ ->
+                             Just (c,y) ->
                                do --io $ putStrLn ("Duplicate call: " ++ tag)
                                   return (c,y)
 
@@ -459,6 +461,12 @@ instance Eq a => Eq (Thunk a) where
   Delay _ p _ == Delay _ q _ = p == q
   _           == _           = False
 
+instance Ord a => Ord (Thunk a) where
+  This x      `compare` This y      = x `compare` y
+  Delay _ p _ `compare` Delay _ q _ = p `compare` q
+  This _      `compare` _           = LT
+  _           `compare` This _      = GT
+
 this :: a -> Thunk a
 this x = This x
 
@@ -573,14 +581,6 @@ instance Value a => Value (Thunk a) where
          Left _  -> return (dflt (either undefined id ema))
          Right x -> get x
 
---[ unwrapping ]------------------------------------------------------------------------------
-
-class Unwrap a b | a -> b, b -> a where
-  unwrap :: a -> b
-
-caseData :: Unwrap k (Thunk (Data lbl cons)) => k -> (Val lbl -> cons -> H ()) -> H ()
-caseData t h = ifForce (unwrap t) (\ (Con lbl cons) -> h lbl cons)
-
 --------------------------------------------------------------------------------
 
 newtype Val a = Val [(Bit,a)] -- sorted on a
@@ -672,7 +672,7 @@ instance Value (Val a) where
 --------------------------------------------------------------------------------
 
 data Data c a = Con (Val c) a
-  deriving ( Eq )
+  deriving ( Eq, Ord )
 
 con :: Ord c => c -> a -> Thunk (Data c a)
 con c a = this (Con (val c) a)
