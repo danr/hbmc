@@ -40,11 +40,11 @@ merge (xs:xss) = help xs (merge xss)
 
 trDatatype :: forall a . Interface a => Datatype a -> Fresh [Decl a]
 trDatatype dt@(Datatype tc tvs cons) =
-  do unwrap <- make_unwrap
+  do constructors <- mapM make_con cons
+     case_data <- make_case_data
      equal <- make_equal
      value <- make_value
-     constructors <- mapM make_con cons
-     return ([wrapper,unwrap,labels,constructive,equal,repr,value] ++ constructors)
+     return ([wrapper,labels] ++ constructors ++ [case_data,constructive,equal,repr,value])
  where
   (indexes,types) = dataInfo dt
 
@@ -65,16 +65,15 @@ trDatatype dt@(Datatype tc tvs cons) =
     [(wrapData tc,[thunk])]
     [api "Constructive",api "Equal",prelude "Eq"]
 
-  -- instance Unwrap Nat (Thunk (Data N (Maybe Nat))) where
-  --   unwrap (Nat t) = t
-  make_unwrap :: Fresh (Decl a)
-  make_unwrap =
+  -- caseNat (Nat t) h = ifForce t h
+  make_case_data :: Fresh (Decl a)
+  make_case_data =
     do t <- fresh
+       h <- fresh
        return $
-         InstDecl []
-           (TyCon (api "Unwrap") [me,thunk])
-           [FunDecl (api "unwrap")
-             [([ConPat (wrapData tc) [VarPat t]],var t)]]
+         FunDecl (caseData tc)
+           [([ConPat (wrapData tc) [VarPat t],VarPat h]
+            ,Apply (api "ifForce") [var t,var h])]
 
   -- data N = Zero | Succ
   --  deriving ( Eq, Ord, Show )

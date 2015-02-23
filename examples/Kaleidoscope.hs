@@ -59,7 +59,7 @@ ex3_ambiguity t1 t2 = linS t1 =:= linS t2 ==> t1 =:= t2
 
 -- append --
 
-(++) :: [Token] -> [Token] -> [Token]
+(++) :: [a] -> [a] -> [a]
 (x:xs) ++ ys = x:(xs ++ ys)
 []     ++ ys = ys
 

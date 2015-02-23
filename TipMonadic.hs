@@ -46,25 +46,23 @@ trFun Tip.Function{..} =
               | tv <- func_tvs
               , s <- ["Equal","Eq","Constructive"]
               ]
-              (foldr TyArr
-                 (TyCon (api "H") [tt func_res])
-                 (map (tt . Tip.lcl_type) func_args)),
+              (TyTup (map (tt . Tip.lcl_type) func_args)
+               `TyArr` (TyCon (api "H") [tt func_res])),
 
-         funDecl func_name args
+         funDecl func_name []
           (H.Apply (api "memo")
             [H.String func_name
-            ,H.Tup (map var args)
-            ,H.Lam [H.VarPat r] b
+            ,H.Lam [H.TupPat (map H.VarPat args),H.VarPat r] b
             ])
        ]
 
-trProp :: Interface a => Tip.Formula a -> Fresh (H.Decl a)
+trProp :: Interface a => Tip.Formula a -> Fresh (a,H.Decl a)
 trProp (Tip.Formula Tip.Prove [] (Tip.collectQuant -> (lcls,tm)))
   = do let input = [ BindTyped x (modTyCon wrapData (trType t)) (var (api "newInput"))
                    | Tip.Local x t <- lcls ]
        terms <- mapM trTerm (collectTerms tm)
        f <- fresh
-       return $ funDecl f [] $
+       return $ (,) f $ funDecl f [] $
          mkDo (input ++ concat terms)
            (H.Apply (api "solveAndSee") [Tup (map (var . Tip.lcl_name) lcls)])
 trProp fm = error $ "Invalid property: " ++ ppRender fm ++ "\n(cannot be polymorphic)"
@@ -103,7 +101,7 @@ trExpr e0 r =
     S.Simple s -> return (trSimple s >>> var r)
     S.Let x (S.Proj i t s) e ->
       do e' <- trExpr e r
-         return (H.Apply (proj i t) [trSimple s,H.Lam [VarPat x] e'])
+         return (H.Apply (proj i t) [var s,H.Lam [VarPat x] e'])
     S.Let x (S.Apply f ss) e
       | f == callName, Var g:args <- ss
         -> do e' <- trExpr e r
@@ -118,19 +116,22 @@ trExpr e0 r =
                   , H.Bind x (returnExpr (trSimple y))
                   ]
                   e'
-      | otherwise -> mkDo [H.Bind x (H.Apply f (map trSimple ss))] <$> trExpr e r
+      | otherwise -> mkDo [H.Bind x (H.Apply f [Tup (map trSimple ss)])] <$> trExpr e r
 
-    S.Match s calls alts ->
+    S.Match tc s calls alts ->
       do s' <- fresh
 
-         let change x | x == s    = s'
-                      | otherwise = x
+         let change l0 =
+               case l0 of
+                 Proj tc' i x | x == s    -> Proj tc' i s'
+                 _ -> l0
 
-         calls' <- mapM (trCall . fmap change) calls
+
+         calls' <- mapM (trCall . modLet change) calls
 
          c <- fresh
          let ctors = [ k | S.ConPat k S.:=> _ <- alts ]
-         alts' <- mapM (trAlt c r ctors . fmap change) alts
+         alts' <- mapM (trAlt c r ctors . modLet change) alts
 
          -- do waitCase s $ \ c s' ->
          --      [[ calls ]]
@@ -139,9 +140,10 @@ trExpr e0 r =
          --        y >>> r
          --      ...
          return $
-           H.Apply (api "caseData") [{- H.Apply (api "unwrap") [-}var s{-]-},H.Lam [VarPat c,VarPat s']
-             (mkDo (calls' ++ alts') Noop)
-           ]
+           H.Apply (caseData tc) [var s,
+             H.Lam [H.ConPat (api "Con") [H.VarPat c,H.VarPat s']]
+               (mkDo (calls' ++ alts') Noop)
+             ]
 
 trSimple :: Interface a => S.Simple a -> H.Expr a
 trSimple (S.Var x)    = var x

@@ -28,10 +28,13 @@ class TipLift.Call a => Interface a where
   proj      :: a -> Int -> a
   unproj    :: a -> Maybe (a,Int)
 
+  mainFun   :: a
+
   conLabel  :: a -> a -- the translation of constructors
   conRepr   :: a -> a -- concrete datatype representation
   thunkRepr :: a -> a
   wrapData  :: a -> a
+  caseData  :: a -> a -- caseNat
   mkCon     :: a -> a -- the pure constructors
 
 data Decls a = Decls [Decl a]

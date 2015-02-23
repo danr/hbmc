@@ -1,5 +1,9 @@
 {-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 module TipSimple where
 
 import Text.PrettyPrint
@@ -7,14 +11,16 @@ import Tip.Pretty
 import Data.Foldable (Foldable)
 import Data.Traversable (Traversable)
 
+import Data.Generics.Geniplate
+
 data Let a = Apply a [Simple a]
-           | Proj a Int (Simple a)
+           | Proj a Int a
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Expr a
   = Simple (Simple a)
   | Let  a (Let a) (Expr a)
-  | Match a [Call a] [Alt a]
+  | Match a a [Call a] [Alt a]
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Simple a
@@ -31,42 +37,34 @@ data Alt a = Pat a :=> Expr a
 data Pat a = ConPat a | Default
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
-substSimple :: (a -> Simple a) -> Simple a -> Simple a
-substSimple su e =
-  case e of
-    Var x       -> su x
-    Con x ss    -> Con x (map (substSimple su) ss)
+instanceTransformBi [t| forall a . (Simple a,Expr a) |]
+instanceTransformBi [t| forall a . (Simple a,Simple a) |]
+instanceTransformBi [t| forall a . (Simple a,Let a) |]
 
-substLet :: (a -> Simple a) -> Let a -> Let a
-substLet su e =
-  case e of
-    Apply f ss -> Apply f (map (substSimple su) ss)
-    Proj t i s -> Proj t i (substSimple su s)
+instanceTransformBi [t| forall a . (Let a,Call a) |]
+instanceTransformBi [t| forall a . (Let a,Alt a) |]
 
-substExpr :: (a -> Simple a) -> Expr a -> Expr a
-substExpr su e0 =
-  case e0 of
-    Simple s   -> Simple (substSimple su s)
-    Let x lt e -> Let  x (substLet su lt) (substExpr su e)
-    Match e calls alts ->
-      case su e of
-        Var z ->
-          Match z
-            [ Call f x (substExpr su e) | Call f x e <- calls ]
-            [ pat :=> substExpr su rhs | pat :=> rhs <- alts ]
-        _ -> error "substExpr: substituted case scrutinee (todo: pick right branch)"
+substSimple :: TransformBi (Simple a) (f a) => (a -> Simple a) -> f a -> f a
+substSimple su =
+  transformBi $ \ s0 ->
+    case s0 of
+      Var x -> su x
+      _     -> s0
+
+modLet :: TransformBi (Let a) (f a) => (Let a -> Let a) -> f a -> f a
+modLet = transformBi
 
 instance Pretty a => Pretty (Expr a) where
   pp (Simple s) = pp s
   pp (Let x lt e) = sep ["let" $\ pp x <+> "=" $\ pp lt <> ";",pp e]
-  pp (Match s calls alts) =
-    ("case" $\ pp s <+> "of")
+  pp (Match tc s calls alts) =
+    ("case" <+> "{-" <+> pp tc <+> "-}" $\ pp s <+> "of")
       $\ (if null calls then empty else braces (vcat (punctuate ";" (map pp calls))))
       $$ vcat (map pp alts)
 
 instance Pretty a => Pretty (Let a) where
   pp (Apply f args) = pp f <+> fsep (map pp args)
-  pp (Proj t i s)   = "proj" <> pp t <> "_" <> pp i <+> pp s
+  pp (Proj t i x)   = "proj" <> pp t <> "_" <> pp i <+> pp x
 
 instance Pretty a => Pretty (Simple a) where
   pp (Var a)        = pp a

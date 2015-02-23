@@ -31,24 +31,33 @@ e `labelled` l = [ el | Gbl (Global f _ _ _) :@: [lbl,el] <- universeBi e, f == 
 
 antiMatch :: Call a => [Expr a] -> Fresh ((Local a,Expr a),Expr a)
 antiMatch xs =
-  do let (f:_fs,argss) = unzip [ (fx,args) | x <- xs, let Gbl (Global fx _ _ _) :@: args = x ]
+  do let (Local f ft:_fs,argss) =
+           unzip
+             [ (Local fx (exprType x),args)
+             | x <- xs, let Gbl (Global fx _ _ _) :@: args = x
+             ]
 
      g <- refresh f
+     let lg = Local g ft
 
      (args,vars) <-
         unzip <$>
         sequence
           [ case column of
-              e:es | all (e==) es -> do y <- fresh; return (e,Left (lcl y))
-              es                  -> do x <- fresh; return (Lcl (lcl x),Right (lcl x))
+              e:es | all (e==) es -> do y <- fresh; return (e,Left (Local y (exprType e)))
+              es                  -> do x <- fresh
+                                        let lx = Local x (exprType (head es))
+                                        return (Lcl lx,Right lx)
           | column <- transpose argss
           ]
 
      let rights = [ x | Right x <- vars ]
 
      return
-       ( (lcl g, Lam rights (Gbl (fun f) :@: args))
-       , Lam (map (either id id) vars) (Gbl (fun callName) :@: (Lcl (lcl g):map Lcl rights))
+       ( (lg, Lam rights (Gbl (fun f) :@: args))
+       , Lam (map (either id id) vars)
+             (Gbl (Global callName (PolyType [] [] ft) [] FunctionNS)
+               :@: (Lcl lg:map Lcl rights))
        )
 
 liftCall :: Call a => Label a -> Expr a -> Fresh (Local a,Expr a,Expr a)
@@ -112,6 +121,5 @@ removeLabelsFromTheory
                      ]
      return Theory{thy_func_decls=fns,..}
 
-lcl a = Local a NoType
 fun a = Global a NoPolyType [] FunctionNS
 

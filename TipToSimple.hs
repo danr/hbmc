@@ -3,6 +3,7 @@ module TipToSimple where
 
 import TipSimple as S
 import Tip.Types as T
+import qualified Tip as T
 import Tip.Fresh
 import Tip.Pretty
 import Control.Monad.Writer
@@ -14,7 +15,7 @@ toExpr e0 =
   case e0 of
     T.Let (Local x _) e1 e2 ->
       do (lets,s1) <- toSimple e1
-         bindLets lets . substExpr (replace x s1) <$> toExpr e2
+         bindLets lets . substSimple (replace x s1) <$> toExpr e2
 
     T.Match (collectLets -> (calls,scrut_expr)) alts ->
       do (lets,Var s) <- toSimple scrut_expr
@@ -35,7 +36,13 @@ toExpr e0 =
              | T.Case pat rhs <- alts
              ]
 
-         return (bindLets lets (S.Match s calls' alts'))
+         let tc =
+               case T.exprType scrut_expr of
+                 TyCon tc' _ -> tc'
+                 t -> error $ "Case on non-TyCon typed scrut:\n  " ++ ppRender e0
+                              ++ "\n " ++ ppRender t
+
+         return (bindLets lets (S.Match tc s calls' alts'))
 
     _ ->
       do (lets,s) <- toSimple e0
@@ -64,7 +71,7 @@ toSimple' e0 =
            ConstructorNS -> do return (Con f xn)
            FunctionNS    -> do a <- lift fresh
                                let lt = case unproj f of
-                                          Just (tc,i) -> let [x] = xn
+                                          Just (tc,i) -> let [Var x] = xn
                                                          in  Proj tc i x
                                           Nothing     -> S.Apply f xn
                                tell [(a,lt)]
@@ -73,7 +80,7 @@ toSimple' e0 =
     T.Let (T.Local x _) e1 e2 ->
       do s1 <- toSimple' e1
          let subst = replace x s1
-         let subst_lets lets = [ (x,substLet subst lt) | (x,lt) <- lets ]
+         let subst_lets lets = [ (x,substSimple subst lt) | (x,lt) <- lets ]
          fmap (substSimple subst) (censor subst_lets (toSimple' e2))
 
     _ -> error $ "toSimple': " ++ ppRender e0

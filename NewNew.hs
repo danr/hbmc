@@ -264,28 +264,28 @@ nocall cl =
 --[ memo ]----------------------------------------------------------------------
 
 {-# NOINLINE memo #-}
-memo :: (Eq a, Equal b, Constructive b) => String -> a -> (b -> H ()) -> H b
-memo tag =
+memo :: (Eq a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> (a -> H b)
+memo tag h =
   unsafePerformIO $
     do putStrLn ("Creating table for " ++ tag ++ "...")
        ref <- newIORef []
        return $
-         \x h -> do xys <- io $ readIORef ref
-                    --io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (length xys))
-                    (c,y) <- case [ (c,y) | (c,x',y) <- xys, x' == x ] of
-                               [] ->
-                                 do y <- new
-                                    c <- new
-                                    io $ writeIORef ref ((c,x,y):xys)
-                                    inContext c $ h y
-                                    return (c,y)
+         \x -> do xys <- io $ readIORef ref
+                  -- io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (length xys))
+                  (c,y) <- case [ (c,y) | (c,x',y) <- xys, x' == x ] of
+                             [] ->
+                               do y <- new
+                                  c <- new
+                                  io $ writeIORef ref ((c,x,y):xys)
+                                  inContext c $ h x y
+                                  return (c,y)
 
-                               (c,y):_ ->
-                                 do --io $ putStrLn ("Duplicate call: " ++ tag)
-                                    return (c,y)
+                             (c,y):_ ->
+                               do --io $ putStrLn ("Duplicate call: " ++ tag)
+                                  return (c,y)
 
-                    addClauseHere [c]
-                    return y
+                  addClauseHere [c]
+                  return y
 
 {-# NOINLINE nomemo #-}
 nomemo :: (Eq a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> a -> H b

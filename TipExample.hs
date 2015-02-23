@@ -37,3 +37,4 @@ con a = Global a NoPolyType [] ConstructorNS
 
 e @@ i = Gbl (fun labelName) :@: [literal (Int i),e]
 
+lcl a = Local a NoType

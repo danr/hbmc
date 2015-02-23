@@ -29,7 +29,7 @@ import Data.Generics.Geniplate
 import TipLift
 import TipMonadic
 import TipTarget
-import TipExample
+-- import TipExample
 import TipToSimple
 import TipData
 -- Main
@@ -69,8 +69,10 @@ main = do
     let decls = runFreshFrom (maximumOn varMax thy2) $
           do fn_decls <- mapM trFun func_decls
              dt_decls <- mapM trDatatype data_decls
-             prop_decls <- mapM trProp (thy_form_decls thy2)
-             return (Decls (concat fn_decls ++ concat dt_decls ++ prop_decls))
+             (prop_names,prop_decls) <- mapAndUnzipM trProp (thy_form_decls thy2)
+             let main_decl = funDecl mainFun []
+                   (mkDo [Stmt (Apply (api "run") [var p]) | p <- prop_names] Noop)
+             return (Decls (concat fn_decls ++ concat dt_decls ++ prop_decls ++ [main_decl]))
 
     putStrLn "{-# LANGUAGE ScopedTypeVariables #-}"
     putStrLn "{-# LANGUAGE TypeFamilies #-}"
@@ -110,10 +112,13 @@ instance Interface Var where
   unproj (Proj v i) = Just (v,i)
   unproj _          = Nothing
 
-  conLabel  f = Var $ "Lbl_" ++ ppRender f
-  conRepr   f = Var $ ppRender f ++ "_Repr"
+  mainFun     = Var "main"
+
+  conLabel  f = Var $ "L_" ++ ppRender f
+  conRepr   f = Var $ ppRender f ++ "_"
   thunkRepr f = Var $ "Thunk_" ++ ppRender f
-  wrapData  f = Var $ "Wrap_" ++ ppRender f
+  wrapData  f = Var $ "D_" ++ ppRender f
+  caseData  f = Var $ "case" ++ ppRender f
   mkCon     f = Var $ "con" ++ ppRender f
 
 instance Pretty Var where
