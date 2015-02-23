@@ -85,7 +85,7 @@ trySolve = H (\env ->
            else
             let find [] =
                   do return (error "shouldn't happen")
-                
+
                 find ((p,unq,H h):ws) =
                   do b <- solveBit (sat env) [p]
                      if b then
@@ -97,7 +97,7 @@ trySolve = H (\env ->
                       else
                        do putStr "X"
                           find ws
-             
+
              in do writeIORef (waits env) []
                    putStrLn "Finding a point to expand..."
                    find (reverse ws)
@@ -156,7 +156,7 @@ check h = undefined
 must :: Bit -> H () -> H ()
 must c h =
   do addClauseHere [c]
-     if c == ff then return () else h 
+     if c == ff then return () else h
 
 addClauseHere :: [Bit] -> H ()
 addClauseHere xs =
@@ -203,12 +203,13 @@ unless cs h
 
 -- happens when one of them is true
 whens :: [Bit] -> H () -> H ()
-whens cs h 
+whens cs h
   | null cs'  = return ()
-  | otherwise = 
+  | otherwise =
     do c0 <- context
        c1 <- new
        sequence_ [ addClauseHere [nt c, c1] | c <- cs' ]
+                               -- c => c1
        inContext c1 $
          do addClauseHere [c0]
             addClauseHere cs'
@@ -354,11 +355,11 @@ instance Equal Bit where
   notEqualHere x y = equalHere x (nt y)
 
 instance (Equal a, Equal b) => Equal (a,b) where
-  equalHere (x1,x2) (y1,y2) = 
+  equalHere (x1,x2) (y1,y2) =
     do equalHere x1 y1
        equalHere x2 y2
 
-  notEqualHere (x1,x2) (y1,y2) = 
+  notEqualHere (x1,x2) (y1,y2) =
     choice
     [ notEqualHere x1 y1
     , notEqualHere x2 y2
@@ -541,7 +542,7 @@ equalUnique =
                          io $ writeIORef ref (Mp.insert (u,v) q uvs)
                          inContext q $ h
                          return q
-                  
+
                    Just q ->
                       do --io $ putStrLn "equalHere duplicate!"
                          return q
@@ -642,7 +643,7 @@ instance Ord a => Equal (Val a) where
                  eq xs ys
         GT -> do addClauseHere [nt y]
                  eq ((x,a):xs) ys
-  
+
   notEqualHere (Val xs) (Val ys) = neq xs ys
    where
     neq [] ys = return ()
@@ -653,12 +654,12 @@ instance Ord a => Equal (Val a) where
         EQ -> do addClauseHere [nt x, nt y]
                  neq xs ys
         GT -> do neq ((x,a):xs) ys
-  
+
 instance Value (Val a) where
   type Type (Val a) = a
-  
+
   dflt _ = error "no default value for Val" -- URK
-  
+
   get (Val xs) =
     do bs <- sequence [ get x | (x,_) <- xs ]
        return (head [ a | (True,(_,a)) <- bs `zip` xs ])
@@ -735,6 +736,4 @@ getData f d t =
        Just (Con c a) ->
          do x <- get c
             f x a
-
---------------------------------------------------------------------------------
 
