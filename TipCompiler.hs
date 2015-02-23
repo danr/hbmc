@@ -51,23 +51,34 @@ main = do
 
     let thy1 = (commuteMatch <=< simplifyExpr aggressively <=< delambda) `vifne` thy0
 
-    ppp thy1
+    -- ppp thy1
 
     let (dis,_) = unzip (map dataInfo (thy_data_decls thy1))
         di      = concat dis
 
     let thy2 = (removeLabelsFromTheory <=< projectPatterns di) `vifne` thy1
 
-    ppp thy2
 
-    forM_ (thy_func_decls thy2) $
-      \ Function{..} ->
-          do ppp func_name
-             putStrLn "="
-             let e = toExpr `vifne` func_body
-             ppp e
-             putStrLn ""
-             ppp ((\ e' -> do { x <- fresh; trExpr e' x }) `vifne` e)
+    let func_decls = [ fn | fn <- thy_func_decls thy2, Tip.func_name fn /= labelName ]
+
+    let data_decls =
+          [ d | d <- thy_data_decls thy2
+              , and [ False | Tip.BuiltinType Tip.Integer :: Tip.Type Var <- universeBi d ]
+              ]
+
+    let decls = runFreshFrom (maximumOn varMax thy2) $
+          do fn_decls <- mapM trFun func_decls
+             dt_decls <- mapM trDatatype data_decls
+             prop_decls <- mapM trProp (thy_form_decls thy2)
+             return (Decls (concat fn_decls ++ concat dt_decls ++ prop_decls))
+
+    putStrLn "{-# LANGUAGE ScopedTypeVariables #-}"
+    putStrLn "{-# LANGUAGE TypeFamilies #-}"
+    putStrLn "{-# LANGUAGE FlexibleInstances #-}"
+    putStrLn "{-# LANGUAGE MultiParamTypeClasses #-}"
+    putStrLn "{-# LANGUAGE GeneralizedNewtypeDeriving #-}"
+    putStrLn "import NewNew"
+    ppp decls
 
 vifne :: F.Foldable f => (f Var -> Fresh a) -> f Var -> a
 f `vifne` x = runFreshFrom (maximumOn varMax x) (f x)
@@ -86,14 +97,6 @@ instance Booly Var where
   false = Var "False"
   bool  = Var "Bool"
 
-instance Proj Var where
-  proj = Proj
-  unproj (Proj v i) = Just (v,i)
-  unproj _          = Nothing
-
-instance Monadic Var where
-  conLabel f = Var $ "lbl_" ++ ppRender f
-
 varMax :: Var -> Int
 varMax Var{}         = 0
 varMax (Refresh v i) = varMax v `max` i
@@ -103,13 +106,23 @@ instance Interface Var where
   api     = Api
   prelude = Prelude
 
+  proj = Proj
+  unproj (Proj v i) = Just (v,i)
+  unproj _          = Nothing
+
+  conLabel  f = Var $ "Lbl_" ++ ppRender f
+  conRepr   f = Var $ ppRender f ++ "_Repr"
+  thunkRepr f = Var $ "Thunk_" ++ ppRender f
+  wrapData  f = Var $ "Wrap_" ++ ppRender f
+  mkCon     f = Var $ "con" ++ ppRender f
+
 instance Pretty Var where
   pp x =
     case x of
       Var ""      -> text "x"
       Var xs      -> text xs
       Refresh v i -> pp v <> int i
-      Proj x i    -> "proj" {- <> pp x <> "_" -} <> pp i
+      Proj x i    -> "proj" {- <> pp x <> "_" -} <> pp (i+1)
       Api x       -> text x
       Prelude x   -> text x
       _           -> text (show x)
@@ -158,7 +171,7 @@ addBool = transformBi f . transformBi g
     gbl b =
       Global
         (if b then true else false)
-        (PolyType [] [] (TyCon bool []))
+        (PolyType [] [] (Tip.TyCon bool []))
         []
         ConstructorNS
 
@@ -169,7 +182,7 @@ addBoolToTheory Theory{..} = addBool Theory{thy_data_decls=bool_decl:thy_data_de
 
 -- project
 
-projectPatterns :: forall f a . (TransformBiM Fresh (Tip.Expr a) (f a),Proj a) => DataInfo a -> f a -> Fresh (f a)
+projectPatterns :: forall f a . (TransformBiM Fresh (Tip.Expr a) (f a),Interface a) => DataInfo a -> f a -> Fresh (f a)
 projectPatterns di =
   transformBiM $ \ e0 ->
     case e0 of
@@ -212,6 +225,7 @@ instance Name String where
   fresh     = refresh "u"
   refresh x = fresh >>= \ i -> return (x ++ "_" ++ show (i :: Int))
 
+{-
 instance Proj String where
   proj tc i = "proj_" ++ tc ++ "_" ++ show i
   unproj ('p':'r':'o':'j':'_':s) =
@@ -219,6 +233,7 @@ instance Proj String where
       (i,'_':rtc) | [(n,[])] <- reads (reverse i) -> Just (reverse rtc,n)
       _ -> Nothing
   unproj _ = Nothing
+-}
 
 {-
 instance Monadic String where

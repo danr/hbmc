@@ -14,7 +14,7 @@ data Let a = Apply a [Simple a]
 data Expr a
   = Simple (Simple a)
   | Let  a (Let a) (Expr a)
-  | Match (Simple a) [Call a] [Alt a]
+  | Match a [Call a] [Alt a]
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Simple a
@@ -49,9 +49,12 @@ substExpr su e0 =
     Simple s   -> Simple (substSimple su s)
     Let x lt e -> Let  x (substLet su lt) (substExpr su e)
     Match e calls alts ->
-      Match (substSimple su e)
-        [ Call f x (substExpr su e) | Call f x e <- calls ]
-        [ pat :=> substExpr su rhs | pat :=> rhs <- alts ]
+      case su e of
+        Var z ->
+          Match z
+            [ Call f x (substExpr su e) | Call f x e <- calls ]
+            [ pat :=> substExpr su rhs | pat :=> rhs <- alts ]
+        _ -> error "substExpr: substituted case scrutinee (todo: pick right branch)"
 
 instance Pretty a => Pretty (Expr a) where
   pp (Simple s) = pp s

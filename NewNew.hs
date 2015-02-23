@@ -115,6 +115,14 @@ solve' h =
 solve :: H Bool
 solve = solve' (return ())
 
+solveAndSee :: (Value a,Show (Type a)) => a -> H ()
+solveAndSee see =
+  do b <- solve
+     if b then
+       do get see >>= (io . print)
+     else
+       do io (putStrLn "No value found.")
+
 io :: IO a -> H a
 io m = H (\_ -> m)
 
@@ -256,20 +264,20 @@ nocall cl =
 --[ memo ]----------------------------------------------------------------------
 
 {-# NOINLINE memo #-}
-memo :: (Eq a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> a -> H b
+memo :: (Eq a, Equal b, Constructive b) => String -> a -> (b -> H ()) -> H b
 memo tag =
   unsafePerformIO $
     do putStrLn ("Creating table for " ++ tag ++ "...")
        ref <- newIORef []
        return $
-         \h x -> do xys <- io $ readIORef ref
+         \x h -> do xys <- io $ readIORef ref
                     --io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (length xys))
                     (c,y) <- case [ (c,y) | (c,x',y) <- xys, x' == x ] of
                                [] ->
                                  do y <- new
                                     c <- new
                                     io $ writeIORef ref ((c,x,y):xys)
-                                    inContext c $ h x y
+                                    inContext c $ h y
                                     return (c,y)
 
                                (c,y):_ ->
@@ -565,8 +573,8 @@ instance Value a => Value (Thunk a) where
 class Unwrap a b | a -> b, b -> a where
   unwrap :: a -> b
 
-caseData :: Unwrap k (Thunk (Data lbl cons)) => k -> (Val lbl -> H ()) -> H ()
-caseData t h = ifForce (unwrap t) (\ (Con lbl _) -> h lbl)
+caseData :: Unwrap k (Thunk (Data lbl cons)) => k -> (Val lbl -> cons -> H ()) -> H ()
+caseData t h = ifForce (unwrap t) (\ (Con lbl cons) -> h lbl cons)
 
 --------------------------------------------------------------------------------
 

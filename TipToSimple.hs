@@ -7,9 +7,9 @@ import Tip.Fresh
 import Tip.Pretty
 import Control.Monad.Writer
 import Control.Applicative
-import TipData (Proj,unproj)
+import TipTarget (Interface(proj,unproj))
 
-toExpr :: (Proj a,Name a) => T.Expr a -> Fresh (S.Expr a)
+toExpr :: Interface a => T.Expr a -> Fresh (S.Expr a)
 toExpr e0 =
   case e0 of
     T.Let (Local x _) e1 e2 ->
@@ -17,7 +17,7 @@ toExpr e0 =
          bindLets lets . substExpr (replace x s1) <$> toExpr e2
 
     T.Match (collectLets -> (calls,scrut_expr)) alts ->
-      do (lets,s) <- toSimple scrut_expr
+      do (lets,Var s) <- toSimple scrut_expr
 
          calls' <-
            sequence
@@ -48,12 +48,12 @@ collectLets e              = ([],e)
 bindLets :: [(a,Let a)] -> S.Expr a -> S.Expr a
 bindLets = flip (foldr (\ (x,lt) e -> S.Let x lt e))
 
-toSimple :: (Proj a,Name a) => T.Expr a -> Fresh ([(a,Let a)],Simple a)
+toSimple :: Interface a => T.Expr a -> Fresh ([(a,Let a)],Simple a)
 toSimple e =
   do (s,w) <- runWriterT (toSimple' e)
      return (w,s)
 
-toSimple' :: (Proj a,Name a) => T.Expr a -> WriterT [(a,Let a)] Fresh (Simple a)
+toSimple' :: Interface a => T.Expr a -> WriterT [(a,Let a)] Fresh (Simple a)
 toSimple' e0 =
   case e0 of
     Lcl (Local x _) -> return (Var x)
@@ -66,7 +66,7 @@ toSimple' e0 =
                                let lt = case unproj f of
                                           Just (tc,i) -> let [x] = xn
                                                          in  Proj tc i x
-                                          Nothing     -> Apply f xn
+                                          Nothing     -> S.Apply f xn
                                tell [(a,lt)]
                                return (Var a)
 
