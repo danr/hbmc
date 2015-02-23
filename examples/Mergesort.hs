@@ -70,7 +70,7 @@ ord _        = True
 
 five = S (S (S (S Z)))
 
-prop_cancel xs ys = msort xs =:= msort ys ==> {- length xs <= five =:= False ==> -} xs =:= ys
+prop_cancel xs ys = msort xs =:= msort ys ==> length xs <= five =:= False ==> xs =:= ys
 
 
 -- prop_cancel2 xs ys zs =

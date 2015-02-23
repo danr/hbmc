@@ -45,8 +45,8 @@ run (H m) =
        refw <- newIORef []
        m (Env s tt refc refw)
 
-tryChecks :: [Bit] -> H ()
-tryChecks as = H (\env ->
+tryChecks :: Bit -> H ()
+tryChecks a = H (\env ->
   do cs <- readIORef (checks env)
      writeIORef (checks env) []
      if null cs then
@@ -58,29 +58,33 @@ tryChecks as = H (\env ->
                    if null cs then
                      return []
                     else
-                     checking cs                   
-              
+                     do putStrLn "check loop!"
+                        writeIORef (checks env) []
+                        checking cs
+
               checking ((c,m):cs) =
-                do b <- solveBit (sat env) (c : as)
+                do ws <- readIORef (waits env)
+                   let ass = a : [ nt p | (p,_,_) <- ws ]
+                   b <- solveBit (sat env) (c : ass)
                    if b then
-                     do putStrLn "Running checked code..."
-                        let H m' = m in m' env
+                     do putStrLn $ "Running checked code, waits: " ++ show (length ws)
+                                          ++ " remaining checks: " ++ show (length cs)
+                        let H m' = m in m' env{here = c}
                         checking cs
                     else
                      do cs' <- checking cs
                         return ((c,m):cs')
-          
+
           cs' <- checking cs
           writeIORef (checks env) cs'
   )
 
 trySolve :: H (Maybe Bool)
 trySolve = H (\env ->
-  do ws <- reverse `fmap` readIORef (waits env)
-     putStrLn ("== Try solve with " ++ show (length ws) ++ " waits ==")
-     let ass = (here env : reverse [ nt p | (p,_,_) <- ws ])
-     let H m = tryChecks ass in m env
-     putStrLn "Solve..."
+  do putStrLn "== Try solve =="
+     let H m = tryChecks (here env) in m env
+     ws <- reverse `fmap` readIORef (waits env)
+     putStrLn $ "Solve with " ++ show (length ws) ++ " waits..."
      b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws ])
      if b then
        do putStrLn "Counterexample!"
@@ -94,16 +98,16 @@ trySolve = H (\env ->
                       return (Just False)
                   else
                    let p:_ = [ p | (p,_,_) <- ws, p `elem` qs ] in
-                     do putStrLn ("Conflict: " ++ show (length qs))
+                     do -- putStrLn ("Conflict: " ++ show (length qs))
                         b <- solveBit (sat env) (here env : [ nt q | q <- qs, q /= p ])
                         if b then
                           let (p,unq,H h):_ = [ t | t@(p,_,_) <- ws, p `elem` qs ] in
                             do let ws' = [ t | t@(_,unq',_) <- reverse ws, unq /= unq' ]
-                               putStrLn ( "Points: " ++ show (length ws')
-                                        )
+                               putStrLn ("Points: " ++ show (length ws'))
                                writeIORef (waits env) ws'
                                putStrLn "Expanding..."
                                h env{ here = p }
+                               putStrLn "Expansion done"
                                return Nothing
                         else
                          do mini
@@ -187,11 +191,13 @@ later unq h = H (\env ->
 
 check :: H () -> H ()
 check h@(H m) = H (\env ->
-    if here env == tt then
-      m env
-    else
-      do cs <- readIORef (checks env)
-         writeIORef (checks env) ((here env, h):cs)
+    do -- putStrLn "start"
+       if here env == tt then
+         m env
+       else
+         do cs <- readIORef (checks env)
+            writeIORef (checks env) ((here env, h):cs)
+       -- putStrLn "stop"
   )
 
 must :: Bit -> H () -> H ()
@@ -275,38 +281,6 @@ ifThenElse b (yes,no) =
 data Call a b =
   Call
   { doit   :: Bit
-  , invoke :: a -> (b -> H ()) -> H ()
-  }
-
-newCall :: (Constructive a, Constructive b, Equal a, Equal b)
-        => (a -> b -> H ()) -> H (Call a b)
-newCall h =
-  do b <- new
-     x <- new
-     y <- new
-     c <- context
-     inContext b $
-       do addClauseHere [c]
-          h x y
-     return $
-       Call{ doit   = b
-           , invoke = \x' k -> do equalHere x' x
-                                  k y
-           }
-
-call :: Call a b -> a -> (b -> H ()) -> H ()
-call cl x k =
-  do addClauseHere [doit cl]
-     invoke cl x k
-
-nocall :: Call a b -> H ()
-nocall cl =
-  do addClauseHere [nt (doit cl)]
--}
-
-data Call a b =
-  Call
-  { doit   :: Bit
   , invoke :: a -> H b
   }
 
@@ -347,7 +321,7 @@ memo tag h =
        ref <- newIORef Mp.empty
        return $
          \x -> do xys <- io $ readIORef ref
-                  -- io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (length xys))
+                  io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (Mp.size xys))
                   (c,y) <- case Mp.lookup x xys of
                              Nothing ->
                                do y <- new
@@ -387,7 +361,8 @@ instance Constructive a => Constructive (Maybe a) where
   newPoint inp = liftM Just (newPoint inp)
 
 new, newInput :: Constructive a => H a
-new      = newPoint False
+new      = do -- io (putStrLn "new")
+              newPoint False
 newInput = newPoint True
 
 --------------------------------------------------------------------------------
@@ -593,7 +568,8 @@ withoutForce :: a -> (a -> H ()) -> H ()
 withoutForce x h = h x
 
 instance Constructive a => Constructive (Thunk a) where
-  newPoint inp = delay inp (newPoint inp)
+  newPoint inp = delay inp $ do -- io (putStrLn ("newPoint " ++ show inp))
+                                newPoint inp
 
 instance Equal a => Equal (Thunk a) where
   equalHere t1 t2 = equalThunk t1 t2
@@ -633,7 +609,7 @@ equalUnique =
                          return q
 
                    Just q ->
-                      do --io $ putStrLn "equalHere duplicate!"
+                      do -- io $ putStrLn "equalUnique"
                          return q
             addClauseHere [q]
 
@@ -840,8 +816,18 @@ class ConstructiveData c => EqualData c a where
                [([c], a -> a -> H ())]
 
 instance EqualData c a => Equal (Data c a) where
+  equalHere (Con (Val [(tt,c)]) x1) (Con c2 x2) =
+    do -- io (putStrLn "oneCon")
+       must (c2 =? c) $
+         do sequence_
+              [ f x1 x2
+              | (cs,f) <- equalData equalHere
+              , c `elem` cs
+              ]
+
   equalHere (Con c1 x1) (Con c2 x2) =
-    do equalHere c1 c2
+    do -- io (putStrLn "equalData")
+       equalHere c1 c2
        c <- context
        sequence_
          [ do x <- new
