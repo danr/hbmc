@@ -56,31 +56,33 @@ _ === _ = False
 step :: R T -> T -> R T
 step (Atom a)  x | a === x  = Eps
                  | otherwise = Nil
-step (p :+: q) x = (step p x) :+: (step q x)
-step (p :>: q) x = ((step p x) :>: q) :+: (epsR p :>: (step q x))
-step (Star p)  x = (step p x) :>: Star p
+step (p :+: q) x =  label 1 (step p x) :+:                    label 2 (step q x)
+step (p :>: q) x = (label 1 (step p x) :>: q) :+: (epsR p :>: label 2 (step q x))
+step (Star p)  x =  label 1 (step p x) :>: Star p
 step _         x = Nil
 
 rec :: R T -> [T] -> Bool
 rec p []     = eps p
 rec p (x:xs) = rec (step p x) xs
 
--- prop_koen p q s = rec (p :>: q) s =:= rec (q :>: p) s
-
+-- prop_koen_easy p q a b  = rec (p :>: q) [a,b] =:= rec (q :>: p) [a,b]
+--
+prop_koen p q s = rec (p :>: q) s =:= rec (q :>: p) s
+--
 -- prop_star_plus p q s = rec (Star (p :+: q)) s =:= rec (Star p :+: Star q) s
-
+--
 -- prop_star_plus_1 p q s = rec (Star (p :+: q)) s =:= True ==> rec (Star p :+: Star q) s =:= True
 -- prop_star_plus_2 p q s = rec (Star p :+: Star q) s =:= True ==> rec (Star (p :+: q)) s =:= True
-
+--
 -- prop_star_plus_easy_1 p q a b = rec (Star (p :+: q)) [a,b] =:= True ==> rec (Star p :+: Star q) [a,b] =:= True
 -- prop_star_plus_easy_2 p q a b = rec (Star p :+: Star q) [a,b] =:= True ==> rec (Star (p :+: q)) [a,b] =:= True
-
-prop_star_plus_easy p q a b = rec (Star (p :+: q)) [a,b] =:= rec (Star p :+: Star q) [a,b]
-
+--
+-- prop_star_plus_easy p q a b = rec (Star (p :+: q)) [a,b] =:= rec (Star p :+: Star q) [a,b]
+--
 -- prop_star_seq p q s = rec (Star (p :>: q)) s =:= rec (Star p :>: Star q) s
-
+--
 -- prop_switcheroo p q s = rec (p :+: q) s =:= rec (p :>: q) s
-
+--
 -- prop_bad_assoc p q r s = rec (p :+: (q :>: r)) s =:= rec ((p :+: q) :>: r) s
 
 {-

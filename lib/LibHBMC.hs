@@ -302,6 +302,40 @@ call cl x k =
 nocall :: Call a b -> H ()
 nocall cl =
   do addClauseHere [nt (doit cl)]
+-}
+
+data Call a b =
+  Call
+  { doit   :: Bit
+  , invoke :: a -> H b
+  }
+
+newCall :: (Constructive a, Constructive b, Equal a, Equal b)
+        => (a -> H (Maybe b)) -> H (Call a b)
+newCall h =
+  do b <- new
+     x <- new
+     c <- context
+     my <- inContext' b $
+       do addClauseHere [c]
+          h x
+     return $
+       Call{ doit   = b
+           , invoke = \x' -> do case my of
+                                  Nothing -> error "Invoked Nothing!"
+                                  Just y  -> do equalHere x' x
+                                                return y
+
+           }
+
+call :: Call a b -> a -> H b
+call cl x =
+  do addClauseHere [doit cl]
+     invoke cl x
+
+nocall :: Call a b -> H ()
+nocall cl =
+  do addClauseHere [nt (doit cl)]
 
 --[ memo ]----------------------------------------------------------------------
 
@@ -555,6 +589,9 @@ ifForce th@(Delay inp unq ref) h =
                        return ()
        Right a -> h a
 
+withoutForce :: a -> (a -> H ()) -> H ()
+withoutForce x h = h x
+
 instance Constructive a => Constructive (Thunk a) where
   newPoint inp = delay inp (newPoint inp)
 
@@ -717,6 +754,9 @@ data Data c a = Con (Val c) a
 con :: Ord c => c -> a -> Thunk (Data c a)
 con c a = this (Con (val c) a)
 
+conStrict :: Ord c => c -> a -> Data c a
+conStrict c a = Con (val c) a
+
 {-
 proj :: Maybe a -> (a -> H ()) -> H ()
 proj (Just x) h = h x
@@ -754,6 +794,38 @@ proj7 _                     _ = return ()
 proj8 :: (x5, (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z)))))))) -> (a -> H ()) -> H ()
 proj8 (_, (_, (_, (_, (_, (_, (_, (Just x, _)))))))) h = h x
 proj8 _                     _ = return ()
+
+mproj1 :: (Maybe a, z) -> (a -> H (Maybe b)) -> H (Maybe b)
+mproj1 (Just x, _) h = h x
+mproj1 _           _ = return Nothing
+
+mproj2 :: (x, (Maybe a, z)) -> (a -> H (Maybe b)) -> H (Maybe b)
+mproj2 (_, (Just x, _)) h = h x
+mproj2 _                _ = return Nothing
+
+mproj3 :: (x, (y, (Maybe a, z))) -> (a -> H (Maybe b)) -> H (Maybe b)
+mproj3 (_, (_, (Just x, _))) h = h x
+mproj3 _                     _ = return Nothing
+
+mproj4 :: (x1, (x, (y, (Maybe a, z)))) -> (a -> H (Maybe b)) -> H (Maybe b)
+mproj4 (_, (_, (_, (Just x, _)))) h = h x
+mproj4 _                     _ = return Nothing
+
+mproj5 :: (x2, (x1, (x, (y, (Maybe a, z))))) -> (a -> H (Maybe b)) -> H (Maybe b)
+mproj5 (_, (_, (_, (_, (Just x, _))))) h = h x
+mproj5 _                     _ = return Nothing
+
+mproj6 :: (x3, (x2, (x1, (x, (y, (Maybe a, z)))))) -> (a -> H (Maybe b)) -> H (Maybe b)
+mproj6 (_, (_, (_, (_, (_, (Just x, _)))))) h = h x
+mproj6 _                     _ = return Nothing
+
+mproj7 :: (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z))))))) -> (a -> H (Maybe b)) -> H (Maybe b)
+mproj7 (_, (_, (_, (_, (_, (_, (Just x, _))))))) h = h x
+mproj7 _                     _ = return Nothing
+
+mproj8 :: (x5, (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z)))))))) -> (a -> H (Maybe b)) -> H (Maybe b)
+mproj8 (_, (_, (_, (_, (_, (_, (_, (Just x, _)))))))) h = h x
+mproj8 _                     _ = return Nothing
 
 class (Show c, Ord c) => ConstructiveData c where
   constrs :: [c]
@@ -801,6 +873,11 @@ getData f d t =
      case md of
        Nothing -> return d
        Just (Con c a) ->
+         do x <- get c
+            f x a
+
+getStrictData :: (c -> a -> H b) -> b -> Data c a -> H b
+getStrictData f d (Con c a) =
          do x <- get c
             f x a
 

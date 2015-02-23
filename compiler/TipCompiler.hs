@@ -100,7 +100,7 @@ maximumOn f = f . F.maximumBy (comparing f)
 data Var
   = Var String | Refresh Var Int
   | Api String | Prelude String
-  | Label | Skip | Call | Cancel | Proj Var Int
+  | Label | Skip | Call | Cancel | Proj Var Int | MProj Var Int
  deriving (Show,Eq,Ord)
 
 instance Booly Var where
@@ -120,6 +120,7 @@ instance Interface Var where
   proj = Proj
   unproj (Proj v i) = Just (v,i)
   unproj _          = Nothing
+  mproj = MProj
 
   mainFun     = Var "main"
 
@@ -137,6 +138,7 @@ instance Pretty Var where
       Var xs      -> text (escape xs)
       Refresh v i -> pp v <> int i
       Proj x i    -> "proj" {- <> pp x <> "_" -} <> pp (i+1)
+      MProj x i   -> "mproj" {- <> pp x <> "_" -} <> pp (i+1)
       Api x       -> text x
       Prelude x   -> "Prelude." <> text x
       _           -> text (show x)

@@ -50,15 +50,21 @@ trDatatype dt@(Datatype tc tvs cons) =
  where
   (indexes,types) = dataInfo dt
 
+  strict = and [ null args | Constructor _ args <- cons ]
+
+  a ! b | strict    = b
+        | otherwise = a
+
   me = TyCon (wrapData tc) (map TyVar tvs)
 
   maybe_tup = TyTup [ TyCon (prelude "Maybe") [modTyCon wrapData t] | t <- types ]
 
   -- (Thunk (Data N (Maybe Nat)))
   thunk :: Type a
-  thunk =
-    TyCon (api "Thunk")
-      [TyCon (api "Data") [TyCon (conLabel tc) [],maybe_tup]]
+  thunk = thunk_apply (TyCon (api "Data") [TyCon (conLabel tc) [],maybe_tup])
+   where
+    thunk_apply t | strict    = t
+                  | otherwise = TyCon (api "Thunk") [t]
 
   -- newtype Nat = Nat (Thunk (Data N (Maybe Nat)))
   --  deriving ( Constructive, Equal, Eq )
@@ -75,7 +81,7 @@ trDatatype dt@(Datatype tc tvs cons) =
        return $
          FunDecl (caseData tc)
            [([ConPat (wrapData tc) [VarPat t],VarPat h]
-            ,Apply (api "ifForce") [var t,var h])]
+            ,Apply (api ("ifForce" ! "withoutForce")) [var t,var h])]
 
 
   -- data N = Zero | Succ
@@ -149,7 +155,7 @@ trDatatype dt@(Datatype tc tvs cons) =
        return $
          funDecl (mkCon c) [ x | Just x <- prenex ]
            (Apply (wrapData tc)
-             [Apply (api "con")
+             [Apply (api ("con" ! "conStrict"))
                [var (conLabel c), Tup tuple ]])
 
 
@@ -197,7 +203,7 @@ trDatatype dt@(Datatype tc tvs cons) =
            ,FunDecl (api "dflt") [([WildPat],var (thunkRepr tc))]
            ,FunDecl (api "get")
              [([ConPat (wrapData tc) [VarPat t]]
-              ,Apply (api "getData") [var f,var (thunkRepr tc),var t]
+              ,Apply (api ("getData" ! "getStrictData")) [var f,var (thunkRepr tc),var t]
               )]
             `Where` [f_def]
            ]

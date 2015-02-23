@@ -27,6 +27,7 @@ class TipLift.Call a => Interface a where
 
   proj      :: a -> Int -> a
   unproj    :: a -> Maybe (a,Int)
+  mproj     :: a -> Int -> a
 
   mainFun   :: a
 

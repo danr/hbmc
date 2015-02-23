@@ -22,7 +22,7 @@ toExpr e0 =
 
          s' <- fresh
 
-         let su = substSimple $ \ x -> Var (if x == s then s' else x)
+         let su = substProj $ \ x -> Var (if x == s then s' else x)
 
          calls' <-
            sequence

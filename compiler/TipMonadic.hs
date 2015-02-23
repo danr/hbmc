@@ -11,10 +11,15 @@ import qualified TipToSimple as ToS
 import qualified Tip
 import TipLift
 
+import Data.Maybe
+
 import Control.Applicative
 
 returnExpr :: Interface a => H.Expr a -> H.Expr a
 returnExpr e = H.Apply (prelude "return") [e]
+
+justExpr :: Interface a => H.Expr a -> H.Expr a
+justExpr e = H.Apply (prelude "Just") [e]
 
 newExpr :: Interface a => H.Expr a
 newExpr = H.Apply (api "new") []
@@ -36,7 +41,7 @@ trFun :: Interface a => Tip.Function a -> Fresh [H.Decl a]
 trFun Tip.Function{..} =
   do r <- fresh
      simp_body <- ToS.toExpr func_body
-     b <- trExpr simp_body r
+     b <- trExpr simp_body (Just r)
      let args = map Tip.lcl_name func_args
      return
        [
@@ -85,28 +90,34 @@ trTerm (pol,lhs,rhs) =
   do (l_lets,l) <- ToS.toSimple lhs
      (r_lets,r) <- ToS.toSimple rhs
      dum1 <- fresh
-     dum2 <- fresh
      e <- trExpr
        (bindLets
          (l_lets ++ r_lets ++
            [(dum1,S.Apply (if pol then api "neqTup" else api "eqTup") [l,r])])
          (S.Simple (S.Var dum1)))
-       dum2
-     return [H.Bind dum2 (var (api "new")),H.Stmt e]
+       Nothing
+     return [H.Stmt e]
 
-trExpr :: Interface a => S.Expr a -> a -> Fresh (H.Expr a)
+trExpr :: Interface a => S.Expr a -> Maybe a -> Fresh (H.Expr a)
 trExpr e0 r =
   case e0 of
-    S.Simple s -> return (trSimple s >>> var r)
+    S.Simple s ->
+      case r of
+        Just r' -> return (trSimple s >>> var r')
+        Nothing -> return (returnExpr (justExpr (trSimple s)))
+
     S.Let x (S.Proj i t s) e ->
       do e' <- trExpr e r
-         return (H.Apply (proj i t) [trSimple s,H.Lam [VarPat x] e'])
+         return (H.Apply ((if isJust r then proj else mproj) i t)
+                   [trSimple s,H.Lam [VarPat x] e'])
+
     S.Let x (S.Apply f ss) e
       | f == callName, Var g:args <- ss
         -> do e' <- trExpr e r
-              return
-                (H.Apply (api "call")
-                  [var g,H.Tup (map trSimple args),H.Lam [VarPat x] e'])
+              return $
+                mkDo
+                  [ H.Bind x (H.Apply (api "call") [var g,H.Tup (map trSimple args)]) ]
+                  e'
       | f == cancelName, [Var g,y] <- ss
         -> do e' <- trExpr e r
               return $
@@ -117,24 +128,26 @@ trExpr e0 r =
                   e'
       | otherwise -> mkDo [H.Bind x (H.Apply f [Tup (map trSimple ss)])] <$> trExpr e r
 
-    S.Match tc s s' calls alts ->
-      do calls' <- mapM trCall calls
+    S.Match tc s s' calls alts
+      | Nothing <- r -> error $ "Cannot do case inside a lifted call: " ++ ppRender e0
+      | Just rr <- r ->
+          do calls' <- mapM trCall calls
 
-         c <- fresh
-         let ctors = [ k | S.ConPat k S.:=> _ <- alts ]
-         alts' <- mapM (trAlt c r ctors) alts
+             c <- fresh
+             let ctors = [ k | S.ConPat k S.:=> _ <- alts ]
+             alts' <- mapM (trAlt c rr ctors) alts
 
-         -- do waitCase s $ \ c s' ->
-         --      [[ calls ]]
-         --      when (c =? K1) $ do
-         --        y <- [[ br1 ]]
-         --        y >>> r
-         --      ...
-         return $
-           H.Apply (caseData tc) [trSimple s,
-             H.Lam [H.ConPat (api "Con") [H.VarPat c,H.VarPat s']]
-               (mkDo (calls' ++ alts') Noop)
-             ]
+             -- do waitCase s $ \ c s' ->
+             --      [[ calls ]]
+             --      when (c =? K1) $ do
+             --        y <- [[ br1 ]]
+             --        y >>> r
+             --      ...
+             return $
+               H.Apply (caseData tc) [trSimple s,
+                 H.Lam [H.ConPat (api "Con") [H.VarPat c,H.VarPat s']]
+                   (mkDo (calls' ++ alts') Noop)
+                 ]
 
     _ -> error $ "iota redex in match or proj: " ++ ppRender e0
 
@@ -144,17 +157,16 @@ trSimple (S.Con k ss) = H.Apply (mkCon k) (map trSimple ss)
 
 trCall :: Interface a => S.Call a -> Fresh (H.Stmt a)
 trCall (Call f args e) =
-  do r' <- fresh
-     e' <- trExpr e r'
-     -- x <- newCall $ \ (a1,..,an) -> \ r' -> e => r'
+  do e' <- trExpr e Nothing
+     -- x <- newCall $ \ (a1,..,an) -> [[ e ]]
      return $
        H.Bind f
          (H.Apply (api "newCall")
-           [H.Lam [H.TupPat (map H.VarPat args), H.VarPat r'] e'])
+           [H.Lam [H.TupPat (map H.VarPat args)] e'])
 
 trAlt :: Interface a => a -> a -> [a] -> S.Alt a -> Fresh (H.Stmt a)
 trAlt c r cons (pat S.:=> rhs) =
-  do body <- trExpr rhs r
+  do body <- trExpr rhs (Just r)
      return $ Stmt $
        case pat of
          S.Default  -> H.Apply (api "unless") [List [H.Apply (=?) [var c,var (conLabel k)] | k <- cons],body]

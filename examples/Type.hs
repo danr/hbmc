@@ -2,6 +2,7 @@
 module Type where
 
 import Tip.DSL
+import Prelude hiding ((&&))
 
 label :: Int -> a -> a
 label c x = x
@@ -12,45 +13,55 @@ data Ty = Ty :-> Ty | A | B | C deriving Eq
 
 infixr 9 :->
 infix  4 ===
+infixr 3 &&
 
-(===) :: Ty -> Ty -> Bool
-A === A = True
-B === B = True
-C === C = True
+(===) :: Ty -> Ty -> LazyBool
+A === A = true
+B === B = true
+C === C = true
 (a :-> x) === (b :-> y) = a === b && x === y
-_ === _ = False
+_ === _ = false
 
-tc :: [Ty] -> Expr -> Ty -> Bool
+false = LFalse
+true = LTrue U
+data LazyBool = LTrue U | LFalse
+data U = U
+
+(&&) :: LazyBool -> LazyBool -> LazyBool
+LTrue{} && b = b
+LFalse  && b = false
+
+tc :: [Ty] -> Expr -> Ty -> LazyBool
 tc env (Var x)      t | Just tx <- env `index` x = tx === t
-tc env (App f x tx) t          = label 1 (tc env f (tx :-> t)) && tc env x tx
+tc env (App f x tx) t          = label 1 (tc env f (tx :-> t)) && (tc env x tx)
 tc env (Lam e)      (tx :-> t) = label 1 (tc (tx:env) e t)
-tc _   _            _ = False
+tc _   _            _ = LFalse
 
--- prop_A0 e = tc [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= False
+-- prop_A0 e = tc [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= false
 --
--- prop_A1 e = tc [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+-- prop_A1 e = tc [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= false
 --
--- prop_A2 e = tc [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
-
-prop_B e  = tc [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)) =:= False
-
-prop_I e  = tc [] e (A :-> A) =:= False
-
-prop_K e  = tc [] e (A :-> B :-> A) =:= False
-
-prop_S e  = tc [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= False
-
-prop_W e  = tc [] e ((A :-> A :-> B) :-> (A :-> B)) =:= False
-
-prop_C e  = tc [] e ((A :-> B :-> C) :-> (B :-> A :-> C)) =:= False
-
-prop_M e  = tc [] e ((A :-> B) :-> (A :-> A :-> B)) =:= False
-
-prop_N e  = tc [] e (A :-> (A :-> A) :-> A) =:= False
-
-prop_D e  = tc [] e ((A :-> B) :-> (A :-> B)) =:= False
-
-prop_K1 e = tc [] e (A :-> B :-> B) =:= False
+-- prop_A2 e = tc [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= false
+--
+-- prop_B e  = tc [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)) =:= false
+--
+-- prop_I e  = tc [] e (A :-> A) =:= false
+--
+-- prop_K e  = tc [] e (A :-> B :-> A) =:= false
+--
+prop_S e  = tc [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= false
+--
+-- prop_W e  = tc [] e ((A :-> A :-> B) :-> (A :-> B)) =:= false
+--
+-- prop_C e  = tc [] e ((A :-> B :-> C) :-> (B :-> A :-> C)) =:= false
+--
+-- prop_M e  = tc [] e ((A :-> B) :-> (A :-> A :-> B)) =:= false
+--
+-- prop_N e  = tc [] e (A :-> (A :-> A) :-> A) =:= false
+--
+-- prop_D e  = tc [] e ((A :-> B) :-> (A :-> B)) =:= false
+--
+-- prop_K1 e = tc [] e (A :-> B :-> B) =:= false
 
 
 -- nats --
