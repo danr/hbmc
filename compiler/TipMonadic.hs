@@ -98,9 +98,9 @@ trExpr :: Interface a => S.Expr a -> a -> Fresh (H.Expr a)
 trExpr e0 r =
   case e0 of
     S.Simple s -> return (trSimple s >>> var r)
-    S.Let x (S.Proj i t (Var y)) e ->
+    S.Let x (S.Proj i t s) e ->
       do e' <- trExpr e r
-         return (H.Apply (proj i t) [var y,H.Lam [VarPat x] e'])
+         return (H.Apply (proj i t) [trSimple s,H.Lam [VarPat x] e'])
     S.Let x (S.Apply f ss) e
       | f == callName, Var g:args <- ss
         -> do e' <- trExpr e r
@@ -117,23 +117,12 @@ trExpr e0 r =
                   e'
       | otherwise -> mkDo [H.Bind x (H.Apply f [Tup (map trSimple ss)])] <$> trExpr e r
 
-    S.Match tc (Var s) calls alts ->
-      do s' <- fresh
-
-         let change l0 =
-               case l0 of
-                 Proj tc' i (Var x) | x == s    -> Proj tc' i (Var s')
-                                    | otherwise -> l0
-                 Proj{}    -> error $ "iota redex in let: " ++ ppRender l0 ++
-                                      "\nfrom:" ++ ppRender e0
-                 S.Apply{} -> l0
-
-
-         calls' <- mapM (trCall . modLet change) calls
+    S.Match tc s calls alts ->
+      do calls' <- mapM trCall calls
 
          c <- fresh
          let ctors = [ k | S.ConPat k S.:=> _ <- alts ]
-         alts' <- mapM (trAlt c r ctors . modLet change) alts
+         alts' <- mapM (trAlt c r ctors) alts
 
          -- do waitCase s $ \ c s' ->
          --      [[ calls ]]
@@ -142,8 +131,8 @@ trExpr e0 r =
          --        y >>> r
          --      ...
          return $
-           H.Apply (caseData tc) [var s,
-             H.Lam [H.ConPat (api "Con") [H.VarPat c,H.VarPat s']]
+           H.Apply (caseData tc) [trSimple s,
+             H.Lam [H.ConPat (api "Con") [H.VarPat c,H.WildPat]]
                (mkDo (calls' ++ alts') Noop)
              ]
 

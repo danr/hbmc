@@ -41,18 +41,12 @@ instanceTransformBi [t| forall a . (Simple a,Expr a) |]
 instanceTransformBi [t| forall a . (Simple a,Simple a) |]
 instanceTransformBi [t| forall a . (Simple a,Let a) |]
 
-instanceTransformBi [t| forall a . (Let a,Call a) |]
-instanceTransformBi [t| forall a . (Let a,Alt a) |]
-
 substSimple :: TransformBi (Simple a) (f a) => (a -> Simple a) -> f a -> f a
 substSimple su =
   transformBi $ \ s0 ->
     case s0 of
       Var x -> su x
       _     -> s0
-
-modLet :: TransformBi (Let a) (f a) => (Let a -> Let a) -> f a -> f a
-modLet = transformBi
 
 bindLets :: [(a,Let a)] -> Expr a -> Expr a
 bindLets = flip (foldr (\ (x,lt) e -> Let x lt e))

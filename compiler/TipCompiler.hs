@@ -136,7 +136,7 @@ instance Pretty Var where
       Var ""      -> text "x"
       Var xs      -> text (escape xs)
       Refresh v i -> pp v <> int i
-      Proj x i    -> "proj" {- <> pp x <> "_" -} <> pp (i+1)
+      Proj x i    -> "proj" <> pp x <> "_" <> pp (i+1)
       Api x       -> text x
       Prelude x   -> "Prelude." <> text x
       _           -> text (show x)
@@ -221,7 +221,11 @@ projectPatterns di =
                      | Just (tc,ixs) <- lookup (gbl_name k) di
                      -> Case (Tip.ConPat k []) <$>
                           substMany
-                            [ (v,Gbl (fun (proj tc i)) :@: [Lcl lx])
+                            [ (v,Gbl (Global
+                                        (proj tc i)
+                                        (PolyType [] [] (lcl_type v))
+                                        [] FunctionNS)
+                                 :@: [Lcl lx])
                             | (v,i) <- vars `zip` ixs
                             ]
                             rhs
