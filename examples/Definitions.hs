@@ -195,7 +195,7 @@ number = S (S (S (S (S (S (S (S (S (S (S Z))))))))))
 prop_inj_sort xs ys = isort xs =:= isort ys ==> (number + number + number) < length xs =:= True ==> xs =:= ys
 -}
 
-prop_rot_bogus  n xs = xs =:= rotate n (xs :: [Nat])
+-- prop_rot_bogus  n xs = xs =:= rotate n (xs :: [Nat])
 
 -- prop_drop_idem   n xs      = drop n (drop n (xs :: [Nat])) =:= drop n xs
 -- prop_drop_invol  n xs      = drop n (drop n (xs :: [Nat])) =:= xs

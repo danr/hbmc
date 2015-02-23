@@ -18,19 +18,23 @@ toExpr e0 =
          bindLets lets . substSimple (replace x s1) <$> toExpr e2
 
     T.Match (collectLets -> (calls,scrut_expr)) alts ->
-      do (lets,s) <- toSimple scrut_expr
+      do (lets,Var s) <- toSimple scrut_expr
+
+         s' <- fresh
+
+         let su = substSimple $ \ x -> Var (if x == s then s' else x)
 
          calls' <-
            sequence
              [ do e' <- toExpr e
-                  return (Call (lcl_name x) (map lcl_name args) e')
+                  return (Call (lcl_name x) (map lcl_name args) (su e'))
              | (x,T.Lam args e) <- calls
              ]
 
          alts' <-
            sequence
              [ do rhs' <- toExpr rhs
-                  return $ (S.:=> rhs') $ case pat of
+                  return $ (S.:=> su rhs') $ case pat of
                     T.Default                   -> S.Default
                     T.ConPat (Global k _ _ _) _ -> S.ConPat k
              | T.Case pat rhs <- alts
@@ -42,7 +46,7 @@ toExpr e0 =
                  t -> error $ "Case on non-TyCon typed scrut:\n  " ++ ppRender e0
                               ++ "\n " ++ ppRender t
 
-         return (bindLets lets (S.Match tc s calls' alts'))
+         return (bindLets lets (S.Match tc (Var s) s' calls' alts'))
 
     _ ->
       do (lets,s) <- toSimple e0

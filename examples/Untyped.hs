@@ -10,17 +10,17 @@ index (x:xs) Z       = Just x
 index (x:xs) (Suc n) = index xs n
 index []     _       = Nothing
 
-data Term = Term :$ Term | TheVar | S | K | I | B -- | C | W
+data Term = Term :$ Term | TheVar | K | I -- | S | B -- | C | W
 
 instance Show Term where
   show = showTerm
 
 showTerm TheVar   = "x"
 showTerm (a :$ b) = "(" ++ showTerm a ++ " " ++ showTerm b ++ ")"
-showTerm S        = "S"
+-- showTerm S        = "S"
 showTerm K        = "K"
 showTerm I        = "I"
-showTerm B        = "B"
+-- showTerm B        = "B"
 -- showTerm C        = "C"
 -- showTerm W        = "W"
 
@@ -32,10 +32,10 @@ cheating TheVar   = True
 cheating _        = False
 
 step :: Term -> Maybe Term
-step (S :$ f :$ g :$ x) = Just (f :$ x :$ (g :$ x))
+-- step (S :$ f :$ g :$ x) = Just (f :$ x :$ (g :$ x))
 step (K :$ x :$ _)      = Just x
 step (I :$ x)           = Just x
-step (B :$ f :$ g :$ x) = Just (f :$ (g :$ x))
+-- step (B :$ f :$ g :$ x) = Just (f :$ (g :$ x))
 -- step (C :$ f :$ x :$ y) = Just (f :$ y :$ x)
 -- step (W :$ f :$ x)      = Just (f :$ x :$ x)
 step (t :$ u)           = par t u (step t) (step u)
@@ -49,6 +49,7 @@ par t u (Just t_red) Nothing      = Just (t_red :$ u)
 par _ _ _ _ = Nothing
 
 
+{-
 left u (Just x) = Just (x :$ u)
 left _ Nothing  = Nothing
 
@@ -64,13 +65,17 @@ kstep Z       x = x
 kstep (Suc n) x = case step x of
     Just u  -> kstep n u
     Nothing -> x
+    -}
 
+{-
 astep :: Nat -> Term -> Maybe Term
 astep Z       x = Just x
 astep (Suc n) x = case step x of
     Just u  -> astep n u
     Nothing -> Nothing
+    -}
 
+thm  k x y = step ((k :$ x) :$ y) =:= Just x ==> True =:= False
 -- thm  x = step x =:= Just x ==> True =:= False
 -- thm2 x = fmap step (step x) =:= Just (Just x) ==> True =:= False
 
@@ -80,7 +85,7 @@ thm_id n f x y = kstep n (f :$ Var x) =:= Var x ==>
                  x =:= y
 -}
 
-thm_omg n f = astep (Suc n) f =:= Just f ==> True =:= False
+-- thm_omg n f = astep (Suc n) f =:= Just f ==> True =:= False
 
 -- thm_why n y = astep n (y :$ TheVar) =:= Just (TheVar :$ (y :$ TheVar)) ==> cheating y =:= True
 

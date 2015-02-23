@@ -29,7 +29,7 @@ import Data.Char
 
 import TipLift
 import TipMonadic
-import TipTarget
+import TipTarget hiding (Expr(Lam))
 -- import TipExample
 import TipToSimple
 import TipData
@@ -136,7 +136,7 @@ instance Pretty Var where
       Var ""      -> text "x"
       Var xs      -> text (escape xs)
       Refresh v i -> pp v <> int i
-      Proj x i    -> "proj" <> pp x <> "_" <> pp (i+1)
+      Proj x i    -> "proj" {- <> pp x <> "_" -} <> pp (i+1)
       Api x       -> text x
       Prelude x   -> "Prelude." <> text x
       _           -> text (show x)
@@ -206,9 +206,18 @@ addBoolToTheory Theory{..} = addBool Theory{thy_data_decls=bool_decl:thy_data_de
 
 -- project
 
-projectPatterns :: forall f a . (TransformBiM Fresh (Tip.Expr a) (f a),Interface a) => DataInfo a -> f a -> Fresh (f a)
-projectPatterns di =
-  transformBiM $ \ e0 ->
+projectPatterns :: Interface a => DataInfo a -> Theory a -> Fresh (Theory a)
+projectPatterns di Theory{..}
+  = do fns <- sequence
+         [ do body <- projectExpr di func_body
+              return Function{func_body=body,..}
+         | Function{..} <- thy_func_decls ]
+       return Theory{thy_func_decls=fns,..}
+
+projectExpr :: Interface a => DataInfo a -> Tip.Expr a -> Fresh (Tip.Expr a)
+projectExpr di = go
+ where
+  go e0 =
     case e0 of
       Match e alts ->
         do x <- fresh
@@ -216,24 +225,29 @@ projectPatterns di =
            make_let lx e =<< fmap (Match (Lcl lx))
              (sequence
                [ case pat of
-                   Default -> return (Case Default rhs)
+                   Default -> Case Default <$> go rhs
                    Tip.ConPat k vars
                      | Just (tc,ixs) <- lookup (gbl_name k) di
-                     -> Case (Tip.ConPat k []) <$>
-                          substMany
-                            [ (v,Gbl (Global
-                                        (proj tc i)
-                                        (PolyType [] [] (lcl_type v))
-                                        [] FunctionNS)
-                                 :@: [Lcl lx])
-                            | (v,i) <- vars `zip` ixs
-                            ]
-                            rhs
+                     -> do rhs' <-
+                             substMany
+                               [ (v,Gbl (Global
+                                           (proj tc i)
+                                           (PolyType [] [] (lcl_type v))
+                                           [] FunctionNS)
+                                    :@: [Lcl lx])
+                               | (v,i) <- vars `zip` ixs
+                               ]
+                               rhs
+                           Case (Tip.ConPat k []) <$> go rhs'
                    _ -> error $ "projectPatterns: " ++ ppShow di ++ "\n" ++ ppRender e0
                | Case pat rhs <- alts
                ])
-      _  -> return e0
- where
+      hd :@: args -> (hd :@:) <$> mapM go args
+      Lam args e  -> Lam args <$> go e
+      Let l e1 e2 -> Let l <$> go e1 <*> go e2
+      Quant q l e -> Quant q l <$> go e
+      Lcl l       -> return (Lcl l)
+
   make_let x (Lcl y) e = (Lcl y // x) e
   make_let x b       e = return (Let x b e)
 

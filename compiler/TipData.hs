@@ -42,11 +42,10 @@ trDatatype :: forall a . Interface a => Datatype a -> Fresh [Decl a]
 trDatatype dt@(Datatype tc tvs cons) =
   do constructors <- mapM make_con cons
      case_data <- make_case_data
-     projs <- sequence [ make_proj i | (_,i) <- types `zip` [0..] ]
      equal <- make_equal
      value <- make_value
      return ([wrapper,labels] ++ constructors ++
-             [case_data] ++ projs ++
+             [case_data] ++
              [constructive,equal,repr,value])
  where
   (indexes,types) = dataInfo dt
@@ -66,7 +65,7 @@ trDatatype dt@(Datatype tc tvs cons) =
   wrapper :: Decl a
   wrapper = DataDecl (wrapData tc) tvs
     [(wrapData tc,[thunk])]
-    [api "Constructive",api "Equal",prelude "Eq"]
+    [api "Constructive",api "Equal",prelude "Eq",prelude "Ord"]
 
   -- caseNat (Nat t) h = ifForce t h
   make_case_data :: Fresh (Decl a)
@@ -78,20 +77,6 @@ trDatatype dt@(Datatype tc tvs cons) =
            [([ConPat (wrapData tc) [VarPat t],VarPat h]
             ,Apply (api "ifForce") [var t,var h])]
 
-  -- projNat1 (Nat t) h = ifForce t $ \ (Con _ a) -> proj1 a h
-  make_proj :: Int -> Fresh (Decl a)
-  make_proj i =
-    do t <- fresh
-       h <- fresh
-       a <- fresh
-       return $
-         FunDecl (proj tc i)
-           [([ConPat (wrapData tc) [VarPat t],VarPat h]
-            ,Apply (api "ifForce")
-               [ var t
-               , Lam [ConPat (api "Con") [WildPat,VarPat a]]
-                     (Apply (api ("proj"++show (i+1))) [var a,var h])
-               ])]
 
   -- data N = Zero | Succ
   --  deriving ( Eq, Ord, Show )

@@ -542,6 +542,7 @@ equalThunk x y =
       do b <- force y
          equalHere a b
 
+{-# NOINLINE equalUnique #-}
 equalUnique :: Unique -> Unique -> H () -> H ()
 equalUnique =
   unsafePerformIO $

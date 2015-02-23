@@ -20,7 +20,7 @@ data Let a = Apply a [Simple a]
 data Expr a
   = Simple (Simple a)
   | Let  a (Let a) (Expr a)
-  | Match a (Simple a) [Call a] [Alt a]
+  | Match a (Simple a) a [Call a] [Alt a]
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Simple a
@@ -54,10 +54,10 @@ bindLets = flip (foldr (\ (x,lt) e -> Let x lt e))
 instance Pretty a => Pretty (Expr a) where
   pp (Simple s) = pp s
   pp (Let x lt e) = sep ["let" $\ pp x <+> "=" $\ pp lt <> ";",pp e]
-  pp (Match tc s calls alts) =
+  pp (Match tc s s' calls alts) =
     ("case" <+> "{-" <+> pp tc <+> "-}" $\ pp s <+> "of")
       $\ (if null calls then empty else braces (vcat (punctuate ";" (map pp calls))))
-      $$ vcat (map pp alts)
+      $$ vcat [pp s' <> "@" <> pp alt | alt <- alts]
 
 instance Pretty a => Pretty (Let a) where
   pp (Apply f args) = pp f <+> fsep (map pp args)

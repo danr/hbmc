@@ -56,9 +56,9 @@ _ === _ = False
 step :: R T -> T -> R T
 step (Atom a)  x | a === x  = Eps
                  | otherwise = Nil
-step (p :+: q) x = label 1 (step p x) .+. label 2 (step q x)
-step (p :>: q) x = (label 1 (step p x) .>. q) .+. (epsR p .>. label 2 (step q x))
-step (Star p)  x = label 1 (step p x) .>. Star p
+step (p :+: q) x = (step p x) :+: (step q x)
+step (p :>: q) x = ((step p x) :>: q) :+: (epsR p :>: (step q x))
+step (Star p)  x = (step p x) :>: Star p
 step _         x = Nil
 
 rec :: R T -> [T] -> Bool
@@ -78,9 +78,9 @@ rec p (x:xs) = rec (step p x) xs
 prop_star_plus_easy p q a b = rec (Star (p :+: q)) [a,b] =:= rec (Star p :+: Star q) [a,b]
 
 -- prop_star_seq p q s = rec (Star (p :>: q)) s =:= rec (Star p :>: Star q) s
---
+
 -- prop_switcheroo p q s = rec (p :+: q) s =:= rec (p :>: q) s
---
+
 -- prop_bad_assoc p q r s = rec (p :+: (q :>: r)) s =:= rec ((p :+: q) :>: r) s
 
 {-

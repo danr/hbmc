@@ -44,7 +44,7 @@ trFun Tip.Function{..} =
          in H.TySig func_name
               [ TyCon s [TyVar tv]
               | tv <- func_tvs
-              , s <- [api "Equal",prelude "Eq",api "Constructive"]
+              , s <- [api "Equal",prelude "Ord",api "Constructive"]
               ]
               (TyTup (map (tt . Tip.lcl_type) func_args)
                `TyArr` (TyCon (api "H") [tt func_res])),
@@ -117,7 +117,7 @@ trExpr e0 r =
                   e'
       | otherwise -> mkDo [H.Bind x (H.Apply f [Tup (map trSimple ss)])] <$> trExpr e r
 
-    S.Match tc s calls alts ->
+    S.Match tc s s' calls alts ->
       do calls' <- mapM trCall calls
 
          c <- fresh
@@ -132,7 +132,7 @@ trExpr e0 r =
          --      ...
          return $
            H.Apply (caseData tc) [trSimple s,
-             H.Lam [H.ConPat (api "Con") [H.VarPat c,H.WildPat]]
+             H.Lam [H.ConPat (api "Con") [H.VarPat c,H.VarPat s']]
                (mkDo (calls' ++ alts') Noop)
              ]
 
