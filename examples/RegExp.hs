@@ -5,111 +5,97 @@ import Control.Monad
 import Data.Typeable
 import Data.Data
 import Tip.DSL
-import Test.QuickCheck hiding (label)
+-- import Test.QuickCheck hiding (label)
 
 label :: Int -> a -> a
 label x s = s
 
-data R
+data R a
   = Nil
   | Eps
-  | Atom C
-  | R `Plus` R
-  | R `Seqq` R
-  | Star R
+  | Atom a
+  | R a :+: R a
+  | R a :>: R a
+  | Star (R a)
  deriving ( Eq, Ord, Show, Data, Typeable )
 
-{-
-instance Arbitrary a => Arbitrary (R a) where
-  arbitrary = sized go
-    where
-      go s = frequency
-        [(1,return Nil)
-        ,(1,return Eps)
-        ,(3,Atom `fmap` arbitrary)
-        ,(s,liftM2 (`Plus`) (go s2) (go s2))
-        ,(s,liftM2 (`Seqq`) (go s2) (go s2))
-        ,(s,liftM  Star  (go s1))
-        ]
-        where
-         s2 = s`div`2
-         s1 = pred s
--}
+infixl 7 .+.
+infixl 8 .>.
 
-infixl 7 `plus`
-infixl 8 `seqq`
+(.+.),(.>.) :: R a -> R a -> R a
+Nil .+. q   = q
+p   .+. Nil = p
+p   .+. q   = p :+: q
 
-plus,seqq :: R  -> R  -> R
-Nil `plus` q   = q
-p   `plus` Nil = p
-p   `plus` q   = p `Plus` q
+Nil .>. q   = Nil
+p   .>. Nil = Nil
+Eps .>. q   = q
+p   .>. Eps = p
+p   .>. q   = p :>: q
 
-Nil `seqq` q   = Nil
-p   `seqq` Nil = Nil
-Eps `seqq` q   = q
-p   `seqq` Eps = p
-p   `seqq` q   = p `Seqq` q
-
-eps :: R -> Bool
+eps :: R a -> Bool
 eps Eps       = True
-eps (p `Plus` q) = if label 1 (eps p) then True else label 2 (eps q)
-eps (p `Seqq` q)  = if label 1 (eps p) then label 2 (eps q) else False
+eps (p :+: q) = label 1 (eps p) || label 2 (eps q)
+eps (p :>: q) = label 1 (eps p) && label 2 (eps q)
 eps (Star _)  = True
 eps _         = False
 
-epsR :: R  -> R
+epsR :: R a  -> R a
 epsR p | eps p     = Eps
        | otherwise = Nil
 
-data C = A | B | C
+data T = A | B | C
  deriving ( Eq, Ord, Show, Data, Typeable )
 
-eq :: C -> C -> Bool
-eq A A = True
-eq B B = True
-eq C C = True
-eq _ _ = False
+(===) :: T -> T -> Bool
+A === A = True
+B === B = True
+C === C = True
+_ === _ = False
 
-instance Arbitrary C where
-  arbitrary = elements [A,B,C]
-
--- step :: Eq a => R a -> a -> R a
-step :: R  -> C -> R
-step (Atom a)  x | a `eq` x  = Eps
+step :: R T -> T -> R T
+step (Atom a)  x | a === x  = Eps
                  | otherwise = Nil
-step (p `Plus` q) x          = label 1 (step p x) `plus` label 2 (step q x)
-step (p `Seqq` q) x           = (label 1 (step p x) `seqq` q) `plus` (epsR p `seqq` label 2 (step q x))
-step (Star p)  x             = label 1 (step p x) `seqq` Star p
-step _         x             = Nil
+step (p :+: q) x = label 1 (step p x) .+. label 2 (step q x)
+step (p :>: q) x = (label 1 (step p x) .>. q) .+. (epsR p .>. label 2 (step q x))
+step (Star p)  x = label 1 (step p x) .>. Star p
+step _         x = Nil
 
--- rec :: Eq a => R a -> [a] -> Bool
-rec :: R  -> [C] -> Bool
+rec :: R T -> [T] -> Bool
 rec p []     = eps p
 rec p (x:xs) = rec (step p x) xs
 
-prop_koen p q s = rec (p `Seqq` q) s =:= rec (q `Seqq` p) s
+-- prop_koen p q s = rec (p :>: q) s =:= rec (q :>: p) s
 
--- prop_star_plus p q a b = rec (Star (p `Plus` q)) [a,b] =:= rec (Star p `Plus` Star q) [a,b]
+-- prop_star_plus p q s = rec (Star (p :+: q)) s =:= rec (Star p :+: Star q) s
 
--- prop_star_seq p q s = rec (Star (p `Seqq` q)) s =:= rec (Star p `Seqq` Star q) s
+-- prop_star_plus_1 p q s = rec (Star (p :+: q)) s =:= True ==> rec (Star p :+: Star q) s =:= True
+-- prop_star_plus_2 p q s = rec (Star p :+: Star q) s =:= True ==> rec (Star (p :+: q)) s =:= True
 
--- prop_switcheroo p q s = rec (p `Plus` q) s =:= rec (p `Seqq` q) s
+-- prop_star_plus_easy_1 p q a b = rec (Star (p :+: q)) [a,b] =:= True ==> rec (Star p :+: Star q) [a,b] =:= True
+-- prop_star_plus_easy_2 p q a b = rec (Star p :+: Star q) [a,b] =:= True ==> rec (Star (p :+: q)) [a,b] =:= True
 
--- prop_bad_assoc p q r s = rec (p `Plus` (q `Seqq` r)) s =:= rec ((p `Plus` q) `Seqq` r) s
+prop_star_plus_easy p q a b = rec (Star (p :+: q)) [a,b] =:= rec (Star p :+: Star q) [a,b]
+
+-- prop_star_seq p q s = rec (Star (p :>: q)) s =:= rec (Star p :>: Star q) s
+--
+-- prop_switcheroo p q s = rec (p :+: q) s =:= rec (p :>: q) s
+--
+-- prop_bad_assoc p q r s = rec (p :+: (q :>: r)) s =:= rec ((p :+: q) :>: r) s
 
 {-
 reck :: R C -> [C] -> Bool
 reck Eps       []  = True
 reck (Atom a)  [b] = a == b
-reck (p `Plus` q) s   = reck p s || reck q s
-reck (p `Seqq` q) s   = reck_seq p q (splits s)
+reck (p :+: q) s   = reck p s || reck q s
+reck (p :>: q) s   = reck_seq p q (splits s)
 reck (Star p)  []  = True
-reck (Star p)  s   | not (eps p) = rec (p `Seqq` Star p) s
+reck (Star p)  s   | not (eps p) = rec (p :>: Star p) s
 reck _ _  = False
 
 okay :: R C -> Bool
-okay (p `Plus` q) = okay p && okay q
-okay (p `Seqq` q) = okay p && okay q
+okay (p :+: q) = okay p && okay q
+okay (p :>: q) = okay p && okay q
 okay (Star p)  = okay p && not (eps p)
 okay _         = True
 
@@ -125,4 +111,26 @@ splits2 :: a -> [([a],[a])] -> [([a],[a])]
 splits2 x xs = [ (x:as,bs) | (as,bs) <- xs ]
 
 prop_same p s = rec p s =:= reck p s
+-}
+
+{-
+instance Arbitrary C where
+  arbitrary = elements [A,B,C]
+-}
+
+{-
+instance Arbitrary a => Arbitrary (R a) where
+  arbitrary = sized go
+    where
+      go s = frequency
+        [(1,return Nil)
+        ,(1,return Eps)
+        ,(3,Atom `fmap` arbitrary)
+        ,(s,liftM2 (:+:) (go s2) (go s2))
+        ,(s,liftM2 (:>:) (go s2) (go s2))
+        ,(s,liftM  Star  (go s1))
+        ]
+        where
+         s2 = s`div`2
+         s1 = pred s
 -}

@@ -588,11 +588,12 @@ instance Show a => Show (Val a) where
 val :: a -> Val a
 val x = Val [(tt,x)]
 
-(=?) :: Eq a => Val a -> a -> Bit
+(=?),valEq :: Eq a => Val a -> a -> Bit
 Val []         =? x  = ff
 Val ((a,y):xs) =? x
   | x == y      = a
   | otherwise   = Val xs =? x
+valEq = (=?)
 
 domain :: Val a -> [a]
 domain (Val xs) = map snd xs

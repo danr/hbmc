@@ -42,9 +42,9 @@ trFun Tip.Function{..} =
        [
          let tt   = modTyCon wrapData . trType
          in H.TySig func_name
-              [ TyCon (api s) [TyVar tv]
+              [ TyCon s [TyVar tv]
               | tv <- func_tvs
-              , s <- ["Equal","Eq","Constructive"]
+              , s <- [api "Equal",prelude "Eq",api "Constructive"]
               ]
               (TyTup (map (tt . Tip.lcl_type) func_args)
                `TyArr` (TyCon (api "H") [tt func_res])),
@@ -64,7 +64,8 @@ trProp (Tip.Formula Tip.Prove [] (Tip.collectQuant -> (lcls,tm)))
        f <- fresh
        return $ (,) f $ funDecl f [] $
          mkDo (input ++ concat terms)
-           (H.Apply (api "solveAndSee") [Tup (map (var . Tip.lcl_name) lcls)])
+           (H.Apply (api "solveAndSee")
+             [Tup (map (var . Tip.lcl_name) lcls)])
 trProp fm = error $ "Invalid property: " ++ ppRender fm ++ "\n(cannot be polymorphic)"
 
 type Term a = (Bool,Tip.Expr a,Tip.Expr a)
@@ -173,4 +174,4 @@ trAlt c r cons (pat S.:=> rhs) =
          S.ConPat k -> H.Apply (api "when") [H.Apply (=?) [var c,var (conLabel k)],body]
 
  where
-  (=?) = api "(=?)"
+  (=?) = api "valEq"

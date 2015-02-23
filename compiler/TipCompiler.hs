@@ -25,6 +25,7 @@ import Tip.Simplify
 import Tip.Utils.Renamer
 
 import Data.Generics.Geniplate
+import Data.Char
 
 import TipLift
 import TipMonadic
@@ -86,6 +87,7 @@ main = do
     putStrLn "{-# LANGUAGE FlexibleInstances #-}"
     putStrLn "{-# LANGUAGE MultiParamTypeClasses #-}"
     putStrLn "{-# LANGUAGE GeneralizedNewtypeDeriving #-}"
+    putStrLn "import qualified Prelude"
     putStrLn "import LibHBMC"
     ppp decls
 
@@ -122,7 +124,7 @@ instance Interface Var where
   mainFun     = Var "main"
 
   conLabel  f = Var $ "L_" ++ ppRender f
-  conRepr   f = Var $ ppRender f ++ "_"
+  conRepr   f = Var $ ppRender f
   thunkRepr f = Var $ "Thunk_" ++ ppRender f
   wrapData  f = Var $ "D_" ++ ppRender f
   caseData  f = Var $ "case" ++ ppRender f
@@ -132,12 +134,22 @@ instance Pretty Var where
   pp x =
     case x of
       Var ""      -> text "x"
-      Var xs      -> text xs
+      Var xs      -> text (escape xs)
       Refresh v i -> pp v <> int i
       Proj x i    -> "proj" {- <> pp x <> "_" -} <> pp (i+1)
       Api x       -> text x
-      Prelude x   -> text x
+      Prelude x   -> "Prelude." <> text x
       _           -> text (show x)
+
+escape :: String -> String
+escape (':':xs) = 'K':escape xs
+escape xs = case concatMap escChar xs of
+               y:ys | not (isAlpha y) -> 'a':y:ys
+               ys                     -> ys
+
+escChar :: Char -> String
+escChar x | isAlphaNum x || x == '\'' || x == '_' = [x]
+          | otherwise = show (ord x)
 
 disambigId :: Id -> [Var]
 disambigId i = vs : [ Refresh vs x | x <- [0..] ]

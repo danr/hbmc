@@ -108,7 +108,7 @@ instance Pretty a => Pretty (Expr a) where
       Tup es     -> tuple (map pp es)
       LinearTup es -> parens (fsep (punctuate "," (map pp es)))
       String s   -> "\"" <> pp s <> "\""
-      Noop       -> "return ()"
+      Noop       -> "Prelude.return ()"
    where
     pp_par e0 =
       case e0 of
