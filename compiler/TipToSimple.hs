@@ -18,7 +18,7 @@ toExpr e0 =
          bindLets lets . substSimple (replace x s1) <$> toExpr e2
 
     T.Match (collectLets -> (calls,scrut_expr)) alts ->
-      do (lets,Var s) <- toSimple scrut_expr
+      do (lets,s) <- toSimple scrut_expr
 
          calls' <-
            sequence
@@ -72,7 +72,7 @@ toSimple' e0 =
            FunctionNS    -> do a <- lift fresh
                                let lt = case unproj f of
                                           Just (tc,i) -> let [Var x] = xn
-                                                         in  Proj tc i x
+                                                         in  Proj tc i (S.Var x)
                                           Nothing     -> S.Apply f xn
                                tell [(a,lt)]
                                return (Var a)

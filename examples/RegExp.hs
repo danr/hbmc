@@ -87,13 +87,13 @@ rec :: R  -> [C] -> Bool
 rec p []     = eps p
 rec p (x:xs) = rec (step p x) xs
 
--- prop_koen p q s = rec (p `Seqq` q) s =:= rec (q `Seqq` p) s
+prop_koen p q s = rec (p `Seqq` q) s =:= rec (q `Seqq` p) s
 
 -- prop_star_plus p q a b = rec (Star (p `Plus` q)) [a,b] =:= rec (Star p `Plus` Star q) [a,b]
 
 -- prop_star_seq p q s = rec (Star (p `Seqq` q)) s =:= rec (Star p `Seqq` Star q) s
 
-prop_switcheroo p q s = rec (p `Plus` q) s =:= rec (p `Seqq` q) s
+-- prop_switcheroo p q s = rec (p `Plus` q) s =:= rec (p `Seqq` q) s
 
 -- prop_bad_assoc p q r s = rec (p `Plus` (q `Seqq` r)) s =:= rec ((p `Plus` q) `Seqq` r) s
 

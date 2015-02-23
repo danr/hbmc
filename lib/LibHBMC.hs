@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, RankNTypes #-}
 {-# LANGUAGE FunctionalDependencies, FlexibleContexts #-}
-module NewNew where
+module LibHBMC where
 
 import Control.Applicative
 import Control.Monad
@@ -672,9 +672,11 @@ data Data c a = Con (Val c) a
 con :: Ord c => c -> a -> Thunk (Data c a)
 con c a = this (Con (val c) a)
 
+{-
 proj :: Maybe a -> (a -> H ()) -> H ()
 proj (Just x) h = h x
 proj _        _ = return ()
+-}
 
 proj1 :: (Maybe a, z) -> (a -> H ()) -> H ()
 proj1 (Just x, _) h = h x
@@ -687,6 +689,26 @@ proj2 _                _ = return ()
 proj3 :: (x, (y, (Maybe a, z))) -> (a -> H ()) -> H ()
 proj3 (_, (_, (Just x, _))) h = h x
 proj3 _                     _ = return ()
+
+proj4 :: (x1, (x, (y, (Maybe a, z)))) -> (a -> H ()) -> H ()
+proj4 (_, (_, (_, (Just x, _)))) h = h x
+proj4 _                     _ = return ()
+
+proj5 :: (x2, (x1, (x, (y, (Maybe a, z))))) -> (a -> H ()) -> H ()
+proj5 (_, (_, (_, (_, (Just x, _))))) h = h x
+proj5 _                     _ = return ()
+
+proj6 :: (x3, (x2, (x1, (x, (y, (Maybe a, z)))))) -> (a -> H ()) -> H ()
+proj6 (_, (_, (_, (_, (_, (Just x, _)))))) h = h x
+proj6 _                     _ = return ()
+
+proj7 :: (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z))))))) -> (a -> H ()) -> H ()
+proj7 (_, (_, (_, (_, (_, (_, (Just x, _))))))) h = h x
+proj7 _                     _ = return ()
+
+proj8 :: (x5, (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z)))))))) -> (a -> H ()) -> H ()
+proj8 (_, (_, (_, (_, (_, (_, (_, (Just x, _)))))))) h = h x
+proj8 _                     _ = return ()
 
 class (Show c, Ord c) => ConstructiveData c where
   constrs :: [c]

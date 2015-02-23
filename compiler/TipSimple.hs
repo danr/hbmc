@@ -14,13 +14,13 @@ import Data.Traversable (Traversable)
 import Data.Generics.Geniplate
 
 data Let a = Apply a [Simple a]
-           | Proj a Int a
+           | Proj a Int (Simple a)
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Expr a
   = Simple (Simple a)
   | Let  a (Let a) (Expr a)
-  | Match a a [Call a] [Alt a]
+  | Match a (Simple a) [Call a] [Alt a]
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Simple a

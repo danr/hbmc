@@ -49,27 +49,34 @@ main = do
     -- putStrLn (ppRender thy)
     let thy0 = addBoolToTheory (renameWith disambigId thy)
 
-    let thy1 = (commuteMatch <=< simplifyExpr aggressively <=< delambda) `vifne` thy0
+    let thy1 = (simplifyExpr aggressively <=< delambda) `vifne` thy0
 
-    -- ppp thy1
+    putStrLn "{-"
+    ppp thy1
+    putStrLn "-}"
 
-    let (dis,_) = unzip (map dataInfo (thy_data_decls thy1))
+    let thy2 = commuteMatch `vifne` thy1
+
+    let (dis,_) = unzip (map dataInfo (thy_data_decls thy2))
         di      = concat dis
 
-    let thy2 = (removeLabelsFromTheory <=< projectPatterns di) `vifne` thy1
+    let thy3 = (removeLabelsFromTheory <=< projectPatterns di) `vifne` thy2
 
+    putStrLn "{-"
+    ppp thy3
+    putStrLn "-}"
 
-    let func_decls = [ fn | fn <- thy_func_decls thy2, Tip.func_name fn /= labelName ]
+    let func_decls = [ fn | fn <- thy_func_decls thy3, Tip.func_name fn /= labelName ]
 
     let data_decls =
-          [ d | d <- thy_data_decls thy2
+          [ d | d <- thy_data_decls thy3
               , and [ False | Tip.BuiltinType Tip.Integer :: Tip.Type Var <- universeBi d ]
               ]
 
-    let decls = runFreshFrom (maximumOn varMax thy2) $
+    let decls = runFreshFrom (maximumOn varMax thy3) $
           do fn_decls <- mapM trFun func_decls
              dt_decls <- mapM trDatatype data_decls
-             (prop_names,prop_decls) <- mapAndUnzipM trProp (thy_form_decls thy2)
+             (prop_names,prop_decls) <- mapAndUnzipM trProp (thy_form_decls thy3)
              let main_decl = funDecl mainFun []
                    (mkDo [Stmt (Apply (api "run") [var p]) | p <- prop_names] Noop)
              return (Decls (concat fn_decls ++ concat dt_decls ++ prop_decls ++ [main_decl]))
@@ -79,7 +86,7 @@ main = do
     putStrLn "{-# LANGUAGE FlexibleInstances #-}"
     putStrLn "{-# LANGUAGE MultiParamTypeClasses #-}"
     putStrLn "{-# LANGUAGE GeneralizedNewtypeDeriving #-}"
-    putStrLn "import NewNew"
+    putStrLn "import LibHBMC"
     ppp decls
 
 vifne :: F.Foldable f => (f Var -> Fresh a) -> f Var -> a
@@ -192,22 +199,27 @@ projectPatterns di =
   transformBiM $ \ e0 ->
     case e0 of
       Match e alts ->
-        Match e <$> -- nabmi fa lo nu .ebu na sampu ju'i .i pu'o fu'irgau
-          sequence
-            [ case pat of
-                Default -> return (Case Default rhs)
-                Tip.ConPat k vars
-                  | Just (tc,ixs) <- lookup (gbl_name k) di
-                  -> Case (Tip.ConPat k []) <$>
-                       substMany
-                         [ (v,Gbl (fun (proj tc i)) :@: [e])
-                         | (v,i) <- vars `zip` ixs
-                         ]
-                         rhs
-                _ -> error $ "projectPatterns: " ++ ppShow di ++ "\n" ++ ppRender e0
-            | Case pat rhs <- alts
-            ]
+        do x <- fresh
+           let lx = Local x (exprType e)
+           make_let lx e =<< fmap (Match (Lcl lx))
+             (sequence
+               [ case pat of
+                   Default -> return (Case Default rhs)
+                   Tip.ConPat k vars
+                     | Just (tc,ixs) <- lookup (gbl_name k) di
+                     -> Case (Tip.ConPat k []) <$>
+                          substMany
+                            [ (v,Gbl (fun (proj tc i)) :@: [Lcl lx])
+                            | (v,i) <- vars `zip` ixs
+                            ]
+                            rhs
+                   _ -> error $ "projectPatterns: " ++ ppShow di ++ "\n" ++ ppRender e0
+               | Case pat rhs <- alts
+               ])
       _  -> return e0
+ where
+  make_let x (Lcl y) e = (Lcl y // x) e
+  make_let x b       e = return (Let x b e)
 
 -- example
 

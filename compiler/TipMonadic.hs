@@ -99,9 +99,9 @@ trExpr :: Interface a => S.Expr a -> a -> Fresh (H.Expr a)
 trExpr e0 r =
   case e0 of
     S.Simple s -> return (trSimple s >>> var r)
-    S.Let x (S.Proj i t s) e ->
+    S.Let x (S.Proj i t (Var y)) e ->
       do e' <- trExpr e r
-         return (H.Apply (proj i t) [var s,H.Lam [VarPat x] e'])
+         return (H.Apply (proj i t) [var y,H.Lam [VarPat x] e'])
     S.Let x (S.Apply f ss) e
       | f == callName, Var g:args <- ss
         -> do e' <- trExpr e r
@@ -118,13 +118,16 @@ trExpr e0 r =
                   e'
       | otherwise -> mkDo [H.Bind x (H.Apply f [Tup (map trSimple ss)])] <$> trExpr e r
 
-    S.Match tc s calls alts ->
+    S.Match tc (Var s) calls alts ->
       do s' <- fresh
 
          let change l0 =
                case l0 of
-                 Proj tc' i x | x == s    -> Proj tc' i s'
-                 _ -> l0
+                 Proj tc' i (Var x) | x == s    -> Proj tc' i (Var s')
+                                    | otherwise -> l0
+                 Proj{}    -> error $ "iota redex in let: " ++ ppRender l0 ++
+                                      "\nfrom:" ++ ppRender e0
+                 S.Apply{} -> l0
 
 
          calls' <- mapM (trCall . modLet change) calls
@@ -144,6 +147,8 @@ trExpr e0 r =
              H.Lam [H.ConPat (api "Con") [H.VarPat c,H.VarPat s']]
                (mkDo (calls' ++ alts') Noop)
              ]
+
+    _ -> error $ "iota redex in match or proj: " ++ ppRender e0
 
 trSimple :: Interface a => S.Simple a -> H.Expr a
 trSimple (S.Var x)    = var x
