@@ -54,6 +54,9 @@ substSimple su =
 modLet :: TransformBi (Let a) (f a) => (Let a -> Let a) -> f a -> f a
 modLet = transformBi
 
+bindLets :: [(a,Let a)] -> Expr a -> Expr a
+bindLets = flip (foldr (\ (x,lt) e -> Let x lt e))
+
 instance Pretty a => Pretty (Expr a) where
   pp (Simple s) = pp s
   pp (Let x lt e) = sep ["let" $\ pp x <+> "=" $\ pp lt <> ";",pp e]

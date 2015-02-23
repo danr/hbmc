@@ -52,9 +52,6 @@ collectLets :: T.Expr a -> ([(T.Local a,T.Expr a)],T.Expr a)
 collectLets (T.Let x ex e) = let (bs,e') = collectLets e in ((x,ex):bs,e')
 collectLets e              = ([],e)
 
-bindLets :: [(a,Let a)] -> S.Expr a -> S.Expr a
-bindLets = flip (foldr (\ (x,lt) e -> S.Let x lt e))
-
 toSimple :: Interface a => T.Expr a -> Fresh ([(a,Let a)],Simple a)
 toSimple e =
   do (s,w) <- runWriterT (toSimple' e)

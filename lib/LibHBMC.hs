@@ -336,6 +336,10 @@ class Equal a where
     do q <- equal x y
        addClauseHere [nt q]
 
+eqTup,neqTup :: Equal a => (a, (a, ())) -> H ()
+eqTup  (x, (y, _)) = equalHere x y
+neqTup (x, (y, _)) = notEqualHere x y
+
 equalPred :: Equal a => a -> a -> Bit -> H ()
 equalPred x y q =
   do q' <- equal x y

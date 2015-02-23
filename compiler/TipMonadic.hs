@@ -82,19 +82,17 @@ collectEqual p = error $ "Cannot understand property: " ++ ppRender p
 
 trTerm :: Interface a => Term a -> Fresh [H.Stmt a]
 trTerm (pol,lhs,rhs) =
-  do l <- fresh
-     r <- fresh
-     lhs' <- ToS.toExpr lhs
-     rhs' <- ToS.toExpr rhs
-     tr_l <- trExpr lhs' l
-     tr_r <- trExpr rhs' r
-     return
-       [ H.Bind l (var (api "new"))
-       , H.Bind r (var (api "new"))
-       , H.Stmt tr_l
-       , H.Stmt tr_r
-       , H.Stmt (H.Apply (if pol then api "notEqualHere" else api "equalHere") [var l,var r])
-       ]
+  do (l_lets,l) <- ToS.toSimple lhs
+     (r_lets,r) <- ToS.toSimple rhs
+     dum1 <- fresh
+     dum2 <- fresh
+     e <- trExpr
+       (bindLets
+         (l_lets ++ r_lets ++
+           [(dum1,S.Apply (if pol then api "neqTup" else api "eqTup") [l,r])])
+         (S.Simple (S.Var dum1)))
+       dum2
+     return [H.Bind dum2 (var (api "new")),H.Stmt e]
 
 trExpr :: Interface a => S.Expr a -> a -> Fresh (H.Expr a)
 trExpr e0 r =

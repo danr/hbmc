@@ -65,7 +65,7 @@ rec :: R T -> [T] -> Bool
 rec p []     = eps p
 rec p (x:xs) = rec (step p x) xs
 
--- prop_koen p q s = rec (p :>: q) s =:= rec (q :>: p) s
+prop_koen p q s = rec (p :>: q) s =:= rec (q :>: p) s
 
 -- prop_star_plus p q s = rec (Star (p :+: q)) s =:= rec (Star p :+: Star q) s
 
@@ -75,7 +75,7 @@ rec p (x:xs) = rec (step p x) xs
 -- prop_star_plus_easy_1 p q a b = rec (Star (p :+: q)) [a,b] =:= True ==> rec (Star p :+: Star q) [a,b] =:= True
 -- prop_star_plus_easy_2 p q a b = rec (Star p :+: Star q) [a,b] =:= True ==> rec (Star (p :+: q)) [a,b] =:= True
 
-prop_star_plus_easy p q a b = rec (Star (p :+: q)) [a,b] =:= rec (Star p :+: Star q) [a,b]
+-- prop_star_plus_easy p q a b = rec (Star (p :+: q)) [a,b] =:= rec (Star p :+: Star q) [a,b]
 
 -- prop_star_seq p q s = rec (Star (p :>: q)) s =:= rec (Star p :>: Star q) s
 --
