@@ -1,0 +1,5 @@
+#!/bin/bash
+
+BASE=$(basename $1)
+
+hbmcc $1 > /tmp/$BASE && (cd /tmp; ghc --make $BASE -O2 && time ./$(basename $BASE .hs))
