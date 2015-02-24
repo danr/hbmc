@@ -1,5 +1,9 @@
 #!/bin/bash
 
-BASE=$(basename $1)
+FILE=$1
+BASE=$(basename $FILE)
+shift
 
-hbmcc $1 > /tmp/$BASE && (cd /tmp; ghc --make $BASE -O2 && time ./$(basename $BASE .hs))
+mkdir -p tmp
+
+hbmcc $FILE $@ > tmp/$BASE && (cd tmp; ghc --make $BASE -O2 && time ./$(basename $BASE .hs))
