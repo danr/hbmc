@@ -3,6 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ViewPatterns #-}
 module Main where
 
 import Control.Monad
@@ -23,6 +24,8 @@ import Tip.Params
 import Tip.Pretty
 import Tip.Simplify
 import Tip.Utils.Renamer
+
+import Control.Monad.Writer hiding ((<>))
 
 import Data.Generics.Geniplate
 import Data.Char
@@ -48,7 +51,7 @@ main = do
       , extra_trans = [] -- es
       }
     -- putStrLn (ppRender thy)
-    let thy0 = addBoolToTheory (renameWith disambigId thy)
+    let thy0 = straightLabel (addBoolToTheory (renameWith disambigId thy))
 
     let thy1 = (simplifyExpr aggressively <=< delambda) `vifne` thy0
 
@@ -183,6 +186,35 @@ instance Call Var where
   skipName   = Skip
   callName   = Call
   cancelName = Cancel
+
+straightLabel :: forall f a . (TransformBi (Expr a) (f a),Call a) => f a -> f a
+straightLabel = transformExprIn $ \ e0 ->
+  case e0 of
+    (projAt -> Just (projAt -> Just (projGlobal -> Just (x,g),e1),e2))
+      | x == labelName
+      -> g :@: [e1,e2]
+    _ -> e0
+
+
+projAt :: Expr a -> Maybe (Expr a,Expr a)
+projAt (Builtin (At 1) :@: [a,b]) = Just (a,b)
+projAt _                          = Nothing
+
+projGlobal :: Expr a -> Maybe (a,Head a)
+projGlobal (hd@(Gbl (Global x _ _ _)) :@: []) = Just (x,hd)
+projGlobal _                                  = Nothing
+
+memosAndChecks :: Theory Var -> (Theory Var,([Var],[Var]))
+memosAndChecks = runWriter . transformBiM trf
+ where
+  trf :: Function Var -> Writer ([Var],[Var]) (Function Var)
+  trf fn@Function{..} =
+    case func_body of
+      (projAt -> Just (projGlobal -> Just (x,_),e))
+        | x == Var "memo"  -> tell ([func_name],[]) >> again
+        | x == Var "check" -> tell ([],[func_name]) >> again
+       where again = trf fn{func_body=e}
+      _ -> return fn
 
 -- add bool
 

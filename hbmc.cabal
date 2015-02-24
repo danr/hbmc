@@ -12,6 +12,7 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:
+    HBMC
     LibHBMC
 
   hs-source-dirs:      lib
@@ -21,7 +22,9 @@ library
                        mtl >=2.1 && <2.3,
                        containers >=0.5 && <0.6,
                        transformers >=0.3 && <0.4,
-                       minisat >=0.1 && <0.2
+                       minisat >=0.1 && <0.2,
+
+                       tip-haskell-frontend ==0.1
 
 executable hbmcc
   main-is:             TipCompiler.hs

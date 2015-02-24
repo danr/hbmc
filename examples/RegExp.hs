@@ -1,14 +1,6 @@
-{-# LANGUAGE DeriveDataTypeable #-}
 module RegExp where
 
-import Control.Monad
-import Data.Typeable
-import Data.Data
-import Tip.DSL
--- import Test.QuickCheck hiding (label)
-
-label :: Int -> a -> a
-label x s = s
+import HBMC
 
 data R a
   = Nil
@@ -17,7 +9,7 @@ data R a
   | R a :+: R a
   | R a :>: R a
   | Star (R a)
- deriving ( Eq, Ord, Show, Data, Typeable )
+ deriving (Eq, Ord, Show)
 
 infixl 7 .+.
 infixl 8 .>.
@@ -45,7 +37,7 @@ epsR p | eps p     = Eps
        | otherwise = Nil
 
 data T = A | B | C
- deriving ( Eq, Ord, Show, Data, Typeable )
+ deriving (Eq, Ord, Show)
 
 (===) :: T -> T -> Bool
 A === A = True
@@ -56,9 +48,13 @@ _ === _ = False
 step :: R T -> T -> R T
 step (Atom a)  x | a === x  = Eps
                  | otherwise = Nil
-step (p :+: q) x =  label 1 (step p x) :+:                    label 2 (step q x)
-step (p :>: q) x = (label 1 (step p x) :>: q) :+: (epsR p :>: label 2 (step q x))
-step (Star p)  x =  label 1 (step p x) :>: Star p
+step (p :+: q) x =             (label 1 (step p x)) :+:       (label 2 (step q x))
+step (p :>: q) x =             (label 1 (step p x) :>: q) :+: (if eps p then label 2 (step q x) else Nil)
+{-
+step (p :>: q) x | eps p     = (label 1 (step p x)  :>: q) :+: label 2 (step q x)
+                 | otherwise =  label 1 (step p x)  :>: q
+-}
+step (Star p)  x =             (label 1 (step p x)) :>: Star p
 step _         x = Nil
 
 rec :: R T -> [T] -> Bool
