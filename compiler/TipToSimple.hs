@@ -69,7 +69,8 @@ toSimple' e0 =
     Gbl (Global f _ _ ns) :@: args ->
       do xn <- mapM toSimple' args
          case ns of
-           ConstructorNS -> do return (Con f xn)
+           ConstructorNS -> do let TyCon tc _ = T.exprType e0
+                               return (Con f tc xn)
            FunctionNS    -> do a <- lift fresh
                                let lt = case unproj f of
                                           Just (tc,i) -> let [Var x] = xn

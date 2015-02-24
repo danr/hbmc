@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternGuards #-}
 module TipTarget where
 
 import Text.PrettyPrint
@@ -36,7 +37,10 @@ class TipLift.Call a => Interface a where
   thunkRepr :: a -> a
   wrapData  :: a -> a
   caseData  :: a -> a -- caseNat
+  makeData  :: a -> a -- makeNat
   mkCon     :: a -> a -- the pure constructors
+
+  pred      :: a -> a
 
 data Decls a = Decls [Decl a]
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)

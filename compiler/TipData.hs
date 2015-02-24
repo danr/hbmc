@@ -42,10 +42,11 @@ trDatatype :: forall a . Interface a => Datatype a -> Fresh [Decl a]
 trDatatype dt@(Datatype tc tvs cons) =
   do constructors <- mapM make_con cons
      case_data <- make_case_data
+     make_data <- make_make_data
      equal <- make_equal
      value <- make_value
      return ([wrapper,labels] ++ constructors ++
-             [case_data] ++
+             [case_data,make_data] ++
              [constructive,equal,repr,value])
  where
   (indexes,types) = dataInfo dt
@@ -82,6 +83,18 @@ trDatatype dt@(Datatype tc tvs cons) =
          FunDecl (caseData tc)
            [([ConPat (wrapData tc) [VarPat t],VarPat h]
             ,Apply (api ("ifForce" ! "withoutForce")) [var t,var h])]
+
+
+  -- makeNat (Nat n) h = doForce t h
+  make_make_data :: Fresh (Decl a)
+  make_make_data =
+    do t <- fresh
+       h <- fresh
+       return $
+         FunDecl (makeData tc)
+           [([ConPat (wrapData tc) [VarPat t],VarPat h]
+            ,Apply (api ("doForce" ! "withoutForce")) [var t,var h])]
+
 
 
   -- data N = Zero | Succ
