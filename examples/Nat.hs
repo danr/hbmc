@@ -30,6 +30,12 @@ Z{} < Z   = False
 S{} < Z   = False
 S n < S m = n < m
 
+(===) :: Nat -> Nat -> Bool
+Z   === Z   = True
+Z{} === S{} = False
+S{} === Z{} = False
+S n === S m = n === m
+
 -- plus_idem x = x + x =:= x
 -- mul_idem  x = x * x =:= x
 -- plus_not_idem x = x + x =:= x ==> True =:= False
