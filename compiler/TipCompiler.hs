@@ -46,7 +46,7 @@ main = do
       { file = f
       , include = []
       , flags = [] -- [PrintCore,PrintProps,PrintExtraIds]
-      , only = es -- []
+      , only = [ s | 'o':s <- es ]
       , extra = []
       , extra_trans = [] -- es
       }
@@ -56,6 +56,16 @@ main = do
     let thy0 = straightLabel remove_labels (addBoolToTheory (renameWith disambigId thy))
 
     let thy1 = (simplifyExpr aggressively <=< delambda) `vifne` thy0
+
+    let memos  = [ Var s | 'm':s <- es ]
+    let checks = [ Var s | 'c':s <- es ]
+
+    let mcs = (memos,checks)
+
+    putStrLn "{-"
+    print es
+    print mcs
+    putStrLn "-}"
 
     putStrLn "{-"
     ppp thy1
@@ -130,7 +140,7 @@ instance Interface Var where
   mainFun     = Var "main"
 
   conLabel  f = Var $ "L_" ++ ppRender f
-  conRepr   f = Var $ ppRender f
+  conRepr   f = f
   thunkRepr f = Var $ "Thunk_" ++ ppRender f
   wrapData  f = Var $ "D_" ++ ppRender f
   caseData  f = Var $ "case" ++ ppRender f
