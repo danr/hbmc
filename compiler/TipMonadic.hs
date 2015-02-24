@@ -15,8 +15,6 @@ import Data.Maybe
 
 import Control.Applicative
 
-import Prelude hiding (pred)
-
 returnExpr :: Interface a => H.Expr a -> H.Expr a
 returnExpr e = H.Apply (prelude "return") [e]
 
@@ -39,20 +37,14 @@ trType t0 =
     Tip.TyVar x    -> TyVar x
     _              -> error "trType: Cannot translate type\n(using HOFs, classes or Ints?)"
 
-trFun :: Interface a => ([a],[a]) -> Tip.Function a -> Fresh [H.Decl a]
-trFun (memos,checks) Tip.Function{..} =
+trFun :: Interface a => Tip.Function a -> Fresh [H.Decl a]
+trFun Tip.Function{..} =
   do r <- fresh
      simp_body <- ToS.toExpr func_body
      b <- trExpr simp_body (Just r)
      let args = map Tip.lcl_name func_args
-     let maybe_check e | func_name `elem` checks = H.Apply (api "check") [e]
-                       | otherwise = e
-
-     tmp <- fresh
-
      return
        [
-       {-
          let tt   = modTyCon wrapData . trType
          in H.TySig func_name
               [ TyCon s [TyVar tv]
@@ -60,17 +52,12 @@ trFun (memos,checks) Tip.Function{..} =
               , s <- [api "Equal",prelude "Ord",api "Constructive"]
               ]
               (TyTup (map (tt . Tip.lcl_type) func_args)
-               `TyArr` (TyCon (api "H") [tt func_res]))
+               `TyArr` (TyCon (api "H") [tt func_res])),
 
-       , -}
-         funDecl func_name [] (H.Apply (prelude "fst") [var tmp])
-
-       , funDecl (pred func_name) [] (H.Apply (prelude "snd") [var tmp])
-
-       , funDecl tmp []
-          (H.Apply (api (if func_name `elem` memos then "record" else "norecord"))
+         funDecl func_name []
+          (H.Apply (api "memo")
             [H.String func_name
-            ,H.Lam [H.TupPat (map H.VarPat args),H.VarPat r] (maybe_check b)
+            ,H.Lam [H.TupPat (map H.VarPat args),H.VarPat r] b
             ])
        ]
 
@@ -111,82 +98,35 @@ trTerm (pol,lhs,rhs) =
        Nothing
      return [H.Stmt e]
 
-trHalfExpr :: Interface a => S.HalfExpr a -> a -> Fresh (H.Expr a)
-trHalfExpr (HalfExpr xs e) r =
-  case xs of
-    []        -> trHalf e r
-    (x,l):xs' -> trLet True x l =<< trHalfExpr (HalfExpr xs' e) r
-
-trHalf :: Interface a => S.Half a -> a -> Fresh (H.Expr a)
-trHalf e0 r =
+trExpr :: Interface a => S.Expr a -> Maybe a -> Fresh (H.Expr a)
+trExpr e0 r =
   case e0 of
-    HVar x    -> return (var x >>> var r)
-    HFun f ss -> return (H.Apply (pred f) [Tup (map trSimple ss),var r])
-    HCon k tc hs ->
-      do -- do makeCase r $ \ c s' ->
-         --      must (c =? Kk) $ do
-         --        ...
-         --        proj_i s' $ \ a -> trHalf h a
-         --        ...
-         c <- fresh
-         s' <- fresh
+    S.Simple s ->
+      case r of
+        Just r' -> return (trSimple s >>> var r')
+        Nothing -> return (returnExpr (justExpr (trSimple s)))
 
-         projs <-
-           sequence
-             [ do a <- fresh
-                  e <- trHalf h a
-                  return $
-                    H.Stmt $
-                      H.Apply (proj tc i)
-                              [var s',H.Lam [VarPat a] e]
-             | (i,h) <- [0..] `zip` hs
-             ]
-
-         return $
-           H.Apply (makeData tc) [var r,
-             H.Lam [H.ConPat (api "Con") [H.VarPat c,H.VarPat s']]
-               (H.Apply (api "must")
-                 [ H.Apply (=?) [var c,var (conLabel k)]
-                 , mkDo projs Noop
-                 ])
-             ]
-
-trLet :: Interface a => Bool -> a -> Let a -> H.Expr a -> Fresh (H.Expr a)
-trLet use_proj x l e' =
-  case l of
-    S.Proj t i s ->
-      do return (H.Apply ((if use_proj then proj else mproj) t i)
+    S.Let x (S.Proj i t s) e ->
+      do e' <- trExpr e r
+         return (H.Apply ((if isJust r then proj else mproj) i t)
                    [trSimple s,H.Lam [VarPat x] e'])
 
-    S.Apply f ss
+    S.Let x (S.Apply f ss) e
       | f == callName, Var g:args <- ss
-        -> do
+        -> do e' <- trExpr e r
               return $
                 mkDo
                   [ H.Bind x (H.Apply (api "call") [var g,H.Tup (map trSimple args)]) ]
                   e'
       | f == cancelName, [Var g,y] <- ss
-        -> do
+        -> do e' <- trExpr e r
               return $
                 mkDo
                   [ H.Stmt (H.Apply (api "nocall") [var g])
                   , H.Bind x (returnExpr (trSimple y))
                   ]
                   e'
-      | otherwise -> return (mkDo [H.Bind x (H.Apply f [Tup (map trSimple ss)])] e')
-
-trExpr :: Interface a => S.Expr a -> Maybe a -> Fresh (H.Expr a)
-trExpr e0 r =
-  case e0 of
-    _ | Just r' <- r, Just h <- tryHalf e0 ->
-      do trHalfExpr (optHalf h) r'
-
-    S.Let x l e -> trLet (isJust r) x l =<< trExpr e r
-
-    S.Simple s ->
-      case r of
-        Just r' -> return (trSimple s >>> var r')
-        Nothing -> return (returnExpr (justExpr (trSimple s)))
+      | otherwise -> mkDo [H.Bind x (H.Apply f [Tup (map trSimple ss)])] <$> trExpr e r
 
     S.Match tc s s' calls alts
       | Nothing <- r -> error $ "Cannot do case inside a lifted call: " ++ ppRender e0
@@ -213,7 +153,7 @@ trExpr e0 r =
 
 trSimple :: Interface a => S.Simple a -> H.Expr a
 trSimple (S.Var x)    = var x
-trSimple (S.Con k _ ss) = H.Apply (mkCon k) (map trSimple ss)
+trSimple (S.Con k ss) = H.Apply (mkCon k) (map trSimple ss)
 
 trCall :: Interface a => S.Call a -> Fresh (H.Stmt a)
 trCall (Call f args e) =
@@ -232,5 +172,5 @@ trAlt c r cons (pat S.:=> rhs) =
          S.Default  -> H.Apply (api "unless") [List [H.Apply (=?) [var c,var (conLabel k)] | k <- cons],body]
          S.ConPat k -> H.Apply (api "when") [H.Apply (=?) [var c,var (conLabel k)],body]
 
-(=?) :: Interface a => a
-(=?) = api "valEq"
+ where
+  (=?) = api "valEq"

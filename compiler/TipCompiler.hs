@@ -46,7 +46,7 @@ main = do
       { file = f
       , include = []
       , flags = [] -- [PrintCore,PrintProps,PrintExtraIds]
-      , only = [ s | 'o':s <- es ] -- []
+      , only = es -- []
       , extra = []
       , extra_trans = [] -- es
       }
@@ -56,16 +56,6 @@ main = do
     let thy0 = straightLabel remove_labels (addBoolToTheory (renameWith disambigId thy))
 
     let thy1 = (simplifyExpr aggressively <=< delambda) `vifne` thy0
-
-    let memos  = [ Var s | 'm':s <- es ]
-    let checks = [ Var s | 'c':s <- es ]
-
-    let mcs = (memos,checks)
-
-    putStrLn "{-"
-    print es
-    print mcs
-    putStrLn "-}"
 
     putStrLn "{-"
     ppp thy1
@@ -90,7 +80,7 @@ main = do
               ]
 
     let decls = runFreshFrom (maximumOn varMax thy3) $
-          do fn_decls <- mapM (trFun mcs) func_decls
+          do fn_decls <- mapM trFun func_decls
              dt_decls <- mapM trDatatype data_decls
              (prop_names,prop_decls) <- mapAndUnzipM trProp (thy_form_decls thy3)
              let main_decl = funDecl mainFun []
@@ -140,14 +130,11 @@ instance Interface Var where
   mainFun     = Var "main"
 
   conLabel  f = Var $ "L_" ++ ppRender f
-  conRepr   f = f
+  conRepr   f = Var $ ppRender f
   thunkRepr f = Var $ "Thunk_" ++ ppRender f
   wrapData  f = Var $ "D_" ++ ppRender f
   caseData  f = Var $ "case" ++ ppRender f
-  makeData  f = Var $ "make" ++ ppRender f
   mkCon     f = Var $ "con" ++ ppRender f
-  pred      f = Var $ "pred_" ++ ppRender f
-
 
 instance Pretty Var where
   pp x =
