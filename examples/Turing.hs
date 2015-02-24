@@ -52,12 +52,17 @@ runt q tape = steps (Succ Stop,[],tape) q
 steps :: State -> Q -> [A]
 steps st q =
   case step q st of
-    (Stop, _, tape') -> tape'
-    st'              -> steps st' q
+    (Stop, tape1, tape2) -> rev tape1 tape2
+    st'                  -> steps st' q
+
+rev :: [A] -> [A] -> [A]
+rev []     ys = ys
+rev (O:xs) ys = ys
+rev (x:xs) ys = rev xs (x:ys)
 
 prog :: Q -> Bool
-prog q = case runt q [A,A,A,B,B,X] of
-            B:B:A:A:A:X:_ -> True
+prog q = case runt q [A,A,B,B,X] of
+            B:B:A:A:X:_ -> True
             _       -> False
 
 prop q = prog q =:= False
