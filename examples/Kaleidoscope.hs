@@ -1,7 +1,7 @@
 {-# LANGUAGE OverlappingInstances,FlexibleInstances #-}
 module Kaleidoscope where
 
-import Tip.DSL
+import HBMC
 import Prelude hiding ((++))
 
 data Token
@@ -40,22 +40,20 @@ linN N_Kaleidoscope = [Kaleidoscope]
 data VP = See NP | VP `VP_In` NP
   deriving Show
 
-label l x = x
-
 linVP :: VP -> [Token]
 linVP (See np)      = [Saw]    ++         label 1 (linNP Obj np)
 linVP (VP_In vp np) = linVP vp ++ [In] ++ label 1 (linNP Obj np)
 
 -- examples --
 
-ex1_parsing s = linS s =:= [I,Saw,The,Butterfly,In,The,Kaleidoscope] ==> True =:= False
+ex1 s = linS s =:= [I,Saw,The,Butterfly,In,The,Kaleidoscope] ==> True =:= False
 
-ex2_two_parses t1 t2 =
+ex2 t1 t2 =
         linS t1 =:= [I,Saw,The,Butterfly,In,The,Kaleidoscope]
     ==> linS t2 =:= [I,Saw,The,Butterfly,In,The,Kaleidoscope]
     ==> t1 =:= t2
 
-ex3_ambiguity t1 t2 = linS t1 =:= linS t2 ==> t1 =:= t2
+ex3 t1 t2 = linS t1 =:= linS t2 ==> t1 =:= t2
 
 -- append --
 
