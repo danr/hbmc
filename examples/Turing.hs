@@ -61,9 +61,9 @@ rev (O:xs) ys = ys
 rev (x:xs) ys = rev xs (x:ys)
 
 prog :: Q -> Bool
-prog q = case runt q [A,A,B,B,X] of
-            B:B:A:A:X:_ -> True
-            _       -> False
+prog q = case runt q [B,A,A,A,A,B,X] of
+                A:A:A:A:B:B:X:_ -> True
+                _ -> False
 
 prop q = prog q =:= False
             
