@@ -46,7 +46,7 @@ main = do
       { file = f
       , include = []
       , flags = [] -- [PrintCore,PrintProps,PrintExtraIds]
-      , only = [ s | 'o':s <- es ] -- []
+      , only = [ s | 'o':s <- es ]
       , extra = []
       , extra_trans = [] -- es
       }
@@ -144,10 +144,7 @@ instance Interface Var where
   thunkRepr f = Var $ "Thunk_" ++ ppRender f
   wrapData  f = Var $ "D_" ++ ppRender f
   caseData  f = Var $ "case" ++ ppRender f
-  makeData  f = Var $ "make" ++ ppRender f
   mkCon     f = Var $ "con" ++ ppRender f
-  pred      f = Var $ "pred_" ++ ppRender f
-
 
 instance Pretty Var where
   pp x =

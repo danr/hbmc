@@ -8,7 +8,6 @@ module TipSimple where
 
 import Text.PrettyPrint
 import Tip.Pretty
-import qualified Data.Foldable as F
 import Data.Foldable (Foldable)
 import Data.Traversable (Traversable)
 
@@ -24,47 +23,9 @@ data Expr a
   | Match a (Simple a) a [Call a] [Alt a]
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
-tryHalf :: Expr a -> Maybe (HalfExpr a)
-tryHalf e0 = case e0 of
-  Match{}   -> Nothing
-  Let x l e -> do HalfExpr ls e' <- tryHalf e
-                  return (HalfExpr ((x,l):ls) e')
-  Simple s  -> return (HalfExpr [] (half s))
- where
-  half :: Simple a -> Half a
-  half (Var x) = HVar x
-  half (Con dc tc ss) = HCon dc tc (map half ss)
-
--- inlines
-optHalf :: Eq a => HalfExpr a -> HalfExpr a
-optHalf (HalfExpr ((x,Apply f ss):ls) h)
-  | sum (map (count x . snd) ls) == 0, count x h == 1
-  = optHalf (HalfExpr ls (substHalf x f ss h))
-optHalf (HalfExpr (l0:ls) h)
-  = let HalfExpr ls' h' = optHalf (HalfExpr ls h)
-    in  HalfExpr (l0:ls') h'
-optHalf he = he
-
-substHalf :: Eq a => a -> a -> [Simple a] -> Half a -> Half a
-substHalf x f args (HVar y) | x == y = HFun f args
-substHalf x f args (HCon dc tc hs) = HCon dc tc (map (substHalf x f args) hs)
-substHalf _ _ _    h = h
-
-count :: (Eq a,Foldable f) => a -> f a -> Int
-count x t = length [ y | y <- F.toList t, x == y ]
-
-data HalfExpr a = HalfExpr [(a,Let a)] (Half a)
-  deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
-
-data Half a
-  = HFun a [Simple a]
-  | HCon a a [Half a]
-  | HVar a
-  deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
-
 data Simple a
   = Var a
-  | Con a {-^ dc -} a {-^ ty con -} [Simple a]
+  | Con a [Simple a]
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Call a = Call a [a] (Expr a)
@@ -114,8 +75,8 @@ instance Pretty a => Pretty (Let a) where
 
 instance Pretty a => Pretty (Simple a) where
   pp (Var a)        = pp a
-  pp (Con k _ [])     = pp k
-  pp (Con k _ ss)     = parens (pp k $\ fsep (map pp ss))
+  pp (Con k [])     = pp k
+  pp (Con k ss)     = parens (pp k $\ fsep (map pp ss))
 
 instance Pretty a => Pretty (Call a) where
   pp (Call f xs e) = (pp f $\ fsep (map pp xs)) $\ "=" <+> pp e

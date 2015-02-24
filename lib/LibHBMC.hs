@@ -282,57 +282,7 @@ nocall :: Call a b -> H ()
 nocall cl =
   do addClauseHere [nt (doit cl)]
 
-pred_Cancel :: Equal x => (Call a b, (x, ())) -> x -> H ()
-pred_Cancel (cl, (x, _)) y =
-  do nocall cl
-     equalHere x y
-
-pred_Call :: Equal b => (Call a b, a) -> b -> H ()
-pred_Call (cl, a) b =
-  do b' <- call cl a
-     equalHere b' b
-
-
 --[ memo ]----------------------------------------------------------------------
-
-{-# NOINLINE record #-}
-record :: (Ord a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> (a -> H b, a -> b -> H ())
-record tag =
-  unsafePerformIO $
-    do putStrLn ("Creating table for " ++ tag ++ "...")
-       ref <- newIORef Mp.empty
-       return $ \h ->
-         let f x =
-               do xys <- io $ readIORef ref
-                  -- io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (Mp.size xys))
-                  (c,y) <- case Mp.lookup x xys of
-                             Nothing ->
-                               do y <- new
-                                  c <- new
-                                  io $ writeIORef ref (Mp.insert x (c,y) xys)
-                                  inContext c $ h x y
-                                  return (c,y)
-
-                             Just (c,y) ->
-                               do -- io $ putStrLn ("Duplicate call: " ++ tag)
-                                  return (c,y)
-
-                  addClauseHere [c]
-                  return y
-
-             h' x y =
-               do y' <- f x
-                  equalHere y' y
-
-          in (f,h')
-
-norecord :: Constructive b => String -> (a -> b -> H ()) -> (a -> H b, a -> b -> H ())
-norecord tag h = (f, h)
- where
-  f x =
-    do y <- new
-       h x y
-       return y
 
 {-# NOINLINE memo #-}
 memo :: (Ord a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> (a -> H b)
@@ -583,9 +533,6 @@ ifForce th@(Delay inp unq ref) h =
                       else
                        return ()
        Right a -> h a
-
-doForce :: Thunk a -> (a -> H ()) -> H ()
-doForce t h = do x <- force t; h x
 
 withoutForce :: a -> (a -> H ()) -> H ()
 withoutForce x h = h x

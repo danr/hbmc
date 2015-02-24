@@ -97,7 +97,7 @@ step (p :&: q) x           =  label 1 (step p x) :&: label 2 (step q x)
 step (p :>: q)x| eps p     = (label 1 (step p x) :>: q) :+: label 2 (step q x)
                | otherwise =  label 1 (step p x) :>: q
 -- step (p :>: q) x           = (label 1 (step p x) .>. q) .+. (cond (eps p) .>. label 2 (step q x))
--- step (Star p)  x           =  label 1 (step p x) .>. Star p
+step (Star p)  x           =  label 1 (step p x) .>. Star p
 step _         x           = Nil
 
 rec :: R T -> [T] -> Bool
@@ -113,14 +113,14 @@ rec p (x:xs) = rec (step p x) xs
 -- prop_bad_assoc p q r s = rec (p :+: (q :>: r)) s =:= rec ((p :+: q) :>: r) s
 
 -- 2m48s:
--- prop_star_plus p q s = rec (Star (p :+: q)) s =:= rec (Star p :+: Star q) s
+prop_star_plus p q s = rec (Star (p :+: q)) s =:= rec (Star p :+: Star q) s
 
 -- 10s:
 -- prop_star_plus p q a b = rec (Star (p :+: q)) [a,b] =:= rec (Star p :+: Star q) [a,b]
 
-prop_Conj p s =
-  eps p =:= False ==>
-    rec (p .&. (p .>. p)) s =:= False
+-- prop_Conj p s =
+--   eps p =:= False ==>
+--     rec (p .&. (p .>. p)) s =:= False
 
 {-
 prop_FromToConj p i j i' j' s =
