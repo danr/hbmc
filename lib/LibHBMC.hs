@@ -338,11 +338,11 @@ norecord tag h = (f, h)
 memo :: (Ord a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> (a -> H b)
 memo tag h =
   unsafePerformIO $
-    do putStrLn ("Creating table for " ++ tag ++ "...")
+    do -- putStrLn ("Creating table for " ++ tag ++ "...")
        ref <- newIORef Mp.empty
        return $
          \x -> do xys <- io $ readIORef ref
-                  io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (Mp.size xys))
+                  -- io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (Mp.size xys))
                   (c,y) <- case Mp.lookup x xys of
                              Nothing ->
                                do y <- new
@@ -603,7 +603,8 @@ instance Equal a => Equal (Thunk a) where
          notEqualHere a b
 
 equalThunk :: Equal a => Thunk a -> Thunk a -> H ()
-equalThunk x y =
+equalThunk x y = do
+  -- io $ putStrLn "equalThunk"
   case (x, y) of
     (Delay _ u _, Delay _ v _)
       | u == v -> return ()
