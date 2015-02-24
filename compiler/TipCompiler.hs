@@ -51,7 +51,9 @@ main = do
       , extra_trans = [] -- es
       }
     -- putStrLn (ppRender thy)
-    let thy0 = straightLabel (addBoolToTheory (renameWith disambigId thy))
+    let remove_labels = any (== "unlabel") es
+
+    let thy0 = straightLabel remove_labels (addBoolToTheory (renameWith disambigId thy))
 
     let thy1 = (simplifyExpr aggressively <=< delambda) `vifne` thy0
 
@@ -191,12 +193,12 @@ instance Call Var where
   callName   = Call
   cancelName = Cancel
 
-straightLabel :: forall f a . (TransformBi (Expr a) (f a),Call a) => f a -> f a
-straightLabel = transformExprIn $ \ e0 ->
+straightLabel :: forall f a . (TransformBi (Expr a) (f a),Call a) => Bool -> f a -> f a
+straightLabel remove_labels = transformExprIn $ \ e0 ->
   case e0 of
     (projAt -> Just (projAt -> Just (projGlobal -> Just (x,g),e1),e2))
       | x == labelName
-      -> g :@: [e1,e2]
+      -> if remove_labels then e2 else g :@: [e1,e2]
     _ -> e0
 
 
