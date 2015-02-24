@@ -48,6 +48,7 @@ eqA _ _ = False
 runt :: Q -> [A] -> [A]
 runt q tape = steps (Succ Stop,[],tape) q
 
+-- FLAGS: csteps
 steps :: State -> Q -> [A]
 steps st q =
   case step q st of
@@ -55,8 +56,8 @@ steps st q =
     st'              -> steps st' q
 
 prog :: Q -> Bool
-prog q = case runt q [A,A,B,X] of
-            B:A:A:X:_ -> True
+prog q = case runt q [A,A,A,B,B,X] of
+            B:B:A:A:A:X:_ -> True
             _       -> False
 
 prop q = prog q =:= False

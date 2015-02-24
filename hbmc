@@ -6,4 +6,18 @@ shift
 
 mkdir -p tmp
 
-hbmcc $FILE $@ > tmp/$BASE && (cd tmp; ghc --make $BASE -O2 && time ./$(basename $BASE .hs))
+FLAGS=`grep 'FLAGS:' $FILE | sed 's/.*FLAGS: *//' | tr '\n' ' '`
+
+NOTE=""
+if [ "$FLAGS" != "" ]
+then
+  NOTE=" (with $FLAGS)"
+fi
+
+echo "== Compiling$NOTE =="
+
+hbmcc $FILE $FLAGS $@ > tmp/$BASE && (cd tmp; ghc --make $BASE -O2
+
+echo "== Running =="
+
+time ./$(basename $BASE .hs))
