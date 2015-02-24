@@ -90,7 +90,7 @@ main = do
               ]
 
     let decls = runFreshFrom (maximumOn varMax thy3) $
-          do fn_decls <- mapM trFun func_decls
+          do fn_decls <- mapM (trFun mcs) func_decls
              dt_decls <- mapM trDatatype data_decls
              (prop_names,prop_decls) <- mapAndUnzipM trProp (thy_form_decls thy3)
              let main_decl = funDecl mainFun []

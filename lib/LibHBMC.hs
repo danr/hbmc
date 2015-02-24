@@ -45,46 +45,10 @@ run (H m) =
        refw <- newIORef []
        m (Env s tt refc refw)
 
-tryChecks :: Bit -> H ()
-tryChecks a = H (\env ->
-  do cs <- readIORef (checks env)
-     writeIORef (checks env) []
-     if null cs then
-       do return ()
-      else
-       do putStrLn "Running checks..."
-          let checking [] =
-                do cs <- readIORef (checks env)
-                   if null cs then
-                     return []
-                    else
-                     do putStrLn "check loop!"
-                        writeIORef (checks env) []
-                        checking cs
-
-              checking ((c,m):cs) =
-                do ws <- readIORef (waits env)
-                   let ass = a : [ nt p | (p,_,_) <- ws ]
-                   b <- solveBit (sat env) (c : ass)
-                   if b then
-                     do putStrLn $ "Running checked code, waits: " ++ show (length ws)
-                                          ++ " remaining checks: " ++ show (length cs)
-                        let H m' = m in m' env{here = c}
-                        checking cs
-                    else
-                     do cs' <- checking cs
-                        return ((c,m):cs')
-
-          cs' <- checking cs
-          writeIORef (checks env) cs'
-  )
-
 trySolve :: H (Maybe Bool)
 trySolve = H (\env ->
-  do putStrLn "== Try solve =="
-     let H m = tryChecks (here env) in m env
-     ws <- reverse `fmap` readIORef (waits env)
-     putStrLn $ "Solve with " ++ show (length ws) ++ " waits..."
+  do ws <- reverse `fmap` readIORef (waits env)
+     putStrLn $ "== Try solve with " ++ show (length ws) ++ " waits =="
      b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws ])
      if b then
        do putStrLn "Counterexample!"
@@ -98,7 +62,7 @@ trySolve = H (\env ->
                       return (Just False)
                   else
                    let p:_ = [ p | (p,_,_) <- ws, p `elem` qs ] in
-                     do -- putStrLn ("Conflict: " ++ show (length qs))
+                     do putStrLn ("Conflict: " ++ show (length qs))
                         b <- solveBit (sat env) (here env : [ nt q | q <- qs, q /= p ])
                         if b then
                           let (p,unq,H h):_ = [ t | t@(p,_,_) <- ws, p `elem` qs ] in
@@ -189,6 +153,7 @@ later unq h = H (\env ->
      writeIORef (waits env) ((here env, unq, h):ws)
   )
 
+{-
 check :: H () -> H ()
 check h@(H m) = H (\env ->
     do -- putStrLn "start"
@@ -199,6 +164,12 @@ check h@(H m) = H (\env ->
             writeIORef (checks env) ((here env, h):cs)
        -- putStrLn "stop"
   )
+-}
+
+check :: H () -> H ()
+check h =
+  do u <- io newUnique
+     later u h
 
 must :: Bit -> H () -> H ()
 must c h =
@@ -337,7 +308,6 @@ memo tag h =
                   addClauseHere [c]
                   return y
 
-{-# NOINLINE nomemo #-}
 nomemo :: (Eq a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> a -> H b
 nomemo tag h t = do r <- new
                     h t r
@@ -568,7 +538,7 @@ withoutForce :: a -> (a -> H ()) -> H ()
 withoutForce x h = h x
 
 instance Constructive a => Constructive (Thunk a) where
-  newPoint inp = delay inp $ do -- io (putStrLn ("newPoint " ++ show inp))
+  newPoint inp = delay inp $ do -- io (putStrLn ("newThunk " ++ show inp))
                                 newPoint inp
 
 instance Equal a => Equal (Thunk a) where

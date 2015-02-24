@@ -37,12 +37,15 @@ trType t0 =
     Tip.TyVar x    -> TyVar x
     _              -> error "trType: Cannot translate type\n(using HOFs, classes or Ints?)"
 
-trFun :: Interface a => Tip.Function a -> Fresh [H.Decl a]
-trFun Tip.Function{..} =
+trFun :: Interface a => ([a],[a]) -> Tip.Function a -> Fresh [H.Decl a]
+trFun (memos,checks) Tip.Function{..} =
   do r <- fresh
      simp_body <- ToS.toExpr func_body
      b <- trExpr simp_body (Just r)
      let args = map Tip.lcl_name func_args
+
+     let maybe_check e | func_name `elem` checks = H.Apply (api "check") [e]
+                       | otherwise = e
      return
        [
          let tt   = modTyCon wrapData . trType
@@ -55,9 +58,9 @@ trFun Tip.Function{..} =
                `TyArr` (TyCon (api "H") [tt func_res])),
 
          funDecl func_name []
-          (H.Apply (api "memo")
+          (H.Apply (api (if func_name `elem` memos then "memo" else "nomemo"))
             [H.String func_name
-            ,H.Lam [H.TupPat (map H.VarPat args),H.VarPat r] b
+            ,H.Lam [H.TupPat (map H.VarPat args),H.VarPat r] (maybe_check b)
             ])
        ]
 
