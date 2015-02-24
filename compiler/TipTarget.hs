@@ -154,7 +154,7 @@ instance Pretty a => Pretty (Decl a) where
         (((case cons of
              [(_,[_])] -> "newtype"
              _         -> "data") $\ pp tc) $\ fsep (map pp tvs) <+> "=") $\
-          (fsep (punctuate " |" [ pp c $\ fsep (map (parens . pp) ts) | (c,ts) <- cons ]) $$
+          (fsep (punctuate " |" [ ppCon c ts | (c,ts) <- cons ]) $$
           (if null derivs then empty
            else "deriving" <+> parens (fsep (punctuate "," (map pp derivs)))))
       InstDecl ctx head ds ->
@@ -164,6 +164,11 @@ instance Pretty a => Pretty (Decl a) where
              "where") $\ vcat (map pp ds)
       AssociatedType lhs rhs -> "type" <+> pp lhs <+> "=" $\ pp rhs
       decl `Where` ds -> pp decl $\ "where" $\ vcat (map pp ds)
+
+ppCon :: Pretty a => a -> [Type a] -> Doc
+ppCon c ts = case ppRender c of
+  '(':':':xs | [t1,t2] <- ts -> pp t1 <+> (":" <> text (init xs)) $\ pp t2
+  _                          -> pp c $\ fsep (map (parens . pp) ts)
 
 instance Pretty a => Pretty (Decls a) where
   pp (Decls ds) = vcat (map pp ds)

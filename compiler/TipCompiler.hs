@@ -159,7 +159,11 @@ instance Pretty Var where
       Prelude x   -> "Prelude." <> text x
       _           -> text (show x)
 
+
+isSym x = x `elem` ":!@#$%^&*\\/=?><+-"
+
 escape :: String -> String
+escape (':':xs) | all isSym xs = "(:" ++ xs ++ ")"
 escape (':':xs) = 'K':escape xs
 escape xs = case concatMap escChar xs of
                y:ys | not (isAlpha y) -> 'a':y:ys
