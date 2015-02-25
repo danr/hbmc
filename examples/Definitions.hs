@@ -190,10 +190,18 @@ sorted :: [Nat] -> Bool
 sorted (x:y:xs) = x <= y && sorted (y:xs)
 sorted _        = True
 
-{-
-number = S (S (S (S (S (S (S (S (S (S (S Z))))))))))
-prop_inj_sort xs ys = isort xs =:= isort ys ==> (number + number + number) < length xs =:= True ==> xs =:= ys
--}
+nub :: [Nat] -> [Nat]
+nub (x:xs) = x:remove x (nub xs)
+nub []     = []
+
+remove :: Nat -> [Nat] -> [Nat]
+remove x [] = []
+remove x (y:ys) = if x === y then ys else y:remove x ys
+
+-- number = S (S (S (S (S (S (S (S (S (S (S Z))))))))))
+number = (S (S (S (S (S Z)))))
+isort_inj     xs ys = isort xs =:= isort ys ==> (number + number + number + number) < length xs =:= True ==> xs =:= ys
+isort_inj_nub xs ys = isort xs =:= isort ys ==> number < length xs =:= True ==> nub xs =:= xs ==> xs =:= ys
 
 -- prop_rot_bogus  n xs = xs =:= rotate n (xs :: [Nat])
 

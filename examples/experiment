@@ -1,21 +1,23 @@
 run() {
   PREFIX=$1
   OPT=$2
-  UPPER=$3
+  LOWER=$3
+  UPPER=$4
   echo $PREFIX $OPT
-  for i in $(seq 0 $UPPER); do
+  for i in $(seq $LOWER $UPPER); do
     echo -n "$i ";
-    hbmclimit 60 Mergesort.hs $OPT o$PREFIX$i > /dev/null;
+    hbmclimit 300 Mergesort.hs $OPT o$PREFIX$i > /dev/null;
   done;
 }
 
-run iinj normal  30
-run inub normal  10
+run iinj normal  0 29
+run inub normal  0 10
 
-run minj normal  25
-run minj mmerge  25
-run minj unlabel 20
+run minj normal  0 29
+run minj mmerge  0 29
+run minj unlabel 0 20
 
-run mnub normal  10
-run mnub mmerge  10
-run mnub unlabel 10
+run mnub normal  0 10
+run mnub mmerge  0 10
+run mnub unlabel 0 10
+

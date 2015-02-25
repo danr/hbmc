@@ -31,8 +31,6 @@ opt (a :+: X)         = opt (X :+: a)
 opt (a :*: X)         = opt (X :*: a)
 opt (a :+: b)         = opt a :+: opt b
 opt (a :*: b)         = opt a :*: opt b
-opt (a :+: (b :+: c)) = opt ((a :+: b) :+: c)
-opt (a :*: (b :*: c)) = opt ((a :*: b) :*: c)
 opt e                 = e
 
 (+) :: N -> N -> N
@@ -43,5 +41,6 @@ Z   + m = m
 S n * m = m + (n * m)
 Z   * m = Z
 
-prop e = opt (d e) =:= (N (S (S Z)) :+: (X :+: X)) ==> True =:= False
+prop1 e = opt (d e) =:= (N (S (S Z)) :+: (X :+: X)) ==> True =:= False
 
+prop2 e = opt (d e) =:= X :*: X :+: X :*: (X :+: X) ==> True =:= False

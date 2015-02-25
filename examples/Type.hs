@@ -1,11 +1,8 @@
 {-# LANGUAGE PatternGuards #-}
 module Type where
 
-import Tip.DSL
+import HBMC
 import Prelude hiding ((&&))
-
-label :: Int -> a -> a
-label c x = x
 
 data Expr = App Expr Expr Ty | Lam Expr | Var Nat
 
