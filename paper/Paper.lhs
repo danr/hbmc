@@ -21,6 +21,7 @@
 
 
 \documentclass{sigplanconf}
+%include polycode.fmt
 
 % The following \documentclass options may be useful:
 
@@ -38,8 +39,8 @@
 \setlength{\pdfpageheight}{\paperheight}
 \setlength{\pdfpagewidth}{\paperwidth}
 
-\conferenceinfo{CONF 'yy}{Month d--d, 20yy, City, ST, Country} 
-\copyrightyear{20yy} 
+\conferenceinfo{ICFP '15}{September, 2015, Vancouver, Canada} 
+\copyrightyear{2015} 
 \copyrightdata{978-1-nnnn-nnnn-n/yy/mm} 
 \doi{nnnnnnn.nnnnnnn}
 
@@ -53,18 +54,15 @@
                                   % (paid open-access papers, 
                                   % short abstracts)
 
-\titlebanner{banner above paper title}        % These are ignored unless
-\preprintfooter{short description of paper}   % 'preprint' option specified.
+\titlebanner{DRAFT}        % These are ignored unless
+\preprintfooter{}   % 'preprint' option specified.
 
-\title{Title Text}
-\subtitle{Subtitle Text, if any}
+\title{SAT-based Bounded Model Checking\\of Functional Programs}
+\subtitle{}
 
-\authorinfo{Name1}
-           {Affiliation1}
-           {Email1}
-\authorinfo{Name2\and Name3}
-           {Affiliation2/3}
-           {Email2/3}
+\authorinfo{Koen Claessen \and Dan Ros{\'e}n}
+           {Chalmers University of Technology}
+           {\{koen,danr\}@@chalmers.se}
 
 \maketitle
 
@@ -76,193 +74,262 @@ This is the text of the abstract.
 
 % general terms are not compulsory anymore, 
 % you may leave them out
-\terms
-term1, term2
+%\terms
+%bounded model checking, SAT
 
 \keywords
-keyword1, keyword2
+bounded model checking, SAT, symbolic evaluation
+
+% ------------------------------------------------------------------------------
 
 \section{Introduction}
 
-The text of the paper begins here.
+SAT-based Bounded Model Checking for hardware, revolution.
 
-Lots of text.
+Finding {\em counter examples}, {\em examples}, {\em inverting functions}, for prototype programming, primarily. Secondarily, for showing their absence.
 
-More text.
+Bounded Model Checking for C. Difference: recursive data structures. Doing this by modelling pointers and the heap does not work.
 
-Lots of text.
+Motivating example: Finding 2 different inputs for which a show function returns the same result.
 
-More text.
+QuickCheck, need to write generators, cannot find intricate examples where things have to correspond.
 
+SmallCheck, only for very small examples, depth bound. FEAT is not depth bound, still size limit.
 
-Lots of text.
+Lazy narrowing, (e.g. Lazy SmallCheck, Lindblad, Reach), exploit the lazy structure of programs + backtracking. Still not good enough for combinatorial search. Could be adapted to 
 
-More text.
+Old text:
 
-Lots of text.
+Bounded model checking for hardware has been a great success. Idea: find bugs efficiently, and show absence of bugs up to size bound, exploiting efficient search in SAT-solvers.
 
-More text.
+This paper we want to bring this power to function programming.
 
+Example of use (sorting).
 
-Lots of text.
+Motivational talk about in what situations to use this: (1) Instead of QuickCheck/SmallCheck. Gain: no complicated generators. (2) Computing inverses in programming / prototype programs. (3) FP as a metalanguage for generating constraints, to solve a problem.
 
-More text.
+Contributions:
 
-Lots of text.
+* symbolic simulation of functional programs using a SAT-solver (first)
 
-More text.
+* incremental implementation (thunks and conflict clause)
 
-Lots of text.
+* dealing with recursive functions, program transformation
 
-More text.
+Show how the solver and the generated program can make the search for a countexample more efficient
 
-Lots of text.
+\cite{apa}
 
-More text.
+% ------------------------------------------------------------------------------
 
-Lots of text.
+\section{Main Idea}
 
-More text.
+Forte, where the user can create (BDD) variables, returning a bool. How about if-then-else on that bool?
 
-Lots of text.
+Need symbolic booleans that influence all datastructures.
 
-More text.
+Example: lists.
 
-Lots of text.
+data List a = Nil | Cons a (List a)
 
-More text.
+symbolic version:
 
-Lots of text.
+data List a = List Bit (Maybe (a, List a))
 
-More text.
+Show case expressions on these lists
 
-Lots of text.
+case xs of
+  Nil -> a
+  Cons y ys -> f (y,ys)
 
-More text.
+becomes:
 
-Lots of text.
+  let List c myys = xs in
+    if c then a else f (fromJust myys)
 
-More text.
+in constraint style:
 
+...
 
-Lots of text.
+Language
 
-More text.
+First-order.
 
-Lots of text.
+e ::= x
+     |  f x1 .. xn
+     |  K x1 .. xn
+     |  let x = e1 in e2
+     |  case x of { … ; K y1 .. yk -> e ; … }
 
-More text.
+Translation into constraints. Define what constraints are. Monadic constraint language. Show API, talk about meaning.
 
+Show translation of datatypes, and generation of case functions. Projection functions.
 
-Lots of text.
+Current idea is to only use “sinks” in case-expressions. Case expressions are translated into:
 
-More text.
+  y <- new
+  ...
+  (constr x =? Ki) ==>
+     do yi <- [[ei]]
+          yi >>> y
+  …
+  return y
 
-Lots of text.
+Show examples.
 
-More text.
+% ------------------------------------------------------------------------------
 
-Lots of text.
+\section{Generating Constraints}
 
-More text.
+\subsection{The Constraint monad}
 
-Lots of text.
+The constraint monad.
 
-More text.
+Show the API.
 
-Lots of text.
+\subsection{Representing datatypes}
 
-More text.
+Show the Val type (Fin?).
 
-Lots of text.
+Show how lists and trees are represented.
 
-More text.
+Show how general datatypes are be represented.
 
-Lots of text.
+equalHere, overloaded.
 
-More text.
+new, overloaded, with depth.
 
-Lots of text.
+\subsection{Translating a program into constraints}
 
-More text.
+Show the syntax of expressions. Assumption: it all terminates.
 
+Show the basic translation of expressions.
 
-Lots of text.
+Show the basic translation of functions (returning their result).
 
-More text.
+\subsection{Memoization}
 
-Lots of text.
+Memoization is good, and easy.
 
-More text.
+Show the memoized translation of functions.
 
+\subsection{Symbolic merging of function calls}
 
+Explain what bad things can happen if we do not do this.
 
+Explain the idea as a program transformation. This only works if we are in a lazy language.
 
-Lots of text.
+Explain what happens in the generated constraints.
 
-More text.
+\subsection{Dynamic termination checks}
 
-Lots of text.
+Even if input program terminates, symbolic program may not terminate without dynamic checks.
 
-More text.
+Show example.
 
-Lots of text.
+Add 'check'. Describe in words. Exact implementation is shown in the next section.
 
+% ------------------------------------------------------------------------------
 
-Lots of text.
+\section{Incrementality}
 
-More text.
+depth sucks. this is what we actually do.
 
-Lots of text.
+\subsection{The type Incr}
 
-More text.
+show API for Incr (FKA Thunk).
 
-Lots of text.
+show how it should be used to do datatypes.
 
-More text.
+one extra function when doing case analysis.
 
-Lots of text.
+show how equalHere is defined for Incr.
 
-More text.
+show how new is defined for Incr. Hey, no depth needed anymore!
 
-Lots of text.
+\subsection{Solving strategies for problems using Incr}
 
-More text.
+queue of contexts that are blocking.
 
-Lots of text.
+assumption conflict, pick the first context. use minimization.
 
-More text.
+statement and proof of completeness.
 
-Lots of text.
+\subsection{Dealing with check}
 
-More text.
+Just add to the queue!
 
-Lots of text.
+% ------------------------------------------------------------------------------
 
-More text.
+\section{Examples}
 
-Lots of text.
+Sorting stuff.
 
-More text.
+Showing stuff, inverse.
 
-Lots of text.
+Regular expressions.
 
-More text.
+Deriving expressions, inverse.
 
-Lots of text.
+Turing machines?
 
-More text.
+% --- %
 
-Lots of text.
+Also show examples of (depth-bound and/or size-bound and/or other-bound) things that terminate without example.
 
-More text.
+Also show higher-order functions?
 
-Lots of text.
+% ------------------------------------------------------------------------------
 
-\appendix
-\section{Appendix Title}
+\section{Experimental evaluations}
 
-This is the text of the appendix, if you need one.
+Compare some examples against Leon.
+
+Compare some examples against Lazy SmallCheck.
+
+Compare with/without memoization and with/without merging function calls.
+
+Compare with/without conflict minimization?
+
+% ------------------------------------------------------------------------------
+
+\section{Related Work}
+
+Leon.
+
+QuickCheck.
+
+Enumeration (SmallCheck, FEAT).
+
+Lazy narrowing (Lazy SmallCheck, Reach, Lindblad).
+
+% ------------------------------------------------------------------------------
+
+\section{Discussion and Future Work}
+
+Higher-order functions.
+
+Laziness.
+
+Crashing programs (and respecting laziness).
+
+Targets a la Reach.
+
+Using SMT. Integers (trivial, but how to do recursion over integers that terminates? add check everywhere?). Equality and functions can be used to encode constructor functions, selector functions, function application. This is what Leon does. Gain?
+
+% ------------------------------------------------------------------------------
+
+\section{Conclusions}
+
+This is a hard problem.
+
+We have found a niche, works well (and better than others) for cases where the SAT problem is not too big, and one gains something from combinatorial search power.
+
+% ------------------------------------------------------------------------------
+
+%\appendix
+%\section{Appendix Title}
+
 
 \acks
 
@@ -271,24 +338,18 @@ Acknowledgments, if needed.
 % We recommend abbrvnat bibliography style.
 
 \bibliographystyle{abbrvnat}
+\bibliography{Paper}
 
 % The bibliography should be embedded for final submission.
 
-\begin{thebibliography}{}
-\softraggedright
+%\begin{thebibliography}{}
+%\softraggedright
 
-\bibitem[Smith et~al.(2009)Smith, Jones]{smith02}
-P. Q. Smith, and X. Y. Jones. ...reference text...
+%\bibitem[Smith et~al.(2009)Smith, Jones]{smith02}
+%P. Q. Smith, and X. Y. Jones. ...reference text...
 
-\end{thebibliography}
+%\end{thebibliography}
 
 
 \end{document}
-
-%                       Revision History
-%                       -------- -------
-%  Date         Person  Ver.    Change
-%  ----         ------  ----    ------
-
-%  2013.06.29   TU      0.1--4  comments on permission/copyright notices
 
