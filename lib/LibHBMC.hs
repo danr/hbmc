@@ -45,6 +45,36 @@ run (H m) =
        refw <- newIORef []
        m (Env s tt refc refw)
 
+{-
+
+new conflict minimization algorithm
+
+call:
+
+  miniConflict xs []
+
+with a list of assumptions xs, of which you already know there was a conflict
+
+miniConflict xs ys =
+  do qs <- conflict
+     let x:_ = [ x | x <- xs, x `elem` qs ]
+         xs' = dropWhile (/= x) xs
+
+     let search [x] ys =
+           do return x
+         
+         search xs ys =
+           do b <- solve (xs1 ++ ys)
+              if b then
+                search xs0 (xs1 ++ ys)
+               else
+                miniConflict xs1 ys
+          where
+           k = length xs `div` 2
+           xs0 = take k xs
+           xs1 = drop k xs
+-}
+
 trySolve :: H (Maybe Bool)
 trySolve = H (\env ->
   do ws <- reverse `fmap` readIORef (waits env)
@@ -63,7 +93,7 @@ trySolve = H (\env ->
                   else
                    let p:_ = [ p | (p,_,_) <- ws, p `elem` qs ] in
                      do putStrLn ("Conflict: " ++ show (length qs))
-                        b <- solveBit (sat env) (here env : [ nt q | q <- qs, q /= p ])
+                        b <- solveBit (sat env) (here env : reverse [ nt q | q <- qs, q /= p ])
                         if b then
                           let (p,unq,H h):_ = [ t | t@(p,_,_) <- ws, p `elem` qs ] in
                             do let ws' = [ t | t@(_,unq',_) <- reverse ws, unq /= unq' ]
