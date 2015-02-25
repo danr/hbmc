@@ -52,19 +52,22 @@ main = do
       }
     -- putStrLn (ppRender thy)
     let remove_labels = any (== "unlabel") es
+    let memos  = [ Var s | 'm':s <- es ]
+    let checks = [ Var s | 'c':s <- es ]
+    let lazy   = any (== "lazy") es
+
+    let mcs = (memos,checks)
 
     let thy0 = straightLabel remove_labels (addBoolToTheory (renameWith disambigId thy))
 
     let thy1 = (simplifyExpr aggressively <=< delambda) `vifne` thy0
 
-    let memos  = [ Var s | 'm':s <- es ]
-    let checks = [ Var s | 'c':s <- es ]
-
-    let mcs = (memos,checks)
 
     putStrLn "{-"
     print es
     print mcs
+    print remove_labels
+    print lazy
     putStrLn "-}"
 
     putStrLn "{-"
@@ -91,7 +94,7 @@ main = do
 
     let decls = runFreshFrom (maximumOn varMax thy3) $
           do fn_decls <- mapM (trFun mcs) func_decls
-             dt_decls <- mapM trDatatype data_decls
+             dt_decls <- mapM (trDatatype lazy) data_decls
              (prop_names,prop_decls) <- mapAndUnzipM trProp (thy_form_decls thy3)
              let main_decl = funDecl mainFun []
                    (mkDo [Stmt (Apply (api "run") [var p]) | p <- prop_names] Noop)

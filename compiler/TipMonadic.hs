@@ -48,13 +48,13 @@ trFun (memos,checks) Tip.Function{..} =
                        | otherwise = e
 
      body <-
-         if func_name `notElem` checks && superSimple simp_body
+         if superSimple simp_body
             then
-              do x <- fresh
+              do -- NB: Ignores memo and check on this function
+                 x <- fresh
                  e <- trExpr simp_body Nothing
                  return $
                    H.Lam [H.TupPat (map H.VarPat args)] $
-                     maybe_check $
                        mkDo [H.Bind x e] (returnExpr (H.Apply (api "unJust") [var x]))
             else
               do b <- trExpr simp_body (Just r)

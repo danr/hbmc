@@ -38,8 +38,8 @@ merge (xs:xss) = help xs (merge xss)
     help xs (y:ys) = y:help (delete y xs) ys
     help xs []     = xs
 
-trDatatype :: forall a . Interface a => Datatype a -> Fresh [Decl a]
-trDatatype dt@(Datatype tc tvs cons) =
+trDatatype :: forall a . Interface a => Bool -> Datatype a -> Fresh [Decl a]
+trDatatype lazy dt@(Datatype tc tvs cons) =
   do constructors <- mapM make_con cons
      case_data <- make_case_data
      equal <- make_equal
@@ -50,7 +50,7 @@ trDatatype dt@(Datatype tc tvs cons) =
  where
   (indexes,types) = dataInfo dt
 
-  strict = and [ null args | Constructor _ args <- cons ]
+  strict = not lazy && and [ null args | Constructor _ args <- cons ]
 
   a ! b | strict    = b
         | otherwise = a
