@@ -1,3 +1,6 @@
+LIMIT=$1
+echo "Time limit: $LIMIT"
+
 run() {
   PREFIX=$1
   OPT=$2
@@ -6,18 +9,21 @@ run() {
   echo $PREFIX $OPT
   for i in $(seq $LOWER $UPPER); do
     echo -n "$i ";
-    hbmclimit 300 Mergesort.hs $OPT o$PREFIX$i > /dev/null;
+    hbmclimit $LIMIT Mergesort.hs $OPT o$PREFIX$i > /dev/null || break;
   done;
 }
 
-run iinj normal  0 29
-run inub normal  0 10
-
 run minj normal  0 29
 run minj mmerge  0 29
-run minj unlabel 0 20
+run minj unlabel 0 29
 
-run mnub normal  0 10
-run mnub mmerge  0 10
-run mnub unlabel 0 10
+run mnub normal  0 29
+run mnub mmerge  0 29
+run mnub unlabel 0 29
+
+run iinj normal  0 29
+run inub normal  0 29
+
+run qinj normal  0 29
+run qnub normal  0 29
 
