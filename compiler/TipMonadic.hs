@@ -41,13 +41,31 @@ trFun :: Interface a => ([a],[a]) -> Tip.Function a -> Fresh [H.Decl a]
 trFun (memos,checks) Tip.Function{..} =
   do r <- fresh
      simp_body <- ToS.toExpr func_body
-     b <- trExpr simp_body (Just r)
+
      let args = map Tip.lcl_name func_args
 
      let maybe_check e | func_name `elem` checks = H.Apply (api "check") [e]
                        | otherwise = e
+
+     body <-
+         if func_name `notElem` checks && superSimple simp_body
+            then
+              do x <- fresh
+                 e <- trExpr simp_body Nothing
+                 return $
+                   H.Lam [H.TupPat (map H.VarPat args)] $
+                     maybe_check $
+                       mkDo [H.Bind x e] (returnExpr (H.Apply (api "unJust") [var x]))
+            else
+              do b <- trExpr simp_body (Just r)
+                 return $
+                   H.Apply (api (if func_name `elem` memos then "memo" else "nomemo"))
+                     [H.String func_name
+                     ,H.Lam [H.TupPat (map H.VarPat args),H.VarPat r] (maybe_check b)
+                     ]
      return
        [
+         {-
          let tt   = modTyCon wrapData . trType
          in H.TySig func_name
               [ TyCon s [TyVar tv]
@@ -56,13 +74,15 @@ trFun (memos,checks) Tip.Function{..} =
               ]
               (TyTup (map (tt . Tip.lcl_type) func_args)
                `TyArr` (TyCon (api "H") [tt func_res])),
-
-         funDecl func_name []
-          (H.Apply (api (if func_name `elem` memos then "memo" else "nomemo"))
-            [H.String func_name
-            ,H.Lam [H.TupPat (map H.VarPat args),H.VarPat r] (maybe_check b)
-            ])
+         -}
+         funDecl func_name [] body
        ]
+
+superSimple :: S.Expr a -> Bool
+superSimple (S.Let _ S.Proj{} _)  = False
+superSimple (S.Let _ S.Apply{} e) = superSimple e
+superSimple S.Match{}             = False
+superSimple S.Simple{}            = True
 
 trProp :: Interface a => Tip.Formula a -> Fresh (a,H.Decl a)
 trProp (Tip.Formula Tip.Prove [] (Tip.collectQuant -> (lcls,tm)))

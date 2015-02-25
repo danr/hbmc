@@ -766,6 +766,10 @@ mproj6 :: (x3, (x2, (x1, (x, (y, (Maybe a, z)))))) -> (a -> H (Maybe b)) -> H (M
 mproj6 (_, (_, (_, (_, (_, (Just x, _)))))) h = h x
 mproj6 _                     _ = return Nothing
 
+unJust :: Maybe a -> a
+unJust (Just x) = x
+unJust Nothing  = error "unJust"
+
 mproj7 :: (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z))))))) -> (a -> H (Maybe b)) -> H (Maybe b)
 mproj7 (_, (_, (_, (_, (_, (_, (Just x, _))))))) h = h x
 mproj7 _                     _ = return Nothing
