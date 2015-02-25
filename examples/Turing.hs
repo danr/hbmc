@@ -4,11 +4,11 @@ import Tip.DSL
 
 data Action = Lft | Rgt
 
-type Q = [((S,A),(S,A),Action)]
+type Q = [((Nat,A),(Nat,A),Action)]
 
-type State = (S,[A],[A])
+type State = (Nat,[A],[A])
 
-data S = Stop | Succ S
+data Nat = Zero | Succ Nat
 
 data A = O | A | B | X
 
@@ -22,8 +22,8 @@ split :: [A] -> (A,[A])
 split []     = (O,[])
 split (x:xs) = (x,xs)
 
-apply :: Q -> (S,A) -> ((S,A),Action)
-apply [] _ = ((Stop,O),Lft)
+apply :: Q -> (Nat,A) -> ((Nat,A),Action)
+apply [] _ = ((Zero,O),Lft)
 apply ((sa,sa',what):q) sa0 =
   if eqT sa sa0 then
     (sa',what)
@@ -33,8 +33,8 @@ apply ((sa,sa',what):q) sa0 =
 act Lft s lft x rgt = (s, lft', y:x:rgt) where (y,lft') = split lft
 act Rgt s lft x rgt = (s, x:lft, rgt)
 
-eqT :: (S, A) -> (S, A) -> Bool
-eqT (Stop, a)   (Stop, b)   = eqA a b
+eqT :: (Nat, A) -> (Nat, A) -> Bool
+eqT (Zero, a)   (Zero, b)   = eqA a b
 eqT (Succ p, a) (Succ q, b) = eqT (p,a) (q,b)
 eqT _           _           = False
 
@@ -46,24 +46,51 @@ eqA X X = True
 eqA _ _ = False
 
 runt :: Q -> [A] -> [A]
-runt q tape = steps (Succ Stop,[],tape) q
+runt q tape = steps q (Succ Zero,[],tape)
 
 -- FLAGS: csteps
-steps :: State -> Q -> [A]
-steps st q =
+steps :: Q -> State -> [A]
+steps q st =
   case step q st of
-    (Stop, tape1, tape2) -> rev tape1 tape2
-    st'                  -> steps st' q
+    (Zero, tape1, tape2) -> rev tape1 tape2
+    st'                  -> steps q st'
+
+runtN :: Nat -> Q -> [A] -> Maybe [A]
+runtN n q tape = stepsN n q (one,[],tape)
+
+stepsN :: Nat -> Q -> State -> Maybe [A]
+stepsN Zero q st = Nothing
+stepsN (Succ n) q st =
+  case step q st of
+    (Zero, tape1, tape2) -> Just (rev tape1 tape2)
+    st'                  -> stepsN n q st'
 
 rev :: [A] -> [A] -> [A]
 rev []     ys = ys
 rev (O:xs) ys = ys
 rev (x:xs) ys = rev xs (x:ys)
 
-prog :: Q -> Bool
-prog q = case runt q [B,A,A,A,A,B,X] of
-                A:A:A:A:B:B:X:_ -> True
-                _ -> False
+one   = Succ Zero
+two   = Succ one
+three = Succ two
+four  = Succ three
+five  = Succ four
+six   = Succ five
+seven = Succ six
 
-prop q = prog q =:= False
+prog0 :: Q -> Bool
+prog0 q = case runt q [B,A,A,A,A,B,X] of
+                 A:A:A:A:B:B:X:_ -> True
+                 _ -> False
+
+prog1 :: Q -> Bool
+prog1 q = case runtN six q [B,A,A,A,A,B,X] of
+                 Just (A:A:A:A:B:B:X:_) ->
+                   --case runtN two q [A,X] of
+                   --  Just (A:X:_) -> True
+                   --  _ -> False
+                   True
+                 _ -> False
+
+prop q = prog0 q =:= False
             
