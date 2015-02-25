@@ -1,0 +1,14 @@
+set terminal pdfcairo
+set key at 22,57
+set key box
+set dummy n
+set pointsize 0.8
+set style data linespoints
+set xlabel "List length"
+set ylabel "Time (s)"
+plot [0:25] [0:60] \
+ 'minj-normal'     using 1:2 lw 3 title "opt",    \
+ 'minj-mmerge'     using 1:2 lw 3 title "memo",   \
+ 'minj-unlabel'    using 1:2 lw 3 title "unopt",  \
+ 'msort-inj-table' using 1:5 lw 3 title "lazysc", \
+                '' using 1:6 lw 3 title "leon"

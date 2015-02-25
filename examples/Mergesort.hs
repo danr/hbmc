@@ -63,6 +63,18 @@ nub :: [Nat] -> [Nat]
 nub (x:xs) = x:remove x (nub xs)
 nub []     = []
 
+sorted :: [Nat] -> Bool
+sorted (x:y:xs) = x <= y && sorted (y:xs)
+sorted _        = True
+
+unique :: [Nat] -> Bool
+unique []     = True
+unique (x:xs) = if x `elem` xs then False else unique xs
+
+elem :: Nat -> [Nat] -> Bool
+x `elem` [] = False
+x `elem` (y:ys) = if x === y then True else x `elem` ys
+
 remove :: Nat -> [Nat] -> [Nat]
 remove x [] = []
 remove x (y:ys) = if x === y then ys else y:remove x ys
@@ -77,6 +89,39 @@ insert n (x:xs) =
   case n <= x of
     True -> n : x : xs
     False -> x : (insert n xs)
+
+(++) :: [a] -> [a] -> [a]
+(x:xs) ++ ys = x:(xs ++ ys)
+[]     ++ ys = ys
+
+partition :: Nat -> [Nat] -> ([Nat],[Nat])
+partition _ [] = ([],[])
+partition p (x:xs) =
+  case partition p xs of
+    (ys,zs) ->
+      case p <= x of
+        True  -> (x:ys,zs)
+        False -> (ys,x:zs)
+
+{-# NOINLINE singleton #-}
+singleton x = [x]
+
+-- FLAGS: cqsort
+qsort :: [Nat] -> [Nat]
+qsort []     = []
+qsort (p:xs) =
+  case partition p xs of
+    (ys,zs) -> qsort ys ++ (singleton p ++ qsort zs)
+
+rev :: [a] -> [a]
+rev []     = []
+rev (x:xs) = rev xs ++ [x]
+
+qrev :: [a] -> [a] -> [a]
+qrev []     acc = acc
+qrev (x:xs) acc = qrev xs (x:acc)
+
+psorted xs = sorted (rev xs) =:= True ==> unique xs =:= True ==> length xs <= n10 =:= True
 
 n0 = Z
 n1 = S n0
@@ -111,6 +156,7 @@ n29 = S n28
 
 #define INJ(sort,name,num) name xs ys = sort xs =:= sort ys ==> length xs <= num =:= False ==> xs =:= ys
 #define NUB(sort,name,num) name xs ys = sort xs =:= sort ys ==> length xs <= num =:= False ==> nub xs =:= xs ==> xs =:= ys
+#define UNQ(sort,name,num) name xs ys = sort xs =:= sort ys ==> length xs <= num =:= False ==> unique xs =:= True ==> xs =:= ys
 
 INJ(msort,minj0,n0)
 INJ(msort,minj1,n1)
@@ -174,6 +220,130 @@ NUB(msort,mnub27,n27)
 NUB(msort,mnub28,n28)
 NUB(msort,mnub29,n29)
 
+UNQ(msort,munq0,n0)
+UNQ(msort,munq1,n1)
+UNQ(msort,munq2,n2)
+UNQ(msort,munq3,n3)
+UNQ(msort,munq4,n4)
+UNQ(msort,munq5,n5)
+UNQ(msort,munq6,n6)
+UNQ(msort,munq7,n7)
+UNQ(msort,munq8,n8)
+UNQ(msort,munq9,n9)
+UNQ(msort,munq10,n10)
+UNQ(msort,munq11,n11)
+UNQ(msort,munq12,n12)
+UNQ(msort,munq13,n13)
+UNQ(msort,munq14,n14)
+UNQ(msort,munq15,n15)
+UNQ(msort,munq16,n16)
+UNQ(msort,munq17,n17)
+UNQ(msort,munq18,n18)
+UNQ(msort,munq19,n19)
+UNQ(msort,munq20,n20)
+UNQ(msort,munq21,n21)
+UNQ(msort,munq22,n22)
+UNQ(msort,munq23,n23)
+UNQ(msort,munq24,n24)
+UNQ(msort,munq25,n25)
+UNQ(msort,munq26,n26)
+UNQ(msort,munq27,n27)
+UNQ(msort,munq28,n28)
+UNQ(msort,munq29,n29)
+
+INJ(qsort,qinj0,n0)
+INJ(qsort,qinj1,n1)
+INJ(qsort,qinj2,n2)
+INJ(qsort,qinj3,n3)
+INJ(qsort,qinj4,n4)
+INJ(qsort,qinj5,n5)
+INJ(qsort,qinj6,n6)
+INJ(qsort,qinj7,n7)
+INJ(qsort,qinj8,n8)
+INJ(qsort,qinj9,n9)
+INJ(qsort,qinj10,n10)
+INJ(qsort,qinj11,n11)
+INJ(qsort,qinj12,n12)
+INJ(qsort,qinj13,n13)
+INJ(qsort,qinj14,n14)
+INJ(qsort,qinj15,n15)
+INJ(qsort,qinj16,n16)
+INJ(qsort,qinj17,n17)
+INJ(qsort,qinj18,n18)
+INJ(qsort,qinj19,n19)
+INJ(qsort,qinj20,n20)
+INJ(qsort,qinj21,n21)
+INJ(qsort,qinj22,n22)
+INJ(qsort,qinj23,n23)
+INJ(qsort,qinj24,n24)
+INJ(qsort,qinj25,n25)
+INJ(qsort,qinj26,n26)
+INJ(qsort,qinj27,n27)
+INJ(qsort,qinj28,n28)
+INJ(qsort,qinj29,n29)
+
+NUB(qsort,qnub0,n0)
+NUB(qsort,qnub1,n1)
+NUB(qsort,qnub2,n2)
+NUB(qsort,qnub3,n3)
+NUB(qsort,qnub4,n4)
+NUB(qsort,qnub5,n5)
+NUB(qsort,qnub6,n6)
+NUB(qsort,qnub7,n7)
+NUB(qsort,qnub8,n8)
+NUB(qsort,qnub9,n9)
+NUB(qsort,qnub10,n10)
+NUB(qsort,qnub11,n11)
+NUB(qsort,qnub12,n12)
+NUB(qsort,qnub13,n13)
+NUB(qsort,qnub14,n14)
+NUB(qsort,qnub15,n15)
+NUB(qsort,qnub16,n16)
+NUB(qsort,qnub17,n17)
+NUB(qsort,qnub18,n18)
+NUB(qsort,qnub19,n19)
+NUB(qsort,qnub20,n20)
+NUB(qsort,qnub21,n21)
+NUB(qsort,qnub22,n22)
+NUB(qsort,qnub23,n23)
+NUB(qsort,qnub24,n24)
+NUB(qsort,qnub25,n25)
+NUB(qsort,qnub26,n26)
+NUB(qsort,qnub27,n27)
+NUB(qsort,qnub28,n28)
+NUB(qsort,qnub29,n29)
+
+UNQ(qsort,qunq0,n0)
+UNQ(qsort,qunq1,n1)
+UNQ(qsort,qunq2,n2)
+UNQ(qsort,qunq3,n3)
+UNQ(qsort,qunq4,n4)
+UNQ(qsort,qunq5,n5)
+UNQ(qsort,qunq6,n6)
+UNQ(qsort,qunq7,n7)
+UNQ(qsort,qunq8,n8)
+UNQ(qsort,qunq9,n9)
+UNQ(qsort,qunq10,n10)
+UNQ(qsort,qunq11,n11)
+UNQ(qsort,qunq12,n12)
+UNQ(qsort,qunq13,n13)
+UNQ(qsort,qunq14,n14)
+UNQ(qsort,qunq15,n15)
+UNQ(qsort,qunq16,n16)
+UNQ(qsort,qunq17,n17)
+UNQ(qsort,qunq18,n18)
+UNQ(qsort,qunq19,n19)
+UNQ(qsort,qunq20,n20)
+UNQ(qsort,qunq21,n21)
+UNQ(qsort,qunq22,n22)
+UNQ(qsort,qunq23,n23)
+UNQ(qsort,qunq24,n24)
+UNQ(qsort,qunq25,n25)
+UNQ(qsort,qunq26,n26)
+UNQ(qsort,qunq27,n27)
+UNQ(qsort,qunq28,n28)
+UNQ(qsort,qunq29,n29)
+
 INJ(isort,iinj0,n0)
 INJ(isort,iinj1,n1)
 INJ(isort,iinj2,n2)
@@ -235,6 +405,38 @@ NUB(isort,inub26,n26)
 NUB(isort,inub27,n27)
 NUB(isort,inub28,n28)
 NUB(isort,inub29,n29)
+
+UNQ(isort,iunq0,n0)
+UNQ(isort,iunq1,n1)
+UNQ(isort,iunq2,n2)
+UNQ(isort,iunq3,n3)
+UNQ(isort,iunq4,n4)
+UNQ(isort,iunq5,n5)
+UNQ(isort,iunq6,n6)
+UNQ(isort,iunq7,n7)
+UNQ(isort,iunq8,n8)
+UNQ(isort,iunq9,n9)
+UNQ(isort,iunq10,n10)
+UNQ(isort,iunq11,n11)
+UNQ(isort,iunq12,n12)
+UNQ(isort,iunq13,n13)
+UNQ(isort,iunq14,n14)
+UNQ(isort,iunq15,n15)
+UNQ(isort,iunq16,n16)
+UNQ(isort,iunq17,n17)
+UNQ(isort,iunq18,n18)
+UNQ(isort,iunq19,n19)
+UNQ(isort,iunq20,n20)
+UNQ(isort,iunq21,n21)
+UNQ(isort,iunq22,n22)
+UNQ(isort,iunq23,n23)
+UNQ(isort,iunq24,n24)
+UNQ(isort,iunq25,n25)
+UNQ(isort,iunq26,n26)
+UNQ(isort,iunq27,n27)
+UNQ(isort,iunq28,n28)
+UNQ(isort,iunq29,n29)
+
 
 -- prop_cancel2 xs ys zs =
 --         msort xs =:= zs

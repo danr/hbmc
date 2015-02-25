@@ -12,53 +12,102 @@ infixr 9 :->
 infix  4 ===
 infixr 3 &&
 
-(===) :: Ty -> Ty -> LazyBool
-A === A = true
-B === B = true
-C === C = true
-(a :-> x) === (b :-> y) = a === b && x === y
-_ === _ = false
+(===) :: Ty -> Ty -> Bool
+A === A = True
+B === B = True
+C === C = True
+(a :-> x) === (b :-> y) = a === b && x === y -- can flip these, too!
+_ === _ = False
 
-false = LFalse
-true = LTrue U
-data LazyBool = LTrue U | LFalse
-data U = U
+(&&) :: Bool -> Bool -> Bool
+True  && b = b
+False && _ = False
 
-(&&) :: LazyBool -> LazyBool -> LazyBool
-LTrue{} && b = b
-LFalse  && b = false
+tc1,tc2,tc3,tc4 :: [Ty] -> Expr -> Ty -> Bool
 
-tc :: [Ty] -> Expr -> Ty -> LazyBool
-tc env (Var x)      t | Just tx <- env `index` x = tx === t
-tc env (App f x tx) t          = label 1 (tc env f (tx :-> t)) && (tc env x tx)
-tc env (Lam e)      (tx :-> t) = label 1 (tc (tx:env) e t)
-tc _   _            _ = LFalse
+tc1 env (Var x)      t | Just tx <- env `index` x = tx === t
+tc1 env (App f x tx) t          = label 1 (tc1 env f (tx :-> t)) && (tc1 env x tx)
+tc1 env (Lam e)      (tx :-> t) = label 1 (tc1 (tx:env) e t)
+tc1 _   _            _ = False
 
--- prop_A0 e = tc [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= false
---
--- prop_A1 e = tc [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= false
---
--- prop_A2 e = tc [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= false
---
--- prop_B e  = tc [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)) =:= false
---
--- prop_I e  = tc [] e (A :-> A) =:= false
---
--- prop_K e  = tc [] e (A :-> B :-> A) =:= false
---
-prop_S e  = tc [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= false
---
--- prop_W e  = tc [] e ((A :-> A :-> B) :-> (A :-> B)) =:= false
---
--- prop_C e  = tc [] e ((A :-> B :-> C) :-> (B :-> A :-> C)) =:= false
---
--- prop_M e  = tc [] e ((A :-> B) :-> (A :-> A :-> B)) =:= false
---
--- prop_N e  = tc [] e (A :-> (A :-> A) :-> A) =:= false
---
--- prop_D e  = tc [] e ((A :-> B) :-> (A :-> B)) =:= false
---
--- prop_K1 e = tc [] e (A :-> B :-> B) =:= false
+tc2 env (Var x)      t | Just tx <- env `index` x = tx === t
+tc2 env (App f x tx) t          = label 1 (tc2 env x tx) && (tc2 env f (tx :-> t))
+tc2 env (Lam e)      (tx :-> t) = label 1 (tc2 (tx:env) e t)
+tc2 _   _            _ = False
+
+tc3 env (Var x)      t | Just tx <- env `index` x = tx === t
+tc3 env (App x f tx) t          = label 1 (tc3 env f (tx :-> t)) && (tc3 env x tx)
+tc3 env (Lam e)      (tx :-> t) = label 1 (tc3 (tx:env) e t)
+tc3 _   _            _ = False
+
+tc4 env (Var x)      t | Just tx <- env `index` x = tx === t
+tc4 env (App x f tx) t          = label 1 (tc4 env x tx) && (tc4 env f (tx :-> t))
+tc4 env (Lam e)      (tx :-> t) = label 1 (tc4 (tx:env) e t)
+tc4 _   _            _ = False
+
+tc1_S0 e = tc1 [] e (A :-> A) =:= False
+tc1_S1 e = tc1 [] e (A :-> (A :-> A) :-> A) =:= False
+tc1_S2 e = tc1 [] e ((A :-> B) :-> (A :-> B)) =:= False
+tc1_S3 e = tc1 [] e (A :-> B :-> B) =:= False
+tc1_S4 e = tc1 [] e (A :-> B :-> A) =:= False
+tc1_S5 e = tc1 [] e ((A :-> B) :-> (A :-> A :-> B)) =:= False
+
+tc1_M0 e = tc1 [] e ((A :-> A :-> B) :-> (A :-> B)) =:= False
+tc1_M1 e = tc1 [] e ((A :-> B :-> C) :-> (B :-> A :-> C)) =:= False
+tc1_M2 e = tc1 [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)) =:= False
+tc1_M3 e = tc1 [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= False
+
+tc1_L0 e = tc1 [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= False
+tc1_L1 e = tc1 [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+tc1_L2 e = tc1 [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+
+tc2_S0 e = tc2 [] e (A :-> A) =:= False
+tc2_S1 e = tc2 [] e (A :-> (A :-> A) :-> A) =:= False
+tc2_S2 e = tc2 [] e ((A :-> B) :-> (A :-> B)) =:= False
+tc2_S3 e = tc2 [] e (A :-> B :-> B) =:= False
+tc2_S4 e = tc2 [] e (A :-> B :-> A) =:= False
+tc2_S5 e = tc2 [] e ((A :-> B) :-> (A :-> A :-> B)) =:= False
+
+tc2_M0 e = tc2 [] e ((A :-> A :-> B) :-> (A :-> B)) =:= False
+tc2_M1 e = tc2 [] e ((A :-> B :-> C) :-> (B :-> A :-> C)) =:= False
+tc2_M2 e = tc2 [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)) =:= False
+tc2_M3 e = tc2 [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= False
+
+tc2_L0 e = tc2 [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= False
+tc2_L1 e = tc2 [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+tc2_L2 e = tc2 [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+
+tc3_S0 e = tc3 [] e (A :-> A) =:= False
+tc3_S1 e = tc3 [] e (A :-> (A :-> A) :-> A) =:= False
+tc3_S2 e = tc3 [] e ((A :-> B) :-> (A :-> B)) =:= False
+tc3_S3 e = tc3 [] e (A :-> B :-> B) =:= False
+tc3_S4 e = tc3 [] e (A :-> B :-> A) =:= False
+tc3_S5 e = tc3 [] e ((A :-> B) :-> (A :-> A :-> B)) =:= False
+
+tc3_M0 e = tc3 [] e ((A :-> A :-> B) :-> (A :-> B)) =:= False
+tc3_M1 e = tc3 [] e ((A :-> B :-> C) :-> (B :-> A :-> C)) =:= False
+tc3_M2 e = tc3 [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)) =:= False
+tc3_M3 e = tc3 [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= False
+
+tc3_L0 e = tc3 [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= False
+tc3_L1 e = tc3 [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+tc3_L2 e = tc3 [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+
+tc4_S0 e = tc4 [] e (A :-> A) =:= False
+tc4_S1 e = tc4 [] e (A :-> (A :-> A) :-> A) =:= False
+tc4_S2 e = tc4 [] e ((A :-> B) :-> (A :-> B)) =:= False
+tc4_S3 e = tc4 [] e (A :-> B :-> B) =:= False
+tc4_S4 e = tc4 [] e (A :-> B :-> A) =:= False
+tc4_S5 e = tc4 [] e ((A :-> B) :-> (A :-> A :-> B)) =:= False
+
+tc4_M0 e = tc4 [] e ((A :-> A :-> B) :-> (A :-> B)) =:= False
+tc4_M1 e = tc4 [] e ((A :-> B :-> C) :-> (B :-> A :-> C)) =:= False
+tc4_M2 e = tc4 [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)) =:= False
+tc4_M3 e = tc4 [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= False
+
+tc4_L0 e = tc4 [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= False
+tc4_L1 e = tc4 [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+tc4_L2 e = tc4 [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
 
 
 -- nats --

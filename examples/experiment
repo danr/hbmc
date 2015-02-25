@@ -1,29 +1,59 @@
 LIMIT=$1
 echo "Time limit: $LIMIT"
+[[ -z $LIMIT ]] && exit
 
 run() {
-  PREFIX=$1
-  OPT=$2
-  LOWER=$3
-  UPPER=$4
-  echo $PREFIX $OPT
+  INFILE=$1
+  PREFIX=$2
+  OPT="$3"
+  LOWER=$4
+  UPPER=$5
+  OPTS=($OPT)
+  FILE="$PREFIX-${OPTS[0]}${OPTS[1]}"
+  echo $FILE
+  rm -f $FILE
   for i in $(seq $LOWER $UPPER); do
-    echo -n "$i ";
-    hbmclimit $LIMIT Mergesort.hs $OPT o$PREFIX$i > /dev/null || break;
+    tail -n 1 $FILE 2> /dev/null
+    (echo -n "$i ";
+    hbmclimit $LIMIT $INFILE "$OPT" o$PREFIX$i > /dev/null) 1>> $FILE 2>> $FILE || break;
   done;
+  cat $FILE
+  perl -p -e 's/Command exited with non-zero status 124\n/- /' $FILE > /tmp/a
+  cat /tmp/a > $FILE
 }
 
-run minj normal  0 29
-run minj mmerge  0 29
-run minj unlabel 0 29
+run Type.hs tc1_L ""             1 1
+run Type.hs tc2_L ""             1 1
+run Type.hs tc3_L ""             1 1
+run Type.hs tc4_L ""             1 1
+run Type.hs tc1_L "lazy"         1 1
+run Type.hs tc2_L "lazy"         1 1
+run Type.hs tc3_L "lazy"         1 1
+run Type.hs tc4_L "lazy"         1 1
+run Type.hs tc1_L unlabel        1 1
+run Type.hs tc2_L unlabel        1 1
+run Type.hs tc3_L unlabel        1 1
+run Type.hs tc4_L unlabel        1 1
+run Type.hs tc1_L "lazy unlabel" 1 1
+run Type.hs tc2_L "lazy unlabel" 1 1
+run Type.hs tc3_L "lazy unlabel" 1 1
+run Type.hs tc4_L "lazy unlabel" 1 1
 
-run mnub normal  0 29
-run mnub mmerge  0 29
-run mnub unlabel 0 29
-
-run iinj normal  0 29
-run inub normal  0 29
-
-run qinj normal  0 29
-run qnub normal  0 29
+# run Mergesort.hs minj normal  0 29
+# run Mergesort.hs minj 'mmerge unlabel' 0 29
+# run Mergesort.hs minj unlabel 0 29
+#
+# run Mergesort.hs mnub normal  0 29
+# run Mergesort.hs mnub 'mmerge unlabel'  0 29
+# run Mergesort.hs mnub unlabel 0 29
+#
+# run Mergesort.hs munq normal  0 29
+# run Mergesort.hs munq 'mmerge unlabel'  0 29
+# run Mergesort.hs munq unlabel 0 29
+#
+# run Mergesort.hs iinj normal  0 29
+# run Mergesort.hs inub normal  0 29
+#
+# run Mergesort.hs qinj normal  0 29
+# run Mergesort.hs qnub normal  0 29
 
