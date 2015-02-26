@@ -2,7 +2,7 @@ module Turing where
 
 import Tip.DSL
 
-data A = O | A | B | X
+data A = O | A | B
 
 data Action = Lft Nat | Rgt Nat | Stp
 
@@ -43,7 +43,6 @@ eqA :: A -> A -> Bool
 eqA O O = True
 eqA A A = True
 eqA B B = True
-eqA X X = True
 eqA _ _ = False
 
 runt :: Q -> [A] -> [A]
@@ -90,20 +89,12 @@ atMost _                             = True
 --lim (((s1,_),(s2,_),_):q) = if atMost s1 then if atMost s2 then lim q else False else False
 
 prog0 :: Q -> Bool
-prog0 q = case runt q [A,X] of
-            A:X:_ ->
-              case runt q [B,A,A,A,A,B,X] of
-                 A:A:A:A:B:B:X:_ -> True
+prog0 q = --case runt q [A] of
+          --  [A] ->
+              case runt q [B,A,A,A,A,B] of
+                 [A,A,A,A,B,B] -> True
                  _ -> False
-            _ -> False
-
-prog1 :: Q -> Bool
-prog1 q = case runt q [A,X] of
-            B:X:A:X:_ ->
-              case runt q [A,A,X] of
-                 B:B:X:A:A:X:_ -> True
-                 _ -> False
-            _ -> False
+          --  _ -> False
 
 {-
 
@@ -174,7 +165,7 @@ prog1 q = case runtN seven q [B,A,A,A,A,B,X] of
                  _ -> False
 -}
 
-prop q = prog1 q =:= False
+prop q = prog0 q =:= False
 
 --prop_help x y z v w = prog0 [((Zero,A),x),((Zero,B),y),((one,A),z),((one,B),v),((two,A),w){-  ,((two,B),u) -}] =:= False
 
