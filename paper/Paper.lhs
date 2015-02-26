@@ -32,6 +32,8 @@
 
 \usepackage{amsmath}
 
+\newcommand{\comment}[1]{\emph{COMMENT: #1}}
+\newcommand{\ifthenelse}{|if|-|then|-|else|}
 
 \begin{document}
 
@@ -86,9 +88,9 @@ bounded model checking, SAT, symbolic evaluation
 
 SAT-based Bounded Model Checking for hardware, revolution.
 
-Finding {\em counter examples}, {\em examples}, {\em inverting functions}, for prototype programming, primarily. Secondarily, for showing their absence.
+Finding {\em counter examples}, {\em examples}, {\em inverting functions}, for prototype programming, primarily. Also: see Reach paper. Secondarily, for showing their absence.
 
-Bounded Model Checking for C. Difference: recursive data structures. Doing this by modelling pointers and the heap does not work.
+Bounded Model Checking for C. Difference here: recursive data structures. Doing this by modelling pointers and the heap does not work.
 
 Motivating example: Finding 2 different inputs for which a show function returns the same result.
 
@@ -113,44 +115,108 @@ This paper contains the following contributions:
 \begin{itemize}
 \item We show how to express values of arbitrary datatypes symbolically in a SAT-solver.
 
-\item We show how a program containing recursive functions over symbolic datatypes can be symbolically executed, generating a SAT-problem.
+\item We show how a program containing recursive functions over datatypes can be symbolically executed, resulting in a SAT-problem.
 
-symbolic simulation of functional programs using a SAT-solver (first)
+\item We show how we can battle certain kinds of exponential blow-up that naturally happen in symbolic evaluation, by means of a novel program transformation.
 
-* incremental implementation (thunks and conflict clause)
-
-* dealing with recursive functions, program transformation
-
-Show how the solver and the generated program can make the search for a countexample more efficient
-
-\cite{apa}
+\item We show to perform bounded model checking {\em incrementally} for growing input sizes, by making use of feedback from the SAT-solver.
+\end{itemize}
 
 % ------------------------------------------------------------------------------
 
 \section{Main Idea}
 
-Forte, where the user can create (BDD) variables, returning a bool. How about if-then-else on that bool?
+\comment{Perhaps this section should be merged with the intro.}
 
-Need symbolic booleans that influence all datastructures.
+The programming language FL, part of the formal verification system Forte \cite{forte} is an ML-like language with one particular distinghuishing feature: symbolic booleans. FL has a primitive function with the following type\footnote{Throughout the paper, we use Haskell notation for our examples, even though the examples may not actually be written in the Haskell language.}:
+\begin{code}
+var :: String -> Bool
+\end{code}
+The idea behind |var| is that it creates a symbolic boolean value with the given name. It is possible to use the normal boolean operators (|(/\)|, |(\/)|, |(not)|, |(==)|, etc.) on these symbolic booleans, and the result is then computed as a normalized boolean formula in terms of the variables created by |var|. The implementation of FL uses BDDs \cite{bdd} for this.
 
-Example: lists.
+%format BoolSym = "\mathit{Bool}^\dagger"
+What happens when we use \ifthenelse{} with these symbolic booleans to choose between, for example, two given lists? This is unfortunately disallowed in FL, and leads to a run-time error. The Haskell library Duct Logic \cite{duct-logic} provided a similar feature to FL, but used the type system to avoid mixing symbolic booleans with regular Haskell values, by making symbolic booleans |BoolSym| a different type from regular |Bool|.
 
+This paper aims to lift this restriction, and allow for all values in the program to be symbolic.
+The problem that an expression such as
+\begin{code}
+if var "a" then [1] else []
+\end{code}
+presents is that at symbolic evaluation time, we cannot decide what constructor to return. One of our main ideas in this paper is to transform algebraic datatypes with several constructors, such as for example:
+\begin{code}
 data List a = Nil | Cons a (List a)
+\end{code}
+into algebraic with one constructor which is the ``superposition state'' of all possible constructors, that contains enough symbolic boolean variables to decide which constructor we actually have, plus a ``superposition'' of all possible arguments. Here is what we could do for lists:
+%format ListSym = "\mathit{List}^\dagger"
+%format FalseSym = "\mathit{False}^\dagger"
+%format TrueSym = "\mathit{True}^\dagger"
+\begin{code}
+data ListSym a = NilCons BoolSym (Maybe (a, ListSym a))
 
-symbolic version:
+nil :: ListSym a
+nil = NilCons FalseSym Nothing
 
-data List a = List Bit (Maybe (a, List a))
+cons :: a -> ListSym a -> ListSym a
+cons x xs = NilCons TrueSym (Just (x, xs))
+\end{code}
+Here, |Maybe| is the regular Haskell datatype, not the symbolic datatype. A symbolic list is thus always built using the |NilCons| constructor. The first argument (a symbolic bool) indicates which constructor we are using (|False| for |Nil|, |True| for |Cons|), and the second argument contains the arguments to the |Cons| constructor (which are only used in the case when we actually have a |Cons| constructor).
 
-Show case expressions on these lists
+An extra datatype invariant has to be respected. For |ListSym| it is that whenever it is possible for the constructor to be |True|, the second argument cannot be |Nothing|.
 
+What have we gained from this? It is now possible to implement \ifthenelse{} on lists, in terms of \ifthenelse{} on symbolic booleans and list elements. Here is the implementation:
+%format c1
+%format c2
+%format ma1
+%format ma2
+\begin{code}
+if b then NilCons c1 ma1 else NilCons c2 ma2 =
+  NilCons  (if b then c1   else c2)
+           (if b then ma1  else ma2)
+\end{code}
+We also need \ifthenelse{} on the regular |Maybe| type, which in a symbolic setting is only used to indicate the presence or absence of constructor arguments:
+%format a1
+\begin{code}
+if b then Nothing  else ma2      = ma2
+if b then ma1      else Nothing  = ma1
+if b then Just a1  else Just a2  =
+  Just (if b then a1 else a2)
+\end{code}
+If one branch does not have arguments, we choose the other side. If both branches have arguments, we choose between them.
+
+How can we do |case|-expressions on these symbolic lists? It turns out having \ifthenelse{} on the result type is enough. If we have a |case|-expression:
+\begin{code}
 case xs of
-  Nil -> a
-  Cons y ys -> f (y,ys)
+  Nil        -> a
+  Cons y ys  -> f (y,ys)
+\end{code}
+we can translate it to work on symbolic lists as follows:
+\begin{code}
+let NilCons c ma = xs in
+  if c then f (fromJust ma) else a
+\end{code}
+In this way, the user can use boolean variables to create a symbolic input to a program, for example representing all lists up to a particular length, containing elements up to a particular size, and run the program. The output will be another symbolic expression, about which we can ask questions. For example, if we want to do property checking, the output will be a symbolic boolean, and we can ask if it can ever be |FalseSym|.
 
-becomes:
+In the remainder of the paper we will use the main idea described in this section, with a number of changes. Firstly, we are going to use a SAT-solver instead of BDDs. The main reason is that SAT-solvers are more well-behaved for large problems than BDDs. 
+%format e1
+%format en = "\mathit{e}_n"
+%format s1
+%format sn = "\mathit{s}_n"
+%format K1
+%format Kn = "\mathit{K}_n"
+\begin{code}
+e ::=  let x = f s1 ... sn in e
+    |  case s of
+         K1 -> e1
+         ...
+         Kn -> en
+    |  s
+\end{code}
 
-  let List c myys = xs in
-    if c then a else f (fromJust myys)
+\begin{code}
+s ::=  K s1 ... sn
+    |  sel s
+    |  x
+\end{code}
 
 in constraint style:
 
@@ -374,6 +440,10 @@ Targets a la Reach.
 
 Using SMT. Integers (trivial, but how to do recursion over integers that terminates? add check everywhere?). Equality and functions can be used to encode constructor functions, selector functions, function application. This is what Leon does. Gain?
 
+If-then-else vs. new and equalHere.
+
+Using BDDs. Incrementality would not work. But otherwise it is not a bad idea. Should use the if-then-else method. The only variables would be the ones created in the input.
+
 % ------------------------------------------------------------------------------
 
 \section{Conclusions}
@@ -381,6 +451,8 @@ Using SMT. Integers (trivial, but how to do recursion over integers that termina
 This is a hard problem.
 
 We have found a niche, works well (and better than others) for cases where the SAT problem is not too big, and one gains something from combinatorial search power.
+
+Our method does not work well when: (1) Expansion does the wrong thing (in which case you can do this by hand), (2) Expansion is too careful, too many small steps, (3) the SAT-problem becomes too big (all intermediate datastructures are remembered), or (4) the SAT-problem is too hard.
 
 It is perhaps surprising that this is even possible; coding a search problem over a program containing recursive functions over recursive datastructures in terms of a SAT-problem, which is inherently finite.
 
