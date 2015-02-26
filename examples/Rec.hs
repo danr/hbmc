@@ -3,7 +3,6 @@ module Rec where
 import Tip.DSL
 
 f :: [Bool] -> Bool
-f [] = False
 f xs = g (f (h xs))
 
 h :: [Bool] -> [Bool]

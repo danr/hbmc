@@ -50,10 +50,6 @@ step (Atom a)  x | a === x  = Eps
                  | otherwise = Nil
 step (p :+: q) x =             (label 1 (step p x)) :+:       (label 2 (step q x))
 step (p :>: q) x =             (label 1 (step p x) :>: q) :+: (if eps p then label 2 (step q x) else Nil)
-{-
-step (p :>: q) x | eps p     = (label 1 (step p x)  :>: q) :+: label 2 (step q x)
-                 | otherwise =  label 1 (step p x)  :>: q
--}
 step (Star p)  x =             (label 1 (step p x)) :>: Star p
 step _         x = Nil
 
@@ -61,9 +57,22 @@ rec :: R T -> [T] -> Bool
 rec p []     = eps p
 rec p (x:xs) = rec (step p x) xs
 
+prop_find1 p = False =:= rec p [A,B,B]
+prop_find2 p = False =:= rec p [A,B,A,B]
+prop_find3 p = False =:= rec p [A,A,B,B]
+prop_find4 p = False =:= rec p [A,B,B,A]
+prop_find5 p = False =:= rec p [A,B,A,B,A]
+prop_find6 p = False =:= rec p [A,B,A,B,B]
+prop_find7 p = False =:= rec p [A,B,A,B,A,B]
+
 -- prop_koen_easy p q a b  = rec (p :>: q) [a,b] =:= rec (q :>: p) [a,b]
 --
-prop_koen p q s = rec (p :>: q) s =:= rec (q :>: p) s
+-- prop_koen p q s = rec (p :>: q) s =:= rec (q :>: p) s
+--
+
+-- prop_koen_easy p q a b  = rec (p :>: q) [a,b] =:= rec (q :>: p) [a,b]
+--
+-- prop_koen p q s = rec (p :>: q) s =:= rec (q :>: p) s
 --
 -- prop_star_plus p q s = rec (Star (p :+: q)) s =:= rec (Star p :+: Star q) s
 --

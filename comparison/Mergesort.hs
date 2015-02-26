@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP #-}
 module Mergesort(module Mergesort,module Nat) where
 
-import Prelude (Bool(..),undefined,Ordering(..), (&&), (||), otherwise, not, fmap, Eq(..), Ord, fst, snd, (==))
+import Prelude (Bool(..),undefined,Ordering(..), (&&), (||), otherwise, not, fmap, Eq(..), Ord, fst, snd, (==),Show(..))
 
 
 import Nat (Nat(..),(+),(*),(===))
@@ -30,6 +30,12 @@ min (S x) (S y) = S (min x y)
 Z   <= _   = True
 S _ <= Z   = False
 S x <= S y = x <= y
+
+(<) :: Nat -> Nat -> Bool
+Z   < Z   = False
+Z   < S{} = True
+S{} < Z   = False
+S n < S m = n < m
 
 count :: Nat -> [Nat] -> Nat
 count n [] = Z
@@ -107,6 +113,38 @@ qsort []     = []
 qsort (p:xs) =
   case partition p xs of
     (ys,zs) -> qsort ys ++ (singleton p ++ qsort zs)
+
+rev :: [a] -> [a]
+rev []     = []
+rev (x:xs) = rev xs ++ [x]
+
+qrev :: [a] -> [a] -> [a]
+qrev []     acc = acc
+qrev (x:xs) acc = qrev xs (x:acc)
+
+usorted :: [Nat] -> Property
+usorted (x:y:xs) = lift (x < y) *&* usorted (y:xs)
+usorted _        = lift True
+
+sorted :: [Nat] -> Property
+sorted (x:y:xs) = lift (x <= y) *&* sorted (y:xs)
+sorted _        = lift True
+
+elem :: Nat -> [Nat] -> Property
+x `elem` [] = lift False
+x `elem` (y:ys) = lift (x === y) *|* (x `elem` ys)
+
+unique :: [Nat] -> Property
+unique []     = lift True
+unique (x:xs) = x `elem` xs *&* unique xs
+
+psorted      xs = sorted xs           *=>* unique xs *=>* lift (length xs <= n4)
+psorted_rev  xs = sorted (rev xs)     *=>* unique xs *=>* lift (length xs <= n4)
+psorted_qrev xs = sorted (qrev xs []) *=>* unique xs *=>* lift (length xs <= n4)
+
+pusorted      xs = usorted xs           *=>* lift (length xs <= n20)
+pusorted_rev  xs = usorted (rev xs)     *=>* lift (length xs <= n10)
+pusorted_qrev xs = usorted (qrev xs []) *=>* lift (length xs <= n10)
 
 n0 = Z
 n1 = S n0

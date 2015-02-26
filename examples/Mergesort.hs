@@ -24,6 +24,12 @@ Z   <= _   = True
 S _ <= Z   = False
 S x <= S y = x <= y
 
+(<) :: Nat -> Nat -> Bool
+Z   < Z   = False
+Z   < S{} = True
+S{} < Z   = False
+S n < S m = n < m
+
 count :: Nat -> [Nat] -> Nat
 count n [] = Z
 count n (x:xs)
@@ -66,6 +72,27 @@ nub []     = []
 sorted :: [Nat] -> Bool
 sorted (x:y:xs) = x <= y && sorted (y:xs)
 sorted _        = True
+
+usorted :: [Nat] -> Bool
+usorted (x:y:xs) = x < y && usorted (y:xs)
+usorted _        = True
+
+allsmall :: Nat -> [Nat] -> Bool
+allsmall n []     = True
+allsmall n (x:xs) = x < n && allsmall n xs
+
+assoc x xs ys zs = (xs ++ (ys ++ zs)) =:= ((xs ++ ys) ++ zs)
+               ==> ((x:xs) ++ (ys ++ zs)) =:= (((x:xs) ++ ys) ++ (zs :: [Bool]))
+
+assoc0 ys zs = [] ++ (ys ++ zs) =:= ([] ++ ys) ++ (zs :: [Bool])
+
+{-
+pins y x xs = not (sorted xs) || sorted (insert x xs) =:= True
+          ==> sorted (x:xs) =:= True
+          ==> sorted (insert y (x:xs)) =:= True
+-}
+
+pallsmall     xs = usorted xs =:= True ==> allsmall n4 xs =:= True ==> length xs <= n4 =:= True
 
 unique :: [Nat] -> Bool
 unique []     = True
@@ -121,7 +148,13 @@ qrev :: [a] -> [a] -> [a]
 qrev []     acc = acc
 qrev (x:xs) acc = qrev xs (x:acc)
 
-psorted xs = sorted (rev xs) =:= True ==> unique xs =:= True ==> length xs <= n10 =:= True
+psorted      xs = sorted xs           =:= True ==> unique xs =:= True ==> length xs <= n3 =:= True
+psorted_rev  xs = sorted (rev xs)     =:= True ==> unique xs =:= True ==> length xs <= n3 =:= True
+psorted_qrev xs = sorted (qrev xs []) =:= True ==> unique xs =:= True ==> length xs <= n3 =:= True
+
+pusorted      xs = usorted xs           =:= True ==> length xs <= n4 =:= True
+pusorted_rev  xs = usorted (rev xs)     =:= True ==> length xs <= n4 =:= True
+pusorted_qrev xs = usorted (qrev xs []) =:= True ==> length xs <= n4 =:= True
 
 n0 = Z
 n1 = S n0

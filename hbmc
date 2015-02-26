@@ -16,8 +16,10 @@ fi
 
 echo "== Compiling$NOTE =="
 
-hbmcc $FILE $FLAGS $@ > tmp/$BASE && (cd tmp; ghc --make $BASE -O2
+EXEC=$(basename $BASE .hs)
+
+hbmcc $FILE $FLAGS $@ > tmp/$BASE && (cd tmp; ghc --make $BASE -O2 || exit
 
 echo "== Running =="
 
-time ./$(basename $BASE .hs))
+time ./$EXEC)

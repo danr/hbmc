@@ -3,6 +3,7 @@ module Kaleidoscope where
 
 import HBMC
 import Prelude hiding ((++))
+import Test.LazySmallCheck hiding ((==>))
 
 data Token
     = Butterfly
@@ -12,10 +13,10 @@ data Token
     | Kaleidoscope
     | Saw
     | The
-  deriving Show
+  deriving (Show,Eq)
 
 data S = S NP VP
-  deriving Show
+  deriving (Show,Eq)
 
 data Case = Subj | Obj
 
@@ -23,7 +24,7 @@ linS :: S -> [Token]
 linS (S np vp) = linNP Subj np ++ linVP vp
 
 data NP = Pron1 | Det N | NP `NP_In` NP
-  deriving Show
+  deriving (Show,Eq)
 
 linNP :: Case -> NP -> [Token]
 linNP c Pron1           = case c of Subj -> [I]; Obj -> [Me]
@@ -31,14 +32,14 @@ linNP _ (Det n)         = [The] ++ linN n
 linNP c (NP_In np1 np2) = linNP c np1 ++ [In] ++ linNP c np2
 
 data N = N_Butterfly | N_Kaleidoscope
-  deriving Show
+  deriving (Show,Eq)
 
 linN :: N -> [Token]
 linN N_Butterfly    = [Butterfly]
 linN N_Kaleidoscope = [Kaleidoscope]
 
 data VP = See NP | VP `VP_In` NP
-  deriving Show
+  deriving (Show,Eq)
 
 linVP :: VP -> [Token]
 linVP (See np)      = [Saw]    ++         label 1 (linNP Obj np)
@@ -54,6 +55,15 @@ ex2 t1 t2 =
     ==> t1 =:= t2
 
 ex3 t1 t2 = linS t1 =:= linS t2 ==> t1 =:= t2
+
+lscex1 s = neg (lift (linS s == [I,Saw,The,Butterfly,In,The,Kaleidoscope]))
+
+lscex2 t1 t2 =
+           lift (linS t1 == [I,Saw,The,Butterfly,In,The,Kaleidoscope])
+      *=>* lift (linS t2 == [I,Saw,The,Butterfly,In,The,Kaleidoscope])
+      *=>* lift (t1 == t2)
+
+lscex3 t1 t2 = lift (linS t1 == linS t2) *=>* lift (t1 == t2)
 
 -- append --
 
