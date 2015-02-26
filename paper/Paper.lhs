@@ -196,13 +196,19 @@ let NilCons c ma = xs in
 \end{code}
 In this way, the user can use boolean variables to create a symbolic input to a program, for example representing all lists up to a particular length, containing elements up to a particular size, and run the program. The output will be another symbolic expression, about which we can ask questions. For example, if we want to do property checking, the output will be a symbolic boolean, and we can ask if it can ever be |FalseSym|.
 
-In the remainder of the paper we will use the main idea described in this section, with a number of changes. Firstly, we are going to use a SAT-solver instead of BDDs. The main reason is that SAT-solvers are more well-behaved for large problems than BDDs. 
+In the remainder of the paper we will use the main idea described in this section, with a number of changes. Firstly, we are going to use a SAT-solver instead of BDDs. The main reason is that SAT-solvers are more well-behaved for large problems than BDDs. Also, we 
+%format x1
+%format xn = "\mathit{x}_n"
 %format e1
 %format en = "\mathit{e}_n"
 %format s1
 %format sn = "\mathit{s}_n"
 %format K1
 %format Kn = "\mathit{K}_n"
+\begin{code}
+d ::= f x1 ... xn = e
+\end{code}
+
 \begin{code}
 e ::=  let x = f s1 ... sn in e
     |  case s of
@@ -218,35 +224,6 @@ s ::=  K s1 ... sn
     |  x
 \end{code}
 
-in constraint style:
-
-...
-
-Language
-
-First-order.
-%\begin{
-%e ::= x
-%     \|  f x1 .. xn
-%     \|  K x1 .. xn
-%     \|  let x = e1 in e2
-%     |  case x of { … ; K y1 .. yk -> e ; … }
-
-Translation into constraints. Define what constraints are. Monadic constraint language. Show API, talk about meaning.
-
-Show translation of datatypes, and generation of case functions. Projection functions.
-
-Current idea is to only use “sinks” in case-expressions. Case expressions are translated into:
-
-  y <- new
-  ...
-  (constr x =? Ki) ==>
-     do yi <- [[ei]]
-          yi >>> y
-  …
-  return y
-
-Show examples.
 
 % ------------------------------------------------------------------------------
 
