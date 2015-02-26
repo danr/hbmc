@@ -47,7 +47,20 @@ count n (x:xs)
 msort :: [Nat] -> [Nat]
 msort []  = []
 msort [x] = [x]
-msort xs  = merge (msort (evens xs)) (msort (odds xs))
+msort xs  = merge (msort ys) (msort zs)
+  where
+    (ys,zs) = splitAt (half (length xs)) xs
+-- msort xs  = merge (msort (evens xs)) (msort (odds xs))
+
+half :: Nat -> Nat
+half (S (S n)) = S (half n)
+half (S Z) = Z
+half Z = Z
+
+splitAt :: Nat -> [a] -> ([a],[a])
+splitAt Z     xs     = ([],xs)
+splitAt (S n) (x:xs) = let (l,r) = splitAt n xs in (x:l,r)
+splitAt (S _) []     = ([],[])
 
 evens :: [a] -> [a]
 evens [] = []
@@ -61,12 +74,15 @@ odds (_:y:xs) = y:odds xs
 
 -- FLAGS: cmerge
 merge :: [Nat] -> [Nat] -> [Nat]
+merge (x:xs) [] = x:xs
+merge []     [] = []
+merge []     ys = ys
 merge (x:xs) (y:ys)
     | x <= y    = x:label [] (merge xs (y:ys))
     | otherwise = y:label [] (merge (x:xs) ys)
-merge (x:xs) [] = x:xs
-merge []     [] = []
-merge [] ys = ys
+--merge (x:xs)  (y:ys)  = hd : merge l r
+--  where (hd,l,r)  | x <= y     = (x, xs, y:ys)
+--                  | otherwise  = (y, x:xs, ys)
 
 ord :: [Nat] -> Bool
 ord (x:y:xs) = if x <= y then ord (y:xs) else False
@@ -136,15 +152,15 @@ x `elem` (y:ys) = lift (x === y) *|* (x `elem` ys)
 
 unique :: [Nat] -> Property
 unique []     = lift True
-unique (x:xs) = x `elem` xs *&* unique xs
+unique (x:xs) = neg (x `elem` xs) *&* unique xs
 
 psorted      xs = sorted xs           *=>* unique xs *=>* lift (length xs <= n4)
 psorted_rev  xs = sorted (rev xs)     *=>* unique xs *=>* lift (length xs <= n4)
-psorted_qrev xs = sorted (qrev xs []) *=>* unique xs *=>* lift (length xs <= n4)
+psorted_qrev xs = sorted (qrev xs []) *=>* unique xs *=>* lift (length xs <= n15)
 
 pusorted      xs = usorted xs           *=>* lift (length xs <= n20)
 pusorted_rev  xs = usorted (rev xs)     *=>* lift (length xs <= n10)
-pusorted_qrev xs = usorted (qrev xs []) *=>* lift (length xs <= n10)
+pusorted_qrev xs = usorted (qrev xs []) *=>* lift (length xs <= n15)
 
 n0 = Z
 n1 = S n0

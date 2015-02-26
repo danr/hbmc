@@ -25,10 +25,13 @@ S _ <= Z   = False
 S x <= S y = x <= y
 
 (<) :: Nat -> Nat -> Bool
-Z   < Z   = False
-Z   < S{} = True
-S{} < Z   = False
-S n < S m = n < m
+x < y = case y of
+  Z   -> False
+  S m -> case x of
+    Z   -> True
+    S n -> n < m
+
+prop_lt x = x < Z =:= False
 
 count :: Nat -> [Nat] -> Nat
 count n [] = Z
@@ -40,7 +43,20 @@ count n (x:xs)
 msort :: [Nat] -> [Nat]
 msort []  = []
 msort [x] = [x]
-msort xs  = merge (msort (evens xs)) (msort (odds xs))
+--msort xs  = merge (msort (evens xs)) (msort (odds xs))
+msort xs  = merge (msort ys) (msort zs)
+  where
+    (ys,zs) = splitAt (half (length xs)) xs
+
+half :: Nat -> Nat
+half (S (S n)) = S (half n)
+half (S Z) = Z
+half Z = Z
+
+splitAt :: Nat -> [a] -> ([a],[a])
+splitAt Z     xs     = ([],xs)
+splitAt (S n) (x:xs) = let (l,r) = splitAt n xs in (x:l,r)
+splitAt (S _) []     = ([],[])
 
 evens :: [a] -> [a]
 evens [] = []
@@ -60,6 +76,11 @@ merge (x:xs) (y:ys)
 merge (x:xs) [] = x:xs
 merge []     [] = []
 merge [] ys = ys
+
+prop_merge_comm xs ys zs =
+  merge xs ys =:= merge ys xs ==>
+  merge xs zs =:= merge zs xs ==>
+  merge ys zs =:= merge zs ys
 
 ord :: [Nat] -> Bool
 ord (x:y:xs) = if x <= y then ord (y:xs) else False
@@ -81,10 +102,12 @@ allsmall :: Nat -> [Nat] -> Bool
 allsmall n []     = True
 allsmall n (x:xs) = x < n && allsmall n xs
 
+{-
 assoc x xs ys zs = (xs ++ (ys ++ zs)) =:= ((xs ++ ys) ++ zs)
                ==> ((x:xs) ++ (ys ++ zs)) =:= (((x:xs) ++ ys) ++ (zs :: [Bool]))
 
 assoc0 ys zs = [] ++ (ys ++ zs) =:= ([] ++ ys) ++ (zs :: [Bool])
+-}
 
 {-
 pins y x xs = not (sorted xs) || sorted (insert x xs) =:= True
@@ -92,7 +115,7 @@ pins y x xs = not (sorted xs) || sorted (insert x xs) =:= True
           ==> sorted (insert y (x:xs)) =:= True
 -}
 
-pallsmall     xs = usorted xs =:= True ==> allsmall n4 xs =:= True ==> length xs <= n4 =:= True
+pallsmall     xs = usorted (rev xs) =:= True ==> allsmall n1 xs =:= True ==> length xs <= n1 =:= True
 
 unique :: [Nat] -> Bool
 unique []     = True
@@ -152,8 +175,8 @@ psorted      xs = sorted xs           =:= True ==> unique xs =:= True ==> length
 psorted_rev  xs = sorted (rev xs)     =:= True ==> unique xs =:= True ==> length xs <= n3 =:= True
 psorted_qrev xs = sorted (qrev xs []) =:= True ==> unique xs =:= True ==> length xs <= n3 =:= True
 
-pusorted      xs = usorted xs           =:= True ==> length xs <= n4 =:= True
-pusorted_rev  xs = usorted (rev xs)     =:= True ==> length xs <= n4 =:= True
+pusorted      xs = usorted xs           =:= True ==> length xs <= n2 =:= True
+pusorted_rev  xs = usorted (rev xs)     =:= True ==> length xs <= n9 =:= True
 pusorted_qrev xs = usorted (qrev xs []) =:= True ==> length xs <= n4 =:= True
 
 n0 = Z

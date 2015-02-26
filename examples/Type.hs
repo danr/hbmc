@@ -23,6 +23,12 @@ _ === _ = False
 True  && b = b
 False && _ = False
 
+nf :: Expr -> Bool
+nf (App Lam{} _ _) = False
+nf (App e x _) = label 1 (nf e) && nf x
+nf (Lam e)     = label 1 (nf e)
+nf Var{}       = True
+
 tc1,tc2,tc3,tc4 :: [Ty] -> Expr -> Ty -> Bool
 
 tc1 env (Var x)      t | Just tx <- env `index` x = tx === t
@@ -108,6 +114,70 @@ tc4_M3 e = tc4 [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= False
 tc4_L0 e = tc4 [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= False
 tc4_L1 e = tc4 [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
 tc4_L2 e = tc4 [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+
+tc1n_S0 e = nf e =:= True ==> tc1 [] e (A :-> A) =:= False
+tc1n_S1 e = nf e =:= True ==> tc1 [] e (A :-> (A :-> A) :-> A) =:= False
+tc1n_S2 e = nf e =:= True ==> tc1 [] e ((A :-> B) :-> (A :-> B)) =:= False
+tc1n_S3 e = nf e =:= True ==> tc1 [] e (A :-> B :-> B) =:= False
+tc1n_S4 e = nf e =:= True ==> tc1 [] e (A :-> B :-> A) =:= False
+tc1n_S5 e = nf e =:= True ==> tc1 [] e ((A :-> B) :-> (A :-> A :-> B)) =:= False
+
+tc1n_M0 e = nf e =:= True ==> tc1 [] e ((A :-> A :-> B) :-> (A :-> B)) =:= False
+tc1n_M1 e = nf e =:= True ==> tc1 [] e ((A :-> B :-> C) :-> (B :-> A :-> C)) =:= False
+tc1n_M2 e = nf e =:= True ==> tc1 [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)) =:= False
+tc1n_M3 e = nf e =:= True ==> tc1 [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= False
+
+tc1n_L0 e = nf e =:= True ==> tc1 [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= False
+tc1n_L1 e = nf e =:= True ==> tc1 [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+tc1n_L2 e = nf e =:= True ==> tc1 [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+
+tc2n_S0 e = nf e =:= True ==> tc2 [] e (A :-> A) =:= False
+tc2n_S1 e = nf e =:= True ==> tc2 [] e (A :-> (A :-> A) :-> A) =:= False
+tc2n_S2 e = nf e =:= True ==> tc2 [] e ((A :-> B) :-> (A :-> B)) =:= False
+tc2n_S3 e = nf e =:= True ==> tc2 [] e (A :-> B :-> B) =:= False
+tc2n_S4 e = nf e =:= True ==> tc2 [] e (A :-> B :-> A) =:= False
+tc2n_S5 e = nf e =:= True ==> tc2 [] e ((A :-> B) :-> (A :-> A :-> B)) =:= False
+
+tc2n_M0 e = nf e =:= True ==> tc2 [] e ((A :-> A :-> B) :-> (A :-> B)) =:= False
+tc2n_M1 e = nf e =:= True ==> tc2 [] e ((A :-> B :-> C) :-> (B :-> A :-> C)) =:= False
+tc2n_M2 e = nf e =:= True ==> tc2 [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)) =:= False
+tc2n_M3 e = nf e =:= True ==> tc2 [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= False
+
+tc2n_L0 e = nf e =:= True ==> tc2 [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= False
+tc2n_L1 e = nf e =:= True ==> tc2 [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+tc2n_L2 e = nf e =:= True ==> tc2 [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+
+tc3n_S0 e = nf e =:= True ==> tc3 [] e (A :-> A) =:= False
+tc3n_S1 e = nf e =:= True ==> tc3 [] e (A :-> (A :-> A) :-> A) =:= False
+tc3n_S2 e = nf e =:= True ==> tc3 [] e ((A :-> B) :-> (A :-> B)) =:= False
+tc3n_S3 e = nf e =:= True ==> tc3 [] e (A :-> B :-> B) =:= False
+tc3n_S4 e = nf e =:= True ==> tc3 [] e (A :-> B :-> A) =:= False
+tc3n_S5 e = nf e =:= True ==> tc3 [] e ((A :-> B) :-> (A :-> A :-> B)) =:= False
+
+tc3n_M0 e = nf e =:= True ==> tc3 [] e ((A :-> A :-> B) :-> (A :-> B)) =:= False
+tc3n_M1 e = nf e =:= True ==> tc3 [] e ((A :-> B :-> C) :-> (B :-> A :-> C)) =:= False
+tc3n_M2 e = nf e =:= True ==> tc3 [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)) =:= False
+tc3n_M3 e = nf e =:= True ==> tc3 [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= False
+
+tc3n_L0 e = nf e =:= True ==> tc3 [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= False
+tc3n_L1 e = nf e =:= True ==> tc3 [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+tc3n_L2 e = nf e =:= True ==> tc3 [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+
+tc4n_S0 e = nf e =:= True ==> tc4 [] e (A :-> A) =:= False
+tc4n_S1 e = nf e =:= True ==> tc4 [] e (A :-> (A :-> A) :-> A) =:= False
+tc4n_S2 e = nf e =:= True ==> tc4 [] e ((A :-> B) :-> (A :-> B)) =:= False
+tc4n_S3 e = nf e =:= True ==> tc4 [] e (A :-> B :-> B) =:= False
+tc4n_S4 e = nf e =:= True ==> tc4 [] e (A :-> B :-> A) =:= False
+tc4n_S5 e = nf e =:= True ==> tc4 [] e ((A :-> B) :-> (A :-> A :-> B)) =:= False
+
+tc4n_M0 e = nf e =:= True ==> tc4 [] e ((A :-> A :-> B) :-> (A :-> B)) =:= False
+tc4n_M1 e = nf e =:= True ==> tc4 [] e ((A :-> B :-> C) :-> (B :-> A :-> C)) =:= False
+tc4n_M2 e = nf e =:= True ==> tc4 [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)) =:= False
+tc4n_M3 e = nf e =:= True ==> tc4 [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C) =:= False
+
+tc4n_L0 e = nf e =:= True ==> tc4 [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= False
+tc4n_L1 e = nf e =:= True ==> tc4 [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
+tc4n_L2 e = nf e =:= True ==> tc4 [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
 
 -- nats --
 

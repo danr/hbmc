@@ -1,0 +1,7 @@
+
+FILE=$1
+DEPTH=$2
+PROP=$3
+echo "import $FILE; import Test.LazySmallCheck; main = depthCheck $DEPTH $PROP" | tee tmp 
+time runghc tmp
+

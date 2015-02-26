@@ -465,6 +465,10 @@ it keeps expanding the tail of the list, hoping for something....
 
 \subsection{Merge sort}
 
+The section discusses some optimisations that can be done
+to functions with more that one recursive call.
+The topic is this implementation of merge sort:
+
 \begin{code}
 msort      :: [Nat] -> [Nat]
 msort []   = []
@@ -477,6 +481,9 @@ merge xs      []      = xs
 merge (x:xs)  (y:ys)  | x <= y     = x:merge xs (y:ys)
                       | otherwise  = y:merge (x:xs) ys
 \end{code}
+
+Here, |evens, odds :: [Nat] -> [Nat]| picks ut the elements
+at the even and the odd positions, respectively. 
 
 %format x_1
 %format x_2
@@ -520,6 +527,14 @@ In Figure \ref{inj} the task is, given a length bound |n|, to find |xs|, |ys| of
 
 The runtime is considerably better for the |merge'| version, and the memoised
 version of |merge| is considerably better than the unmemoised version.
+The runtimes are compared to Leon and LazySmallCheck. Their 
+best runtime was chosen from the |evens|-|odds| version or the more standard
+|splitAt (length xs `div` 2)| version of |msort| (both favored the
+latter version). It should be said that our system works worse on
+that version.  
+
+We also applied the |merge| to |merge'| transformation 
+by hand for them, but this did not improve their runtime. 
 
 \begin{figure}[htp] \centering{
 \includegraphics[scale=0.60]{inj.pdf}}
@@ -534,11 +549,110 @@ Our tool is \emph{opt} (using |merge'|), \emph{memo} (using |merge| and memoisat
 
 \subsection{Inverting type checking}
 
+%format :-> = ":\rightarrow"
+%format env = "\rho"
+
+\begin{code}
+data Expr = App Expr Expr Ty | Lam Expr | Var Nat
+
+data Ty = Ty :-> Ty | A | B | C 
+
+tc :: [Ty] -> Expr -> Ty -> Bool
+tc  env  (App f x tx)  t           = tc env f (tx :-> t) 
+                                   && tc env x tx
+tc  env  (Lam e)       (tx :-> t)  = tc (tx:env) e t
+tc  env  (Lam e)       _           = False
+tc  env  (Var x)       t           =  case env `index` x of 
+                                        Just tx  -> tx == t 
+                                        Nothing  -> False
+\end{code}
+
+\begin{code}
+nf :: Expr -> Bool
+nf (App (Lam _) _ _) = False
+nf (App f x _)       = nf f && nf x
+nf (Lam e)           = nf e
+nf (Var _)           = True
+\end{code}
+
+> tc [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C)
+
+> nf e && tc [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C)
+
 \subsection{Regular expressions}
-Regular expressions.
+
+%format :+: = ":\!\!+\!\!:"
+%format :&: = ":\!\&\!:"
+%format :>: = ":>:"
+
+\begin{code}
+step  :: R T -> T -> R T
+step  (Atom a)   x  = if a == x then Eps else Nil
+step  (p :+: q)  x  =  step p x :+:  step q x
+step  (p :&: q)  x  =  step p x :&:  step q x
+step  (p :>: q)  x  =  (step p x :>: q) :+: 
+                       if eps p then step q x else Nil
+step  (Star p)   x  =  step p x :>: Star p
+step  _          x  = Nil
+
+rec :: R T -> [T] -> Bool
+rec p []      = eps p
+rec p (x:xs)  = rec (step p x) xs
+\end{code}
+
+... smart constructors .....
+
+\begin{code}
+eps  :: R T -> Bool
+eps  Eps                = True
+eps  (p :+: q)          = eps p || eps q
+eps  (p :&: q)          = eps p && eps q
+eps  (p :>: q)          = eps p && eps q
+eps  (Star _)           = True
+eps  _                  = False
+\end{code}
+
+.. eps .. memo eps
+
+> not (eps p) && rec (p :&: (p :>: p)) s 
+
+\begin{verbatim}
+p: (R(R(R__(T))_(T))(R__(T))(T))
+s: (List(T)(List(T)(List(T)(List(T)_))))
+
+Counterexample!
+p: Star (Atom B) :>: Atom B
+s: Cons B (Cons B Nil)
+\end{verbatim}
+
+(28s! quicker when either of the constructors are replaced with the smart constructors)
+
+\begin{code}
+iter :: Nat -> R T -> R T
+iter Z     _ = Eps
+iter (S n) r = r :>: iter n r
+\end{code}
+
+> i /= j && not (eps p) && rec (iter i p :&: iter j p) s
+
+On this example: 
+
+\begin{verbatim}
+i: (Nat(Nat(Nat_)))
+j: (Nat(Nat(Nat_)))
+p: (R(R(R__(T))_(T))(R__(T))(T))
+s: (List(T)(List(T)(List(T)_)))
+
+Counterexample!
+i: S (S Z)
+j: S Z
+p: Star (Atom A) :>: Atom A
+s: Cons A (Cons A Nil)
+\end{verbatim}
 
 \subsection{Ambiguity detection}
 
+TODO
 Showing stuff, inverse.
 
 \subsection{Integration from Differentiation}
@@ -554,6 +668,41 @@ Also show higher-order functions?
 % ------------------------------------------------------------------------------
 
 \section{Experimental evaluations}
+
+\begin{table}[htd]
+\begin{center}
+
+\textit{
+\begin{tabular}{l r r r }
+\em Problem & \em Our tool & \em Lazy SC & \em Leon \\
+\hline
+\hline
+\multicolumn{4}{l}{Sorting} \\
+...  & x.xs &  x.xs & x.xs \\
+...  & x.xs &  x.xs & x.xs \\
+\multicolumn{4}{l}{Inverting type checker} \\
+\hline
+|(w)|         & 1.0s &  x.xs & x.xs \\
+|(.)|         & 6.7s &  x.xs & x.xs \\
+|s|           & 7.6s &  x.xs & x.xs \\
+|nf|, |w|     & 0.1s &  0.9s & x.xs \\
+|nf|, |(.)|   & 0.3s &  x.xs & x.xs \\
+|nf|, |s|     & 0.8s &  x.xs & x.xs \\
+\multicolumn{4}{l}{Regular expressions} \\
+\hline
+|p :&: (p :>: p)|        & 27.2s &  0.6s & x.xs \\
+|p .&. (p .>. p)|        &  2.0s &  0.4s & x.xs \\
+|iter i p :&: iter j p|  &  6.6s & 17.4s & x.xs \\
+|iter i p .&. iter j p|  & 12.6s & 18.8s & x.xs \\
+\multicolumn{4}{l}{Show} \\
+\hline
+ambig  & x.xs &  x.xs & x.xs \\
+\end{tabular}
+}
+\end{center}
+\caption{Evaluation on the examples}
+\label{eval}
+\end{table}%
 
 Compare some examples against Leon.
 
@@ -603,7 +752,7 @@ This is a hard problem.
 
 We have found a niche, works well (and better than others) for cases where the SAT problem is not too big, and one gains something from combinatorial search power.
 
-Our method does not work well when: (1) Expansion does the wrong thing (in which case you can do this by hand), (2) Expansion is too careful, too many small steps, (3) the SAT-problem becomes too big (all intermediate datastructures are remembered), or (4) the SAT-problem is too hard.
+Our method does not work well when: (1) Expansion does the wrong thing (in which case you can do this by hand), (2) Expansion is too careful, too many small steps, (3) the SAT-problem becomes too big (all intermediate datastructures are remembered), or (4) the SAT-problem is too hard. 
 
 It is perhaps surprising that this is even possible; coding a search problem over a program containing recursive functions over recursive datastructures in terms of a SAT-problem, which is inherently finite.
 

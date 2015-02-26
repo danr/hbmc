@@ -1,0 +1,30 @@
+
+timeout 300 ./runlazy Type 6 tcn_M0
+timeout 300 ./runlazy Type 7 tcn_M0
+timeout 300 ./runlazy Type 8 tcn_M0
+timeout 300 ./runlazy Type 6 tcn_M1
+timeout 300 ./runlazy Type 7 tcn_M1
+timeout 300 ./runlazy Type 8 tcn_M1
+timeout 300 ./runlazy Type 6 tcn_M2
+timeout 300 ./runlazy Type 7 tcn_M2
+timeout 300 ./runlazy Type 8 tcn_M2
+timeout 300 ./runlazy Type 6 tcn_M3
+timeout 300 ./runlazy Type 7 tcn_M3
+timeout 300 ./runlazy Type 8 tcn_M3
+
+timeout 300 ./runlazy Type 6 tc_M0
+timeout 300 ./runlazy Type 7 tc_M0
+timeout 300 ./runlazy Type 8 tc_M0
+timeout 300 ./runlazy Type 6 tc_M1
+timeout 300 ./runlazy Type 7 tc_M1
+timeout 300 ./runlazy Type 8 tc_M1
+timeout 300 ./runlazy Type 6 tc_M2
+timeout 300 ./runlazy Type 7 tc_M2
+timeout 300 ./runlazy Type 8 tc_M2
+timeout 300 ./runlazy Type 6 tc_M3
+timeout 300 ./runlazy Type 7 tc_M3
+timeout 300 ./runlazy Type 8 tc_M3
+
+./runlazy RegExpDeluxe 3 prop_Conj
+./runlazy RegExpDeluxe 3 prop_iter
+

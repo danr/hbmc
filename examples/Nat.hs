@@ -1,6 +1,6 @@
 module Nat where
 
-import Prelude hiding ((+),(*),(-),(<))
+import Prelude hiding ((+),(*),(-),(<),id)
 import Tip.DSL
 
 data Nat = Z | S Nat deriving (Eq,Ord)
@@ -36,14 +36,27 @@ Z{} === S{} = False
 S{} === Z{} = False
 S n === S m = n === m
 
--- plus_idem x = x + x =:= x
+id :: Nat -> Nat
+id Z = Z
+id (S n) = S (id n)
+
+prop_id x = Z =:= id x
+plus_dumb x = x + Z =:= x
+
+plus_idem x = x + x =:= x
+plus_not_idem x = x + x =:= x ==> True =:= False
+plus_inf x =  S x =:= x
+plus_ninf x =  S x =:= x ==> True =:= False
+
+{-
 -- mul_idem  x = x * x =:= x
 -- plus_not_idem x = x + x =:= x ==> True =:= False
 
 silly x y z = x * (y + z) =:= (x * y) + z
 
-sub_comm  x y   = x - y =:= y - x
 sub_assoc x y z = x - (y - z) =:= (x - y) - z
 
 not_trans x y z = x < y =:= True ==> y < z =:= True ==> x < z =:= False
+-}
 
+sub_comm  x y   = x - y =:= y - x
