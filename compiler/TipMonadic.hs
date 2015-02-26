@@ -25,7 +25,7 @@ thenReturn :: Interface a => [H.Stmt a] -> a -> H.Expr a
 ss `thenReturn` x = mkDo ss (returnExpr (var x))
 
 (>>>) :: Interface a => H.Expr a -> H.Expr a -> H.Expr a
-a >>> b = H.Apply (api "equalHere") [a,b]
+a >>> b = H.Apply (api "(>>>)") [a,b]
 
 trType :: Tip.Type a -> Type a
 trType t0 =

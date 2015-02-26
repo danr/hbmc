@@ -95,7 +95,7 @@ trySolve = H (\env ->
                      do putStrLn ("Conflict: " ++ show (length qs))
                         --b <- solveBit (sat env) (here env : reverse [ nt q | q <- qs, q /= p ])
                         b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws, p `elem` qs, p /= p0 ])
-                        --b <- return True
+                        -- b <- return True
                         if b then
                           let (p,unq,H h):_ = [ t | t@(p,_,_) <- ws, p `elem` qs ] in
                             do let ws' = [ t | t@(_,unq',_) <- reverse ws, unq /= unq' ]
@@ -300,7 +300,7 @@ newCall h =
        Call{ doit   = b
            , invoke = \x' -> do case my of
                                   Nothing -> error "Invoked Nothing!"
-                                  Just y  -> do equalHere x' x
+                                  Just y  -> do x' >>> x
                                                 return y
 
            }
@@ -370,6 +370,8 @@ newInput = newPoint True
 --------------------------------------------------------------------------------
 
 class Equal a where
+  (>>>)        :: a -> a -> H ()
+
   equal        :: a -> a -> H Bit
   equalHere    :: a -> a -> H ()
   notEqualHere :: a -> a -> H ()
@@ -388,6 +390,7 @@ class Equal a where
     do q <- equal x y
        addClauseHere [nt q]
 
+
 eqTup,neqTup :: Equal a => (a, (a, ())) -> H ()
 eqTup  (x, (y, _)) = equalHere x y
 neqTup (x, (y, _)) = notEqualHere x y
@@ -398,10 +401,13 @@ equalPred x y q =
      equalHere q q'
 
 instance Equal () where
+  _ >>> _ = return ()
   equalHere    _ _ = return ()
   notEqualHere _ _ = addClauseHere []
 
 instance Equal Bit where
+  x >>> y = equalHere x y
+
   equalHere x y
     | x == y    = return ()
     | x == nt y = addClauseHere []
@@ -411,6 +417,10 @@ instance Equal Bit where
   notEqualHere x y = equalHere x (nt y)
 
 instance (Equal a, Equal b) => Equal (a,b) where
+  (x1,x2) >>> (y1,y2) =
+    do x1 >>> y1
+       x2 >>> y2
+
   equalHere (x1,x2) (y1,y2) =
     do equalHere x1 y1
        equalHere x2 y2
@@ -550,6 +560,9 @@ force th =
      Just x <- peek th
      return x
 
+doForce :: Thunk a -> (a -> H ()) -> H ()
+doForce t h = force t >>= h
+
 ifForce :: Thunk a -> (a -> H ()) -> H ()
 ifForce (This x)               h = h x
 ifForce th@(Delay inp unq ref) h =
@@ -574,12 +587,17 @@ instance Constructive a => Constructive (Thunk a) where
                                 newPoint inp
 
 instance Equal a => Equal (Thunk a) where
-  equalHere t1 t2 = equalThunk t1 t2
+  t1 >>> t2 = equalThunk t1 t2
+
+  equalHere t1 t2 =
+    ifForce t1 $ \a ->
+    ifForce t2 $ \b ->
+      equalHere a b
 
   notEqualHere t1 t2 =
     ifForce t1 $ \a ->
-      do b <- force t2
-         notEqualHere a b
+    ifForce t2 $ \b ->
+      notEqualHere a b
 
 equalThunk :: Equal a => Thunk a -> Thunk a -> H ()
 equalThunk x y = do
@@ -595,7 +613,7 @@ equalThunk x y = do
   equalThunk' x y =
     ifForce x $ \a ->
       do b <- force y
-         equalHere a b
+         a >>> b
 
 {-# NOINLINE equalUnique #-}
 equalUnique :: Unique -> Unique -> H () -> H ()
@@ -615,12 +633,6 @@ equalUnique =
                       do -- io $ putStrLn "equalUnique"
                          return q
             addClauseHere [q]
-
-zipThunk :: (a -> b -> H ()) -> Thunk a -> Thunk b -> H ()
-zipThunk f t1 t2 =
-  ifForce t1 $ \a ->
-    do b <- force t2
-       f a b
 
 instance Value a => Value (Thunk a) where
   type Type (Thunk a) = Type a
@@ -692,6 +704,8 @@ newVal xs =
     k = n `div` 2
 
 instance Ord a => Equal (Val a) where
+  (>>>) = equalHere
+
   equalHere (Val xs) (Val ys) = eq xs ys
    where
     eq [] ys = sequence_ [ addClauseHere [nt y] | (y,_) <- ys ]
@@ -822,29 +836,56 @@ class ConstructiveData c => EqualData c a where
   equalData :: (forall x . Equal x => x -> x -> H ()) ->
                [([c], a -> a -> H ())]
 
-instance EqualData c a => Equal (Data c a) where
-  equalHere (Con (Val [(tt,c)]) x1) (Con c2 x2) =
-    do -- io (putStrLn "oneCon")
-       must (c2 =? c) $
-         do sequence_
-              [ f x1 x2
-              | (cs,f) <- equalData equalHere
-              , c `elem` cs
-              ]
+instance Equal a => Equal (Maybe a) where
+  Nothing >>> _       = return ()
+  _       >>> Nothing = error "memcpy to unallocated memory"
+  Just x  >>> Just y  = x >>> y
 
-  equalHere (Con c1 x1) (Con c2 x2) =
-    do -- io (putStrLn "equalData")
-       equalHere c1 c2
-       c <- context
-       sequence_
-         [ do x <- new
-              sequence_ [ addClauseHere [nt (c1 =? c), x] | c <- cs ]
-              inContext x (do addClauseHere [c]; f x1 x2)
-         | (cs, f) <- equalData equalHere
-         , any (`elem` allcs) cs
-         ]
-   where
-    allcs = domain c1 `intersect` domain c2
+  equalHere    = error "equalHere on Maybe"
+  notEqualHere = error "notEqualHere on Maybe"
+
+equalOn ::
+  (Equal a,EqualData c a) =>
+  (forall x . Equal x => x -> x -> H ()) ->
+  Data c a -> Data c a -> H ()
+
+equalOn k (Con (Val [(tt,c)]) x1) (Con c2 x2) =
+  do -- io (putStrLn "oneCon")
+     must (c2 =? c) $
+       do sequence_
+            [ f x1 x2
+            | (cs,f) <- equalData k
+            , c `elem` cs
+            ]
+
+equalOn k (Con c1 x1) (Con c2 x2) =
+  do -- io (putStrLn "equalData")
+     equalHere c1 c2
+     c <- context
+     sequence_
+       [ do x <- new
+            sequence_ [ addClauseHere [nt (c1 =? c), x] | c <- cs ]
+            inContext x (do addClauseHere [c]; f x1 x2)
+       | (cs, f) <- equalData k
+       , any (`elem` allcs) cs
+       ]
+ where
+  allcs = domain c1 `intersect` domain c2
+
+instance (Equal a,EqualData c a) => Equal (Data c a) where
+  (>>>) = equalOn (>>>)
+
+  {- -- This does not work:
+     -- it copies all the thunks in the same context
+     -- and never stops.
+     -- then counterexamples exist in contexts
+     -- that are unallowed due to thunks
+  Con c a >>> Con c2 a2 =
+    do c >>> c2
+       a >>> a2
+  -}
+
+  equalHere = equalOn equalHere
 
   notEqualHere (Con c1 x1) (Con c2 x2) =
     choice
