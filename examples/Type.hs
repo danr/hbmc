@@ -109,7 +109,6 @@ tc4_L0 e = tc4 [] e ((A :-> A :-> B) :-> (B :-> C) :-> (A :-> C)) =:= False
 tc4_L1 e = tc4 [] e ((A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
 tc4_L2 e = tc4 [] e ((A :-> A :-> B) :-> (B :-> B :-> C) :-> (A :-> C)) =:= False
 
-
 -- nats --
 
 data Nat = S Nat | Z

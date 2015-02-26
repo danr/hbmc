@@ -91,9 +91,11 @@ trySolve = H (\env ->
                    do putStrLn "Contradiction!"
                       return (Just False)
                   else
-                   let p:_ = [ p | (p,_,_) <- ws, p `elem` qs ] in
+                   let p0:_ = [ p | (p,_,_) <- ws, p `elem` qs ] in
                      do putStrLn ("Conflict: " ++ show (length qs))
-                        b <- solveBit (sat env) (here env : reverse [ nt q | q <- qs, q /= p ])
+                        --b <- solveBit (sat env) (here env : reverse [ nt q | q <- qs, q /= p ])
+                        b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws, p `elem` qs, p /= p0 ])
+                        --b <- return True
                         if b then
                           let (p,unq,H h):_ = [ t | t@(p,_,_) <- ws, p `elem` qs ] in
                             do let ws' = [ t | t@(_,unq',_) <- reverse ws, unq /= unq' ]

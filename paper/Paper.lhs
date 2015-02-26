@@ -67,7 +67,7 @@
 \maketitle
 
 \begin{abstract}
-This is the text of the abstract.
+We present a new symbolic evaluation method for functional programs that generates input to a SAT-solver. The result is a bounded model checking method for functional programs that can find concrete inputs that cause the program to produce certain outputs, or show the inexistence of such inputs under certain bounds. SAT-solvers have long been used for bounded model checking of hardware and also low-level software. This paper presents the first method for SAT-based bounded model checking for high-level programs containing recursive algebraic datatypes and unlimited recursion. Our method works {\em incrementally}, i.e. it increases bounds on inputs until it finds a solution. We also present a novel optimization 
 \end{abstract}
 
 \category{CR-number}{subcategory}{third-level}
@@ -108,9 +108,14 @@ Example of use (sorting).
 
 Motivational talk about in what situations to use this: (1) Instead of QuickCheck/SmallCheck. Gain: no complicated generators. (2) Computing inverses in programming / prototype programs. (3) FP as a metalanguage for generating constraints, to solve a problem.
 
-Contributions:
+This paper contains the following contributions:
 
-* symbolic simulation of functional programs using a SAT-solver (first)
+\begin{itemize}
+\item We show how to express values of arbitrary datatypes symbolically in a SAT-solver.
+
+\item We show how a program containing recursive functions over symbolic datatypes can be symbolically executed, generating a SAT-problem.
+
+symbolic simulation of functional programs using a SAT-solver (first)
 
 * incremental implementation (thunks and conflict clause)
 
@@ -154,12 +159,12 @@ in constraint style:
 Language
 
 First-order.
-
-e ::= x
-     |  f x1 .. xn
-     |  K x1 .. xn
-     |  let x = e1 in e2
-     |  case x of { … ; K y1 .. yk -> e ; … }
+%\begin{
+%e ::= x
+%     \|  f x1 .. xn
+%     \|  K x1 .. xn
+%     \|  let x = e1 in e2
+%     |  case x of { … ; K y1 .. yk -> e ; … }
 
 Translation into constraints. Define what constraints are. Monadic constraint language. Show API, talk about meaning.
 
@@ -185,13 +190,63 @@ Show examples.
 
 The constraint monad.
 
+\begin{code}
+type C a
+instance Monad C
+
+newVar  :: C Prop
+insist  :: Prop -> C ()
+when    :: Prop -> C () -> C ()
+\end{code}
+
+%format /\ = "\wedge"
+%format \/ = "\vee"
+%format ==> = "\Rightarrow"
+%format nt = "\neg"
+\begin{code}
+type Prop
+
+(/\), (\/), (==>)  :: Prop -> Prop -> Prop
+(nt)               :: Prop -> Prop
+true, false        :: Prop
+\end{code}
+
 Show the API.
 
 \subsection{Representing datatypes}
 
 Show the Val type (Fin?).
 
+\begin{code}
+newtype Fin a = Fin [(Prop,a)]
+
+newFin  :: Ord a => [a] -> C (Fin a)
+is      :: Ord a => Fin a -> a -> Prop
+one     :: a -> Fin a
+\end{code}
+
 Show how lists and trees are represented.
+
+\begin{code}
+data List a  = List (Fin ListC) (Maybe a) (Maybe (List a))
+data ListC   = Nil | Cons
+
+nil        :: List a
+nil        = List (one Nil) Nothing Nothing
+
+cons       :: a -> List a -> List a
+cons x xs  = List (one Cons) (Just x) (Just xs)
+
+isNil, isCons :: List a -> Prop
+isNil   (List c _ _)  = c `is` Nil
+isCons  (List c _ _)  = c `is` Cons
+
+selList1 :: List a -> Maybe a
+selList1 (List _ mx _) = mx
+
+selList2 :: List a -> Maybe (List a)
+selList2 (List _ _ mxs) = mxs
+\end{code}
 
 Show how general datatypes are be represented.
 
@@ -291,6 +346,8 @@ Compare with/without memoization and with/without merging function calls.
 
 Compare with/without conflict minimization?
 
+Show timings of the above examples.
+
 % ------------------------------------------------------------------------------
 
 \section{Related Work}
@@ -324,6 +381,8 @@ Using SMT. Integers (trivial, but how to do recursion over integers that termina
 This is a hard problem.
 
 We have found a niche, works well (and better than others) for cases where the SAT problem is not too big, and one gains something from combinatorial search power.
+
+It is perhaps surprising that this is even possible; coding a search problem over a program containing recursive functions over recursive datastructures in terms of a SAT-problem, which is inherently finite.
 
 % ------------------------------------------------------------------------------
 

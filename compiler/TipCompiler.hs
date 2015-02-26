@@ -210,6 +210,7 @@ projGlobal :: Expr a -> Maybe (a,Head a)
 projGlobal (hd@(Gbl (Global x _ _ _)) :@: []) = Just (x,hd)
 projGlobal _                                  = Nothing
 
+{-
 memosAndChecks :: Theory Var -> (Theory Var,([Var],[Var]))
 memosAndChecks = runWriter . transformBiM trf
  where
@@ -221,6 +222,7 @@ memosAndChecks = runWriter . transformBiM trf
         | x == Var "check" -> tell ([],[func_name]) >> again
        where again = trf fn{func_body=e}
       _ -> return fn
+-}
 
 -- add bool
 

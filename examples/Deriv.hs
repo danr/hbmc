@@ -16,6 +16,7 @@ d N{}       = N Z
 infix 4 :*:
 infix 3 :+:
 
+-- FLAGS: copt
 opt :: E -> E
 opt (N Z :*: e)       = N Z
 opt (e :*: N Z)       = N Z
