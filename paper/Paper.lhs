@@ -31,6 +31,7 @@
 % authoryear    To obtain author/year citation style instead of numeric.
 
 \usepackage{amsmath}
+\usepackage{graphicx}
 
 \newcommand{\comment}[1]{\emph{COMMENT: #1}}
 \newcommand{\ifthenelse}{|if|-|then|-|else|}
@@ -361,19 +362,192 @@ Just add to the queue!
 
 \section{Examples}
 
-Sorting stuff.
+In this section we aim to describe how our system works in practice by
+looking at some examples.
+
+\subsection{Generating sorted lists}
+
+Assume that we are given a predicate about unique and sorted lists,
+that all elements are pairwise larger than the next:
+
+\begin{code}
+usorted  ::  [Nat] -> Bool
+usorted (x:y:xs)  =  x < y && usorted (y:xs)
+usorted _         =  True
+\end{code}
+
+\noindent
+Now we can investigate the expansion strategy by asking for |xs|
+such that |usorted xs| and |length xs > n|, given some bound |n|.
+With |n|, the trace looks like this:
+
+\begin{verbatim}
+xs: _
+xs: (List__)
+xs: (List_(List__))
+xs: (List_(List_(List__)))
+xs: (List_(List_(List_(List__))))
+xs: (List_(List(Nat_)(List_(List__))))
+xs: (List_(List(Nat_)(List(Nat_)(List__))))
+xs: (List(Nat_)(List(Nat_)(List(Nat_)(List__))))
+xs: (List(Nat_)(List(Nat(Nat_))(List(Nat_)(List__))))
+xs: (List(Nat_)(List(Nat(Nat_))(List(Nat(Nat_))(List__))))
+xs= Cons Z (Cons (S Z) (Cons (S (S Thunk_Nat)) Nil))
+\end{verbatim}
+
+All but the last lines describe a partial view of the value.
+Delayed values are represented with a @_@, and other values
+with their type constructor and the arguments. The
+value is first expanded to be sufficiently wide, and
+then the natural number elements are. Note that
+no values except for the needed ones are evaluated.
+We are not always that lucky as we shall see later.
+
+Can also generate reverese and qrev lists, can generate
+sorted lists with |sort xs=xs|.... Later we will look at the more difficult
+|sort xs=sort ys|. Sorting stuff
+
+\subsubsection{Terminate without example}
+
+Sometimes it can be noticed that there is no counterexample regardless how the
+program is expanded.  The simplest property when this happens is perhaps asking
+for an |x| such that |x < Z|. The standard definition of |(<)| returns |False|
+for any |y < Z|, so there is a contradiction in this context. This is also the
+same context that the Thunk in |x| is waiting for, but since this is
+unsatisfiable, it will never be expanded.
+
+Let's return to the previous example with asking for an |xs|, such that
+|usorted xs| and |length xs > n|, but with  the new constraint that |all (< n)
+xs|.  So the list must be sorted, but the upper bounds on the data is only
+local: namely that each element should be below |n|. The other constraint is a
+lower bound on the data: that it should at least have length |n|.
+
+When executing this, first the |length| constraint forces the program to expand
+to make the list at least that long.  Then the |unsorted| predicate will make
+sure that all the elements are pairwise ordered. This will make the first
+element to be at least |Z|, the one after that at least |S Z| and so un until
+the |n|th element. But then we will eventually enter the situation outlined
+above and the |n|th element cannot expand any more, and the system terminates
+cleanly with saying:
+
+\begin{verbatim}
+Contradiction!
+No value found.
+\end{verbatim}
+
+\noindent
+and thus efficiently proving the property (for a specific choice of |n|, not for all |n|.)
+So our system can be used with bounds written as boolean predicates, for instance depth.
+
+\subsubsection{Limitations of termination discovery}
+
+Our system is not an inductive prover and will not terminate on
+
+\begin{code}
+nub xs = y:y:ys
+\end{code}
+
+\noindent
+(Note that it does not help even if the element type is finite.)
+
+nor on:
+
+\begin{code}
+usorted (rev xs) && all (< n) xs && length xs > n
+\end{code}
+
+\noindent
+it keeps expanding the tail of the list, hoping for something....
+
+\subsubsection{Discussion about contracts checking a'la Leon}
+
+....
+
+\subsection{Merge sort}
+
+\begin{code}
+msort      :: [Nat] -> [Nat]
+msort []   = []
+msort [x]  = [x]
+msort xs   = merge (msort (evens xs)) (msort (odds xs))
+
+merge :: [Nat] -> [Nat] -> [Nat]
+merge []      ys      = ys
+merge xs      []      = xs
+merge (x:xs)  (y:ys)  | x <= y     = x:merge xs (y:ys)
+                      | otherwise  = y:merge (x:xs) ys
+\end{code}
+
+%format x_1
+%format x_2
+%format x_3
+%format y_1
+%format y_2
+%format y_3
+
+Symbolically evaluating merge is expensive since |merge| does two recursive
+calls. One observation is that evaluating |merge| from the tuple of arguments
+|([x_1, x_2, ...],[y_1, y_2, ...])| will make two calls to the pairs
+|([x_1, x_2, ...],[y_2, ...])| and
+|([x_2, , ...],[y_1, y_2, ...])|. However, both of these will make the call
+to the same symbolic lists |([x_2, ...],[y_2, ...])|. We can
+avoid to twice calculate symbolic corresponding to those two merged,
+by memoising the function. The second time the merge of these two lists
+is requested, the saved symbolic list is instead returned.
+
+Another observation is that the calls in |merge| can be \emph{merged} to make |merge'|:
+
+\begin{code}
+merge' :: [Nat] -> [Nat] -> [Nat]
+merge' []      ys      = ys
+merge' xs      []      = xs
+merge' (x:xs)  (y:ys)  = hd : merge' l r
+  where (hd,l,r)  | x <= y     = (x, xs, y:ys)
+                  | otherwise  = (y, x:xs, ys)
+\end{code}
+
+When evaluating the program strict, these versions of merge make no difference,
+but when evaluating it symbolically, the |merge'| version will make a
+\emph{linear} number of calls instead of \emph{exponential} in the length of
+the lists.
+
+Our compiler can make this transformation automatically given that the
+user annotates which calls in the program to collapse.
+
+In Figure \ref{inj} the task is, given a length bound |n|, to find |xs|, |ys| of type |[Nat]| subject to:
+
+> xs /= ys && msort xs == msort ys && length xs >= n
+
+The runtime is considerably better for the |merge'| version, and the memoised
+version of |merge| is considerably better than the unmemoised version.
+
+\begin{figure}[htp] \centering{
+\includegraphics[scale=0.60]{inj.pdf}}
+\caption{
+Run time to find |xs|, |ys :: [Nat]| such that |xs /= ys|
+and |msort xs == msort ys| with a constraint on |length xs|.
+Our tool is \emph{opt} (using |merge'|), \emph{memo} (using |merge| and memoisation),
+\emph{unopt} (using |merge|). The other tools are LazySmallCheck and Leon.
+\label{inj}
+}
+\end{figure}
+
+\subsection{Inverting type checking}
+
+\subsection{Regular expressions}
+Regular expressions.
+
+\subsection{Ambiguity detection}
 
 Showing stuff, inverse.
 
-Regular expressions.
-
+\subsection{Integration from Differentiation}
 Deriving expressions, inverse.
 
+\subsection{Synthesising turing machines}
 Turing machines?
 
 % --- %
-
-Also show examples of (depth-bound and/or size-bound and/or other-bound) things that terminate without example.
 
 Also show higher-order functions?
 
