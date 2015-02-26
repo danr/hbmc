@@ -44,9 +44,11 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
      case_data <- make_case_data
      equal <- make_equal
      value <- make_value
+     view_data <- make_view_data
      return ([wrapper,labels] ++ constructors ++
              [case_data] ++
-             [constructive,equal,repr,value])
+             [constructive,equal,repr,value] ++
+             [view_tycon,view_data])
  where
   (indexes,types) = dataInfo dt
 
@@ -207,3 +209,26 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
               )]
             `Where` [f_def]
            ]
+
+  -- instance IncrView a => IncrView (D_List a) where
+  --   incrView (D_List x) = incrView x
+  make_view_data :: Fresh (Decl a)
+  make_view_data =
+    do t <- fresh
+       return $
+         InstDecl
+           [TyCon (api "IncrView") [TyVar tv] | tv <- tvs]
+           (TyCon (api "IncrView") [me])
+           [FunDecl (api "incrView")
+             [([ConPat (wrapData tc) [VarPat t]]
+              ,Apply (api ("incrView")) [var t]
+              )]]
+
+  -- instance IncrView L where
+  --   incrView _ = return "Nat"
+  view_tycon :: Decl a
+  view_tycon = InstDecl []
+    (TyCon (api "IncrView") [TyCon (conLabel tc) []])
+    [FunDecl (api "incrView")
+      [([WildPat],returnExpr (String (conRepr tc)))]]
+

@@ -55,6 +55,10 @@ data Decl a
 funDecl :: a -> [a] -> Expr a -> Decl a
 funDecl f xs b = FunDecl f [(map VarPat xs,b)]
 
+tagShow :: Interface a => [a] -> Expr a
+tagShow []     = var   (api "TagNil")
+tagShow (x:xs) = Apply (api "TagCons") [String x,var x,tagShow xs]
+
 data Type a
   = TyCon a [Type a]
   | TyVar a
@@ -87,6 +91,9 @@ mkDo ss Noop = case (init ss,last ss) of
   (i,Stmt e)   -> mkDo i e
   (i,Bind x e) -> mkDo i e
 mkDo ss e = Do ss e
+
+returnExpr :: Interface a => Expr a -> Expr a
+returnExpr e = Apply (prelude "return") [e]
 
 var :: a -> Expr a
 var x = Apply x []

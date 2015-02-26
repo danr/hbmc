@@ -15,9 +15,6 @@ import Data.Maybe
 
 import Control.Applicative
 
-returnExpr :: Interface a => H.Expr a -> H.Expr a
-returnExpr e = H.Apply (prelude "return") [e]
-
 justExpr :: Interface a => H.Expr a -> H.Expr a
 justExpr e = H.Apply (prelude "Just") [e]
 
@@ -93,7 +90,7 @@ trProp (Tip.Formula Tip.Prove [] (Tip.collectQuant -> (lcls,tm)))
        return $ (,) f $ funDecl f [] $
          mkDo (input ++ concat terms)
            (H.Apply (api "solveAndSee")
-             [Tup (map (var . Tip.lcl_name) lcls)])
+             [tagShow (map Tip.lcl_name lcls)])
 trProp fm = error $ "Invalid property: " ++ ppRender fm ++ "\n(cannot be polymorphic)"
 
 type Term a = (Bool,Tip.Expr a,Tip.Expr a)

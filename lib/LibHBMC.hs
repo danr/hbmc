@@ -62,7 +62,7 @@ miniConflict xs ys =
 
      let search [x] ys =
            do return x
-         
+
          search xs ys =
            do b <- solve (xs1 ++ ys)
               if b then
@@ -145,9 +145,9 @@ solve' h =
 solve :: H Bool
 solve = solve' (return ())
 
-solveAndSee :: (Value a,Show (Type a)) => a -> H ()
+solveAndSee :: (Value a,Show (Type a),IncrView a) => a -> H ()
 solveAndSee see =
-  do b <- solve
+  do b <- solve' (io . putStrLn =<< incrView see)
      if b then
        do get see >>= (io . print)
      else
@@ -872,3 +872,68 @@ getStrictData f d (Con c a) =
          do x <- get c
             f x a
 
+-----------------------------------------------------------------
+
+class IncrView a where
+  incrView :: a -> H String
+
+data TagShow a b = TagCons String a b
+
+data TagNil = TagNil
+
+instance Show TagNil where
+  show TagNil = ""
+
+instance (Show a,Show b) => Show (TagShow a b) where
+  show (TagCons x xe r) = x ++ ": " ++ show xe ++ "\n" ++ show r
+
+instance IncrView TagNil where
+  incrView TagNil = return ""
+
+instance (IncrView a,IncrView b) => IncrView (TagShow a b) where
+  incrView (TagCons x xe r) = do
+    xe' <- incrView xe
+    r' <- incrView r
+    return (x ++ ": " ++ xe' ++ "\n" ++ r')
+
+instance (Show c,IncrView c,IncrView a) => IncrView (Data c a) where
+  incrView (Con v c) =
+    do v' <- incrView v
+       c' <- incrView c
+       return ("(" ++ v' ++ c' ++ ")")
+
+instance (Show a,IncrView a) => IncrView (Val a) where
+  incrView (Val bs) =
+    case [x | (tt,x) <- bs] of
+      [x]    -> return (dropL_ (show x))
+      ~(x:_) -> incrView x      -- the TyCon
+   where
+    dropL_ ('L':'_':l) = l
+    dropL_ xs          = xs
+
+instance IncrView a => IncrView (Maybe a) where
+  incrView Nothing  = return "-"
+  incrView (Just x) = incrView x
+
+instance (IncrView a,IncrView b) => IncrView (a,b) where
+  incrView (a,b) = (++) <$> incrView a <*> incrView b
+
+instance IncrView () where
+  incrView _ = return ""
+
+instance IncrView a => IncrView (Thunk a) where
+  incrView t =
+    do md <- peek t
+       case md of
+         Nothing -> return "_"
+         Just cn -> incrView cn
+
+instance (Value a, Value b) => Value (TagShow a b) where
+  type Type (TagShow a b) = TagShow (Type a) (Type b)
+  dflt ~(TagCons _ x y) = TagCons "_" (dflt x) (dflt y)
+  get   (TagCons s x y) = liftM2 (TagCons s) (get x) (get y)
+
+instance Value (TagNil) where
+  type Type TagNil = TagNil
+  dflt _ = TagNil
+  get  _ = return TagNil
