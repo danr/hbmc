@@ -266,7 +266,7 @@ one x = Fin [(true,x)]
 is :: Eq a => Fin a -> a -> Prop
 Fin pxs `is` x = head ([p | (p,y) <- pxs, x == y] ++ [false])
 \end{code}
-The function |newFin| creates a suitable number of new variables, uses a proposition function that creates a formula expressing that exactlyOne of its arguments is true, and returns |Fin a| value which relates the values from |xs| to the corresponding propositional variables. The function |one| creates a |Fin a| with only one option. The function |is| selects the proposition belonging to the given value.
+The function |newFin| creates a suitable number of new variables, uses a proposition function |exactlyOne| that creates a formula expressing that exactly one of its arguments is true, and returns |Fin a| value which relates the values from |xs| to the corresponding propositional variables. The function |one| creates a |Fin a| with only one option. The function |is| selects the proposition belonging to the given value.
 
 \subsection{Incrementality}
 
@@ -424,7 +424,7 @@ instance Symbolic a => Symbolic (ExprC a) where
 \end{code}
 With the instance above, we also have |new :: C ExprSym| to our disposal.
 
-\subsection{Copying symbolic values}
+\subsection{Copying symbolic values} \label{sec:copy}
 
 The last operation on symbolic types we need is {\em copying}. Copying is needed when we want to generate constraints that define a symbolic value |y| in terms of a given value |x|. Copying is also used a lot, and therefore we introduce a type class:
 %format >>> = "\rhd"
@@ -524,7 +524,7 @@ Function application can only happen inside a let-definition and only with simpl
 
 %format (transr (e)) = "\llbracket" e "\rrbracket\!\!\!\Rightarrow\!\!\!"
 %format (trans (e))  = "\llbracket" e "\rrbracket"
-The translation revolves around the basic translation for expressions, denoted |transr e r|, where |e| is a (simple or regular) expression, and |r| is a variable. The idea is that |transr e r| is a monadic computation that will generate constraints that will put the value of the expression |e| into the variable |r|.
+The translation revolves around the basic translation for expressions, denoted |transr e r|, where |e| is a (simple or regular) expression, and |r| is a variable. We write |transr e r| for the monadic computation that generate constraints that copy the symbolic value of the expression |e| into the symbolic value |r|.
 
 Given the translation for expressions, the translation for function definitions is:
 \begin{code}
@@ -564,6 +564,8 @@ Consider the definition of the standard Haskell function |(++)|:
 (x:xs)  ++ ys  = x : (xs ++ ys)
 \end{code}
 Applying our translation to this function and using symbolic lists, yields the following code:
+%format ++? = ++"\!^\dagger"
+%format ==? = =="^\dagger"
 \begin{code}
 (++?) :: Symbolic a => ListSym a -> ListSym a -> C (ListSym a)
 xs ++? ys = do  zs <- new
@@ -574,23 +576,41 @@ xs ++? ys = do  zs <- new
                     do  vs <- sel2 cxs ++ ys
                         cons (sel1 cxs) vs >>> zs
 \end{code}
-An example property that we may want to find a counter example to may look like this:
+An example property that we may use to find a counter example to may look like this:
 \begin{code}
 appendCommutative xs ys =
-  do  vs <-  xs ++ ys
-      ws <-  ys ++ xs
-      b  <-  vs == ws
-      insist (neg b)
+  do  vs <-  xs ++? ys
+      ws <-  ys ++? xs
+      b  <-  vs ==? ws
+      insist (nt b)
 \end{code}
-
+When we run the above computation, constraints will be generated that are going to search for inputs |xs| and |ys| such that |xs++ys == ys++xs| is false.
 
 \subsection{Memoization} \label{sec:memo}
 
-When performing symbolic evaluation, much more so than when running a program on concrete values, it is very common that functions get applied to the same arguments more than once.
+When performing symbolic evaluation, it is very common that functions get applied to the same arguments more than once. This is much more so compared to running a program on concrete values. A reason for this is that in symbolic evaluation, {\em all} branches of every case expression are potentially executed. If two or more branches contain a function application with the same arguments (something that is even more likely to happen when using selector functions), a concrete run will only execute one of them, but a symbolic run will execute all of them. A concrete example of this happens in datatype instances of the function |(>>>)| (see Section \ref{sec:copy}).
 
-Memoization is good, and easy.
+An easy solution to this problem is to use memoization. We apply memoization in two ways.
 
-Show the memoized translation of functions.
+First, for translated top-level function calls that return a result, we keep a memo table that remembers to which symbolic arguments a function has been applied. If a given argument has not been seen yet, a fresh symbolic result value |r| is created using |new|, and the function body |e| is run {\em in a fresh context} |c|.
+
+Translating a definition |f x1 ... xn = e| with memoization on yields the following result:
+\begin{code}
+f x1 ... xn =
+  do  mcy <- lookMemo_f x1 ... xn
+      case mcy of
+          Nothing     -> do  c <- new
+                             y <- new
+                             storeMemo_f x1 ... xn (c,y)
+                             with c § transr e y
+                             insist c
+                             return y
+
+          Just (c,y)  -> do  insist c
+                             return y
+\end{code}
+
+We allow memoization to be turned on and off manually for each top-level function. We always memoize |(>>>)|.
 
 \subsection{Symbolic merging of function calls}
 
@@ -610,7 +630,9 @@ Add 'check'. Describe in words. Exact implementation is shown in the next sectio
 
 \subsection{Other optimizations}
 
-Not all datatypes need to use |Delay|. If they are finite, they don't. We decided not to do it for enumeration types (e.g. |Bool|).
+We perform a few other optimizations in our translation. Two of them are described here.
+
+Not all algebraic datatypes need to use |Delay|. In principle, for any finite type we do not need to use |Delay| because we know the (maximum) size of the elements on beforehand. In our translator, we decided to not use |Delay| for enumeration types (e.g.\ |BoolSym|).
 
 For definitions that contain simple expressions, we can avoid the creation of a fresh symbolic value. Instead we can translate:
 \begin{code}
@@ -1106,6 +1128,8 @@ Liquid types.
 % ------------------------------------------------------------------------------
 
 \section{Discussion and Future Work}
+
+Parallelize expansion.
 
 Make choices of which constructor arguments to merge less arbitrary.
 
