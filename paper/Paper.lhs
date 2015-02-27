@@ -271,7 +271,7 @@ The function |newFin| creates a suitable number of new variables, uses a proposi
 
 \subsection{Incrementality}
 
-Before we show the symbolic encoding of datatypes in the constraint generation setting, we need to introduce one more auxiliary type. Since we are going to create symbolic inputs to programs {\em incrementally}, i.e.\ without knowing on beforehand how large they should be, we introduce the type |Delay|.
+Before we show the symbolic encoding of datatypes in the constraint generation setting, we need to introduce one more auxiliary type. Since we are going to create symbolic inputs to programs {\em incrementally}, i.e.\ without knowing on beforehand how large they should be, we introduce the type |Delay|\footnote{As we shall see in Section \ref{sec:solving}, the story is slightly more complicated than this, but we present a simplified version here for presentation purposes.}.
 \begin{code}
 type Delay a
 
@@ -286,9 +286,9 @@ Using |force|, we can make a delayed computation happen. Using |wait|, we can ma
 The way |Delay| is implemented is the standard way lazy thunks are implemented in an imperative setting, using |IORef|s, as follows:
 \begin{code}
 data Delay a  =  Done a
-              |  Delay (IORef (Either (IO ()) a))
+              |  Delay (IORef (Either (C ()) a))
 \end{code}
-In the next subsection, we will see how |Delay| is used.
+A |Delay| is either an already evaluated value, or a mutable reference filled with either a constraint generator that, when run, will fill the reference with a value, or a value. In the next subsection, we will see how |Delay| is used.
 
 \subsection{Symbolic datatypes}
 
@@ -685,9 +685,11 @@ fSym e = do  r <- new
                          sel2 ce >>> x
                          y >>> r
 \end{code}
-The above function first waits for its argument to be defined, and then creates a fresh context |c| and a fresh input |x|, and then it evaluates |fSym| with the input |x| in the context |c|. Then, the normal part of the case expression progresses, but instead of calling |fSym|, the branches simply use |insist| to make sure the context of the merged call is set, and copy the argument they need into |x|. This guarantees that |y| gets the correct value.
+The above function first waits for its argument to be defined, and then creates a fresh context |c| and a fresh input |x|, and then it evaluates |fSym| with the input |x| in the context |c|. Then, the normal part of the case expression progresses, but instead of calling |fSym|, the branches simply use |insist| to make sure the context of the merged call is set, and copy the argument they need into |x|. This guarantees that |y| gets the correct value. An interesting thing to notice is that, because we are generating constraints and not evaluating values, 
 
-Note that in the above code, because |(>>>)| is memoized, the call |y >>> r| only gets performed once although it appears in the code three times, and |sel2 ce >>> x| gets performed only once although it appears twice.
+Note that in the above code, because |(>>>)| is memoized, the call |y >>> r| only gets performed once although it appears in the code three times, and |sel2 ce >>> x| also gets performed only once although it appears twice.
+
+Our experimental evaluation also shows the importance of merging function calls in case branches. Automatically knowing when and where to apply the labels of function calls that should be merged is future work.
 
 \subsection{Other optimizations}
 
@@ -695,7 +697,7 @@ We perform a few other optimizations in our translation. Two of them are describ
 
 Not all algebraic datatypes need to use |Delay|. In principle, for any finite type we do not need to use |Delay| because we know the (maximum) size of the elements on beforehand. In our translator, we decided to not use |Delay| for enumeration types (e.g.\ |BoolSym|).
 
-For definitions that contain simple expressions, we can translate as follows:
+For definitions that consist of a simple expression |s|, we can translate as follows:
 \begin{code}
 trans (f x1 ... xn = s) /// = /// f x1 ... xn = do  return s
 \end{code}
@@ -703,7 +705,64 @@ This avoids the creation of an unnecessary helper value using |new|.
 
 % ------------------------------------------------------------------------------
 
-\section{Solving constraints}
+\section{Solving the constraints} \label{sec:solving}
+
+In the previous two sections, we have seen how to generate constraints in the |C| monad, and how to translate functional programs into constraint producing programs. However, we have not talked about how to actually generate symbolic inputs to programs, and how to use the SAT-solver to find solutions to these constraints. In order to do this, we have to make part of the code we have shown so far slightly more complicated.
+
+\subsection{Inputs and internal points}
+
+In a symbolic program, there are two kinds of symbolic expressions: inputs and internal points. They are dealt with in two fundamentally different ways. Inputs are expressions that are created outside of the program, and that are controlled by the solver. If the solver determines that a certain input should be made bigger by expanding one of its delays, it can do so, and the program will react to this, by triggering constraint generators that are waiting for these delays to appear. These triggers may in turn define other delays (by using |>>>|), and a cascade of constraint generators will be set in motion. So, inputs are set on the outside, and internal points react to their stimuli.
+
+We would like to make this difference explicit by introducing two functions to create symbolic expressions: one called |new| for internal points, and one called |newInput| for inputs. To implement this, we introduce a new datatype of |Mode|s, with which symbolic expressions can be labelled.
+\begin{code}
+data Mode = Input | Internal
+\end{code}
+The most important place where the label should occur is when we create a |Delay|. We make the following changes:
+\begin{code}
+data Delay a  =  Done a
+              |  Delay Mode (IORef (Either (C ()) a))
+
+delay :: Mode -> C a -> C (Delay a)
+\end{code}
+The function |delay| gets an extra |Mode| argument, which indicates what kind of delay we are creating.
+
+Whenever we create any new symbolic value, we need to be explicit about what kind of value we are creating. We therefore change the |Symbolic| class accordingly:
+\begin{code}
+class Symbolic a where
+  newMode :: Mode -> C a
+
+new, newInput :: Symbolic a => C a
+new       = newMode Internal
+newInput  = newMode Input
+\end{code}
+The function |new| now always creates internal points, where as the new function |newInput| creates new inputs.
+
+The mode information needs to be propagated through all calls of |newMode|:
+\begin{code}
+instance Symbolic Prop where
+  newMode _ = newVal
+
+instance Symbolic a => Symbolic (Arg a) where
+  newMode m = An `fmap` newMode m
+
+instance Symbolic a => Symbolic (Delay a) where
+  newMode m = delay m (newMode m)
+
+instance Symbolic a => Symbolic (ExprC a) where
+  newMode m =  do  c <- newFin [Var,Add,Mul,Neg]
+                   liftM3  (Expr c) (newMode m)
+                           (newMode m) (newMode m)
+\end{code}
+What is now the different between delays that belong to inputs and delays that belong to internal points? Well, if the program decides to do a |wait| on an internal point, then the algorithm that controls the expansion of the input delays does not need to know this. But if the program decides to do a |wait| on an input delay, the  algorithm that controls the expansion needs to know about it, because now this delay is a candidate for expansion later on.
+
+To implement this, we introduce one more function to the |C| monad:
+\begin{code}
+triggered :: Delay a -> C ()
+\end{code}
+We augment |C| to also be a state monad 
+
+
+In the previous two sections, we have seen how to generate constraints
 
 queue of contexts that are blocking.
 
@@ -717,11 +776,13 @@ Even if input program terminates, symbolic program may not terminate without dyn
 
 Show example.
 
-Add 'check'. Describe in words. Exact implementation is shown in the next section.
+Add 'check'.
 
-\subsection{Dealing with check}
-
-Just add to the queue!
+\begin{code}
+check :: C () -> C ()
+check m =  do  x <- newInput
+               wait x § \ () -> m
+\end{code}
 
 % ------------------------------------------------------------------------------
 
