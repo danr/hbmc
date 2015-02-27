@@ -748,8 +748,8 @@ sorted lists with |sort xs=xs|.... Later we will look at the more difficult
 Sometimes it can be noticed that there is no counterexample regardless how the
 program is expanded.  The simplest property when this happens is perhaps asking
 for an |x| such that |x < Z|. The standard definition of |(<)| returns |False|
-for any |y < Z|, so there is a contradiction in this environment. This is also the
-same environment that the Thunk in |x| is waiting for, but since this is
+for any |y < Z|, so there is a contradiction in this context. This is also the
+same context that the Thunk in |x| is waiting for, but since this is
 unsatisfiable, it will never be expanded.
 
 Let's return to the previous example with asking for an |xs|, such that
@@ -927,10 +927,10 @@ in normal form, takes less a fraction of a second.
 
 Constraining the data in this way allows 
 cutting away big parts of the search space (only normal 
-forms). The environment condition where the expression is not in normal
+forms). The context where the expression is not in normal
 form will become inconsistent due to the predicate,
 and no delayed computations are evaluated from inconsistent
-environments. This would not be the case if we up from decided on how
+contexts. This would not be the case if we up from decided on how
 big our symbolic values were. So here we see a direct benefit from 
 incrementally expanding the program.
 
@@ -964,88 +964,210 @@ and 30 seconds without the normal form predicate.
 
 \subsection{Regular expressions}
 
-Brzozowski...
-
-> step  :: R T -> T -> R T
-
-> eps  :: R T -> Bool
-
 %format :+: = ":\!\!+\!\!:"
 %format :&: = ":\!\&\!:"
 %format :>: = ":>:"
 %format .>. = ".\!>\!\!."
 
-\begin{code}
-step  :: R T -> T -> R T
-step  (Atom a)   x  = if a == x then Eps else Nil
-step  (p :+: q)  x  =  step p x :+:  step q x
-step  (p :&: q)  x  =  step p x :&:  step q x
-step  (p :>: q)  x  =  (step p x :>: q) :+: 
-                       if eps p then step q x else Nil
-step  (Star p)   x  =  step p x :>: Star p
-step  _          x  = Nil
+%format Meps = "\epsilon"
+%format (repp (p) (i) (j)) = p "\!\{" i "," j "\}"
+%format (reppp (p) (i) (j)) = "(" p ")\!\{" i "," j "\}"
+%format (maxx (i) (j)) = i "\cap" j
+%format (minn (i) (j)) = i "\cup" j
+%format Mempset = "\emptyset"
 
-rec :: R T -> [T] -> Bool
-rec p []      = eps p
-rec p (x:xs)  = rec (step p x) xs
-\end{code}
+We used an regular expression recognizer
+to falsify some plausible looking regular
+expression laws.
 
-... smart constructors .....
+We will call the main one |prop_repeat|:
 
-\begin{code}
-eps  :: R T -> Bool
-eps  Eps                = True
-eps  (p :+: q)          = eps p || eps q
-eps  (p :&: q)          = eps p && eps q
-eps  (p :>: q)          = eps p && eps q
-eps  (Star _)           = True
-eps  _                  = False
-\end{code}
+> Meps `notElem` p && s `elem` repp p i j & repp p i' j' ==> s `elem` repp p (maxx i i') (minn j j')
 
-.. eps .. memo eps
+Here, |repp p i j| means repeat the regular expression |p| from |i| to |j| times. 
+If |i > j|, then this regular expression does not recognize any string.
+Conjunction of regular expressions is denoted by |&|.
 
-> not (eps p) && rec (p :&: (p :>: p)) s 
+This property is false for |i = 0|, |j = 1|, |i' = j' = 2|, |p = a+aa| and |s = aa|,
+since |reppp (a+aa) (maxx 0 2) (minn 1 2) = reppp (a+aa) 2 1 = Mempset|.
+
+The library has the following api:
+
+> data RE a  = a :>: a  | a :+: a  | a :&: a 
+>            | Star a   | Eps      | Nil
+
+> step  ::  RE Token -> Token -> RE Token
+> eps   ::  RE a -> Bool
+> rec   ::  RE Token -> [Token] -> Bool
+> rep   ::  RE Token -> Nat -> Nat -> RE Token
+
+The |step| function does Brzozowski differentiation, |eps|
+answers if the expression contains the empty string, |rec|
+answers if the word is recognised, and |rep| is the
+above repetition.
+
+We can now ask our system for variables satisfying:
+
+> not (eps p)  && rec s (rep p i j :&: repp p i' j') 
+>              && not (rec (rep p (max i i') (min j j')) s)
+
+whereupon we get the following counterexample in just over 30 seconds:
+
+% p:  (R(R(R__(T))(R__(T))(T))(R__(T))(T))
+% i:  (Nat(Nat(Nat_)))
+% i': (Nat(Nat(Nat_)))
+% j:  (Nat(Nat(Nat_)))
+% j': (Nat(Nat(Nat_)))
+% s:  (List(T)(List(T)(List(T)_)))
 
 \begin{verbatim}
-p: (R(R(R__(T))_(T))(R__(T))(T))
-s: (List(T)(List(T)(List(T)(List(T)_))))
-
 Counterexample!
-p: Star (Atom B) :>: Atom B
-s: Cons B (Cons B Nil)
+p:  (Atom A :>: Atom A) :+: Atom A
+i:  S (S Z)
+i': S Z
+j:  S (S Z)
+j': S Z
+s:  Cons A (Cons A Nil)
 \end{verbatim}
 
-(28s! quicker when either of the constructors are replaced with the smart constructors)
+(This conterexample is essentially the same as outlined above.)
+
+The implementation of the regular expression library contains
+lots of calls that are the same across the branches. For instance,
+the |eps| function looks like this:
 
 \begin{code}
-iter :: Nat -> R T -> R T
-iter Z     _ = Eps
-iter (S n) r = r :>: iter n r
+eps :: R T -> Bool
+eps Eps        = True
+eps (p :+: q)  = eps p || eps q
+eps (p :&: q)  = eps p && eps q
+eps (p :>: q)  = eps p && eps q
+eps (Star _)   = True
+eps _          = False
 \end{code}
 
-> i /= j && not (eps p) && rec (iter i p :&: iter j p) s
+Here, we could collapse all the calls |eps p| as described
+in the section above, but it is actually enough to just
+memoize them as they are exactly the same. (The same holds for |eps q|).
+The recursive call structure of the |step| function follows
+the same pattern as for |eps| and memoisation is enough there as well.
 
-On this example: 
+% \begin{code}
+% step  :: RE Token -> Token -> RE Token
+% step  (Atom a)   x  = if a == x then Eps else Nil
+% step  (p :+: q)  x  =  step p x :+:  step q x
+% step  (p :&: q)  x  =  step p x :&:  step q x
+% step  (p :>: q)  x  =  (step p x :>: q) :+: 
+%                        if eps p then step q x else Nil
+% step  (Star p)   x  =  step p x :>: Star p
+% step  _          x  = Nil
+% \end{code}
+% 
+% The previous code uses the predicate |eps :: R a -> Bool|
+% which answers if a regular expression recognizes 
+% the empty string. We can now define the recognizer |rec|
+% for an input word:
+% 
+% \begin{code}
+% rec :: RE Token -> [Token] -> Bool
+% rec p []      = eps p
+% rec p (x:xs)  = rec (step p x) xs
+% \end{code}
+% 
+% The first example we look at is 
+% relating conjunction of regular expressions |(:&:)|
+% and sequential composition |(:>:)|:
+% 
+% > not (eps p) && rec (p :&: (p :>: p)) s 
+% 
+% On this example, we get a counterexample after 28
+% seconds, having explored the right part of the
+% expression, but the list a little too far:
+% 
+% \begin{verbatim}
+% p: (R(R(R__(T))_(T))(R__(T))(T))
+% s: (List(T)(List(T)(List(T)(List(T)_))))
+% 
+% Counterexample!
+% p: Star (Atom B) :>: Atom B
+% s: Cons B (Cons B Nil)
+% \end{verbatim}
+% 
+% The second  property we looked at 
+% involves iterates a regular expression
+% with |iter| a number of times:
+% 
+% \begin{code}
+% iter :: Nat -> R a -> R a
+% iter Z     _ = Eps
+% iter (S n) r = r :>: iter n r
+% \end{code}
+% 
+% The property is now is trying to find such an expression
+% |p|, a word |s| and two numbers |i| and |j| such that:
+% 
+% > i /= j && not (eps p) && rec (iter i p :&: iter j p) s
+% 
+% On this example we explore this: 
+% 
+% \begin{verbatim}
+% i: (Nat(Nat(Nat_)))
+% j: (Nat(Nat(Nat_)))
+% p: (R(R(R__(T))_(T))(R__(T))(T))
+% s: (List(T)(List(T)(List(T)_)))
+% 
+% Counterexample!
+% i: S (S Z)
+% j: S Z
+% p: Star (Atom A) :>: Atom A
+% s: Cons A (Cons A Nil)
+% \end{verbatim}
+% 
+% Given this:
+% 
+% \begin{code}
+% subtract1 :: Nat -> Nat
+% subtract1 Z      = Z
+% subtract1 (S x)  = x
+% 
+% rep :: R T -> Nat -> Nat -> R T
+% rep p i      (S j)  = (cond (isZero i) :+: p) 
+%                     :>: rep p (subtract1 i) j
+% rep p Z      Z      = Eps
+% rep p (S _)  Z      = Nil 
+% \end{code}
+% 
+% Prove this:
+% 
+% > not (eps p)  && rec (rep p i j :&: rep p i' j') s 
+% >              && not (rec (rep p (i `max` i') (j `min` j')))
+% 
+% This is what we get:
+% 
+% \begin{verbatim}
+% p8: (R(R(R__(T))(R__(T))(T))(R__(T))(T))
+% i0: (Nat(Nat(Nat_)))
+% i': (Nat(Nat(Nat_)))
+% j0: (Nat(Nat(Nat_)))
+% j': (Nat(Nat(Nat_)))
+% s: (List(T)(List(T)(List(T)_)))
+% 
+% == Try solve with 74 waits ==
+% Counterexample!
+% p8: (Atom A :>: Atom A) :+: Atom A
+% i0: S (S Z)
+% i': S Z
+% j0: S (S Z)
+% j': S Z
+% s: Cons A (Cons A Nil)
+% \end{verbatim}
 
-\begin{verbatim}
-i: (Nat(Nat(Nat_)))
-j: (Nat(Nat(Nat_)))
-p: (R(R(R__(T))_(T))(R__(T))(T))
-s: (List(T)(List(T)(List(T)_)))
-
-Counterexample!
-i: S (S Z)
-j: S Z
-p: Star (Atom A) :>: Atom A
-s: Cons A (Cons A Nil)
-\end{verbatim}
-
-\subsection{Ambiguity detection}
-
-Showing stuff, inverse.
-
-\subsection{Integration from Differentiation}
-Deriving expressions, inverse.
+% \subsection{Ambiguity detection}
+% 
+% Showing stuff, inverse.
+% 
+% \subsection{Integration from Differentiation}
+% Deriving expressions, inverse.
 
 \subsection{Synthesising turing machines}
 
@@ -1177,9 +1299,8 @@ LSC timed out.
 \multicolumn{3}{l}{Regular expressions} \\
 \hline
 |p :&: (p :>: p)|        & 27.2s &  0.6s  \\
-|p .&. (p .>. p)|        &  2.0s &  0.4s  \\
 |iter i p :&: iter j p|  &  6.6s & 17.4s  \\
-|iter i p .&. iter j p|  & 12.6s & 18.8s  \\
+|rep p i j :&: rep p i' j'| & 35.7s & 103s \\
 \multicolumn{3}{l}{Show} \\
 \hline
 ambig  & x.xs &  x.xs \\
