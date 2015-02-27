@@ -42,19 +42,19 @@
 \setlength{\pdfpageheight}{\paperheight}
 \setlength{\pdfpagewidth}{\paperwidth}
 
-\conferenceinfo{ICFP '15}{September, 2015, Vancouver, Canada} 
-\copyrightyear{2015} 
-\copyrightdata{978-1-nnnn-nnnn-n/yy/mm} 
+\conferenceinfo{ICFP '15}{September, 2015, Vancouver, Canada}
+\copyrightyear{2015}
+\copyrightdata{978-1-nnnn-nnnn-n/yy/mm}
 \doi{nnnnnnn.nnnnnnn}
 
-% Uncomment one of the following two, if you are not going for the 
+% Uncomment one of the following two, if you are not going for the
 % traditional copyright transfer agreement.
 
-%\exclusivelicense                % ACM gets exclusive license to publish, 
+%\exclusivelicense                % ACM gets exclusive license to publish,
                                   % you retain copyright
 
 %\permissiontopublish             % ACM gets nonexclusive license to publish
-                                  % (paid open-access papers, 
+                                  % (paid open-access papers,
                                   % short abstracts)
 
 \titlebanner{DRAFT}        % These are ignored unless
@@ -70,12 +70,12 @@
 \maketitle
 
 \begin{abstract}
-We present a new symbolic evaluation method for functional programs that generates input to a SAT-solver. The result is a bounded model checking method for functional programs that can find concrete inputs that cause the program to produce certain outputs, or show the inexistence of such inputs under certain bounds. SAT-solvers have long been used for bounded model checking of hardware and also low-level software. This paper presents the first method for SAT-based bounded model checking for high-level programs containing recursive algebraic datatypes and unlimited recursion. Our method works {\em incrementally}, i.e. it increases bounds on inputs until it finds a solution. We also present a novel optimization 
+We present a new symbolic evaluation method for functional programs that generates input to a SAT-solver. The result is a bounded model checking method for functional programs that can find concrete inputs that cause the program to produce certain outputs, or show the inexistence of such inputs under certain bounds. SAT-solvers have long been used for bounded model checking of hardware and also low-level software. This paper presents the first method for SAT-based bounded model checking for high-level programs containing recursive algebraic datatypes and unlimited recursion. Our method works {\em incrementally}, i.e. it increases bounds on inputs until it finds a solution. We also present a novel optimization
 \end{abstract}
 
 \category{CR-number}{subcategory}{third-level}
 
-% general terms are not compulsory anymore, 
+% general terms are not compulsory anymore,
 % you may leave them out
 %\terms
 %bounded model checking, SAT
@@ -99,7 +99,7 @@ QuickCheck, need to write generators, cannot find intricate examples where thing
 
 SmallCheck, only for very small examples, depth bound. FEAT is not depth bound, still size limit.
 
-Lazy narrowing, (e.g. Lazy SmallCheck, Lindblad, Reach), exploit the lazy structure of programs + backtracking. Still not good enough for combinatorial search. Could be adapted to 
+Lazy narrowing, (e.g. Lazy SmallCheck, Lindblad, Reach), exploit the lazy structure of programs + backtracking. Still not good enough for combinatorial search. Could be adapted to
 
 Old text:
 
@@ -445,6 +445,68 @@ usorted _         =  True
 
 \noindent
 Now we can investigate the expansion strategy by asking for |xs|
+such that |usorted xs| and |length xs >= n|, given some bound |n|.
+With |n|, the trace looks like this:
+
+\begin{verbatim}
+xs: _
+xs: (List__)
+xs: (List_(List__))
+xs: (List_(List_(List__)))
+xs: (List_(List_(List_(List__))))
+xs: (List_(List(Nat_)(List_(List__))))
+xs: (List_(List(Nat_)(List(Nat_)(List__))))
+xs: (List(Nat_)(List(Nat_)(List(Nat_)(List__))))
+xs: (List(Nat_)(List(Nat(Nat_))(List(Nat_)(List__))))
+xs: (List(Nat_)(List(Nat(Nat_))(List(Nat(Nat_))(List__))))
+xs= Cons Z (Cons (S Z) (Cons (S (S Thunk_Nat)) Nil))
+\end{verbatim}
+
+All but the last lines describe a partial view of the value.
+Delayed values are represented with a @_@, and other values
+with their type constructor and the arguments. The
+value is first expanded to be sufficiently wide, and
+then the natural number elements are. Note that
+no values except for the needed ones are evaluated.
+We are not always that lucky as we shall see later.
+
+Can also generate reverese and qrev lists, can generate
+sorted lists with |sort xs=xs|.... Later we will look at the more difficult
+|sort xs=sort ys|. Sorting stuff
+
+\subsubsection{Terminate without example}
+Also show examples of (depth-bound and/or size-bound and/or other-bound) things that terminate without example.
+
+If we again ask for |xs|, such that |usorted xs|,
+|length xs >= n|, but add that |all (< n) xs|, i.e.
+the list must be sorted, it must \emph{at least}
+have some length |n| (an upper bound), but also
+every element must be below |n|, the system
+will terminate
+
+
+\subsubsection{Discussion about nub and delete}
+
+\begin{code}
+nub xs = y:y:ys
+\end{code}
+
+Note that it does not help even if the element type is finite.
+
+\subsubsection{Discussion about contracts checking a'la Leon}
+
+\subsection{Merge sort}
+
+\subsection{Inverting type checking}
+
+\begin{code}
+usorted  ::  [Nat] -> Bool
+usorted (x:y:xs)  =  x < y && usorted (y:xs)
+usorted _         =  True
+\end{code}
+
+\noindent
+Now we can investigate the expansion strategy by asking for |xs|
 such that |usorted xs| and |length xs > n|, given some bound |n|.
 With |n|, the trace looks like this:
 
@@ -479,8 +541,8 @@ sorted lists with |sort xs=xs|.... Later we will look at the more difficult
 Sometimes it can be noticed that there is no counterexample regardless how the
 program is expanded.  The simplest property when this happens is perhaps asking
 for an |x| such that |x < Z|. The standard definition of |(<)| returns |False|
-for any |y < Z|, so there is a contradiction in this context. This is also the
-same context that the Thunk in |x| is waiting for, but since this is
+for any |y < Z|, so there is a contradiction in this environment. This is also the
+same environment that the Thunk in |x| is waiting for, but since this is
 unsatisfiable, it will never be expanded.
 
 Let's return to the previous example with asking for an |xs|, such that
@@ -640,15 +702,22 @@ Upon which our tool answers this term, when pretty-printed:
 \end{code}
 
 This takes about 7 seconds, but as can be seen above,
-it contains redexes! Interestingly, we can 
-avoid seeing redexes and reduce the search space by
+it contains redexes. Interestingly, we can 
+avoid getting redexes \emph{and} reduce the search space by
 by adding a recursive predicate 
 |nf :: Expr -> Bool|
 that checks that there is no unreduced
-lambda in the expression. 
+lambda in the expression. Now, we ask
+for the same as above, and that |nf e|.
+With this modification, finding the s combinator,
+in normal form, takes less a fraction of a second. 
 
-And voila, with this modification, finding the s combinator
-takes less a fraction of a second.
+Constraining the data in this way allows 
+cutting away big parts of the search space (only normal 
+forms). The environment condition where the expression is not in normal
+form will become inconsistent due to the predicate,
+and no delayed computations are evaluated from inconsistent
+environments. This is a benefit from incrementally expanding the program.
 
 Both the code for the type checker and the
 normal form predicate contains calls that 
@@ -657,26 +726,26 @@ sort. Without merging these calls, finding the a normal
 form of the s comibator takes about a second,
 and 30 seconds without the normal form predicate.
 
-\begin{code}
-data Expr = App Expr Expr Type | Lam Expr | Var Nat
-
-data Type = Type :-> Type | A | B | C 
-tc  env  (App f x tx)  t           = tc env f (tx :-> t) 
-                                   && tc env x tx
-tc  env  (Lam e)       (tx :-> t)  = tc (tx:env) e t
-tc  env  (Lam e)       _           = False
-tc  env  (Var x)       t           =  case env `index` x of 
-                                        Just tx  -> tx == t 
-                                        Nothing  -> False
-\end{code}
-
-\begin{code}
-nf :: Expr -> Bool
-nf (App (Lam _) _ _) = False
-nf (App f x _)       = nf f && nf x
-nf (Lam e)           = nf e
-nf (Var _)           = True
-\end{code}
+% \begin{code}
+% data Expr = App Expr Expr Type | Lam Expr | Var Nat
+% 
+% data Type = Type :-> Type | A | B | C 
+% tc  env  (App f x tx)  t           = tc env f (tx :-> t) 
+%                                    && tc env x tx
+% tc  env  (Lam e)       (tx :-> t)  = tc (tx:env) e t
+% tc  env  (Lam e)       _           = False
+% tc  env  (Var x)       t           =  case env `index` x of 
+%                                         Just tx  -> tx == t 
+%                                         Nothing  -> False
+% \end{code}
+% 
+% \begin{code}
+% nf :: Expr -> Bool
+% nf (App (Lam _) _ _) = False
+% nf (App f x _)       = nf f && nf x
+% nf (Lam e)           = nf e
+% nf (Var _)           = True
+% \end{code}
 
 \subsection{Regular expressions}
 
@@ -752,7 +821,6 @@ s: Cons A (Cons A Nil)
 
 \subsection{Ambiguity detection}
 
-TODO
 Showing stuff, inverse.
 
 \subsection{Integration from Differentiation}

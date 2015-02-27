@@ -178,11 +178,23 @@ prog1 q = case runtN seven q [B,A,A,A,A,B,X] of
                  _ -> False
 -}
 
+<<<<<<< Updated upstream
 prop q = prog0 q =:= False
 
 prop_prop q = neg (lift (prog0 q))
 
 prop_help x y z v w = prog0 [((Zero,A),x),((Zero,B),y),((one,A),z),((one,B),v),((two,A),w){-  ,((two,B),u) -}] =:= False
+||||||| merged common ancestors
+prop q = prog1 q =:= False
+=======
+prop q = prog0 q =:= False
+>>>>>>> Stashed changes
 
+<<<<<<< Updated upstream
 prop_prop_help x y z v w = neg (lift (prog0 [((Zero,A),x),((Zero,B),y),((one,A),z),((one,B),v),((two,A),w){-  ,((two,B),u) -}]))
+||||||| merged common ancestors
+--prop_help x y z v w = prog0 [((Zero,A),x),((Zero,B),y),((one,A),z),((one,B),v),((two,A),w){-  ,((two,B),u) -}] =:= False
+=======
+prop_help x y z v w = prog0 [((Zero,A),x),((Zero,B),y),((one,A),z),((one,B),v),((two,A),w){-  ,((two,B),u) -}] =:= False
+>>>>>>> Stashed changes
 
