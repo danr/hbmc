@@ -208,7 +208,10 @@ For these reasons, we move from an {\em expression-based} view (using \ifthenels
 
 \section{Generating Constraints}
 
-In this section, we explain how we can translate a program $p$ in a simple functional programming language into a monadic program $p'$ in Haskell, such that when $p'$ is run, it generates constraints in a SAT-solver that correspond to the behavior of $p$.
+%format pSym = "\mathit{p}^\dagger"
+%format ASym = "\mathit{A}^\dagger"
+%format BSym = "\mathit{B}^\dagger"
+In this section, we explain how we can translate a program |p :: A -> B| in a simple functional programming language into a monadic program |pSym :: ASym -> C BSym| in Haskell, such that when |pSym| is run, it generates constraints in a SAT-solver that correspond to the behavior of |p|.
 
 For now, we assume that the datatypes and programs we deal with are first-order. We also assume that all definitions are total, i.e.\ terminating and non-crashing. We will later have a discussion on how these restrictions can be lifted.
 
@@ -479,8 +482,11 @@ We can see that copying runs the same recursive call to |>>>| multiple times in 
 
 \subsection{Translating a program into constraints}
 
-Show the syntax of expressions. Assumption: it all terminates.
+We now have developed enough machinery to explain how we can translate a program in a functional language into a monadic program in Haskell that, when run on symbolic input, produces constraints. For now, we assume that this language is first-order.
 
+We start by presenting the syntax of the language we translate. This language is very restricted syntactically, but it is easy to see that more expressive languages can be translated into this language.
+
+Function definitions |d| and recursion can only happen on top-level. A program is a sequence of definitions |d|.
 %format x1
 %format xn = "\mathit{x}_n"
 %format e1
@@ -492,8 +498,12 @@ Show the syntax of expressions. Assumption: it all terminates.
 \begin{code}
 d ::= f x1 ... xn = e
 \end{code}
-
+Expressions are separated into two categories: {\em simple} expressions and regular expressions. Simple expressions are constructor applications, selector functions, or variables. Regular expressions are let-expressions with a function application, case-expressions, or simple expressions.
 \begin{code}
+s ::=  K s1 ... sn
+    |  sel s
+    |  x
+
 e ::=  let x = f s1 ... sn in e
     |  case s of
          K1 -> e1
@@ -501,16 +511,40 @@ e ::=  let x = f s1 ... sn in e
          Kn -> en
     |  s
 \end{code}
+Function application can only happen inside a let-definition and only with simple expressions as arguments. Case-expressions can only match on constructors, the program has to use explicit selector functions to project out the arguments. 
 
+%format (transr (e)) = "\llbracket" e "\rrbracket\!\!\!\Rightarrow\!\!\!"
+%format (trans (e))  = "\llbracket" e "\rrbracket"
+The translation revolves around the basic translation for expressions, denoted |transr e r|, where |e| is a (simple or regular) expression, and |r| is a variable. The idea is that |transr e r| is a monadic computation that will generate constraints that will put the value of the expression |e| into the variable |r|.
+
+Given the translation for expressions, the translation for function definitions is:
 \begin{code}
-s ::=  K s1 ... sn
-    |  sel s
-    |  x
+trans (f x1 ... xn = e) /// = /// f x1 ... xn = do  y <- new
+                                                    transr e y
+                                                    return y
 \end{code}
+To translate a function definition, we generate code that creates a new symbolic value |y|, translates |e| into |y|, and returns |y|.
 
-Show the basic translation of expressions.
+The translation for simple expressions is simple, because no monadic code needs to be generated; we have pure functions for concrete data constructors and pure functions for selectors.
+\begin{code}
+transr s r /// = /// s >>> r
+\end{code}
+We simply copy the value of the simple expression into |r|.
 
-Show the basic translation of functions (returning their result).
+To translate let-expressions, we use the standard monadic transformation:
+\begin{code}
+transr (let f s1 ... sn in e) r /// = /// do  x <- f s1 ... sn
+                                              transr e r
+\end{code}
+To translate case-expressions, we use |wait| to wait for the result to become defined, and then generate code for all branches.
+%format isK1 = "\mathit{isK}_1"
+%format isKn = "\mathit{isK}_n"
+\begin{code}
+transr (case s of      ///  =  ///  wait s § \c ->
+          K1 -> e1     ///  ¤  ///  ///   do  when (isK1 c)  §  transr e1 r
+          ...          ///  ¤  ///            ...
+          Kn -> en) r  ///  ¤  ///            when (isKn c)  §  transr en r
+\end{code}
 
 \subsection{Selective delays}
 
