@@ -1,12 +1,13 @@
 set terminal pdfcairo
-set key at 22,57
+set key at 22,1
 set key box
 set dummy n
 set pointsize 0.8
 set style data linespoints
 set xlabel "List length"
 set ylabel "Time (s)"
-plot [0:25] [0:60] \
+set logscale y
+plot [0:25] [0.01:300] \
  'minj-normal'     using 1:2 lw 3 title "opt",    \
  'minj-mmerge'     using 1:2 lw 3 title "memo",   \
  'minj-unlabel'    using 1:2 lw 3 title "unopt",  \
