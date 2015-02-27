@@ -33,6 +33,7 @@
 \usepackage{amsmath}
 \usepackage{xcolor}
 \usepackage{graphicx}
+\usepackage{textcomp}
 
 \newcommand{\comment}[1]{\emph{COMMENT: #1}}
 \newcommand{\ifthenelse}{|if|-|then|-|else|}
@@ -914,6 +915,12 @@ simply typed lambda calculus. It answers whether
 a given expression has a given type, in an environment:
 
 > tc :: [Type] -> Expr -> Type -> Bool
+> tc  env  (App f x tx)  t           = tc env f (tx :-> t) && tc env x tx
+> tc  env  (Lam e)       (tx :-> t)  = tc (tx:env) e t
+> tc  env  (Lam e)       _           = False
+> tc  env  (Var x)       t           =  case env `index` x of 
+>                                         Just tx  -> tx == t 
+>                                         Nothing  -> False
 
 By now inverting this function, we can use it 
 both to infer the type of a given expression,
@@ -945,7 +952,9 @@ cutting away big parts of the search space (only normal
 forms). The environment condition where the expression is not in normal
 form will become inconsistent due to the predicate,
 and no delayed computations are evaluated from inconsistent
-environments. This is a benefit from incrementally expanding the program.
+environments. This would not be the case if we up from decided on how
+big our symbolic values were. So here we see a direct benefit from 
+incrementally expanding the program.
 
 Both the code for the type checker and the
 normal form predicate contains calls that 
@@ -976,6 +985,12 @@ and 30 seconds without the normal form predicate.
 % \end{code}
 
 \subsection{Regular expressions}
+
+Brzozowski...
+
+> step  :: R T -> T -> R T
+
+> eps  :: R T -> Bool
 
 %format :+: = ":\!\!+\!\!:"
 %format :&: = ":\!\&\!:"
@@ -1055,15 +1070,112 @@ Showing stuff, inverse.
 Deriving expressions, inverse.
 
 \subsection{Synthesising turing machines}
-Turing machines?
 
-% --- %
+Another example we considered was a simulator
+of turing machines. The tape symbols are
+either empty (|O|), or |A| or |B|:
 
-Also show higher-order functions?
+> data A = O | A | B
+
+The actions are either halting or moving
+right or left and entering a new state represented with a |Nat|:
+
+> data Action = Lft Nat | Rgt Nat | Stp
+
+The machine is then a function from the state (a |Nat|), and
+a the symbol at the tape head |A|, to a symbol to be written
+and a new head:
+
+> type Q' = (Nat,A) -> (A,Action)
+
+but we (currently) don't support functions we represent this 
+tabulated in a list instead:
+
+> type Q      = [((Nat,A),(A,Action))]
+
+(This transformation from lists to tables could be
+done automatically, with the addition of a default value.)
+A configuration of the machine is a state, and a zipper
+of the tape head: the reversed list of the symbols to
+the left, and the current symbol consed on to the symbols to the right:
+
+> type Configuration  = (Nat,[A],[A])
+
+The |step| function advances the machine one step, which 
+either terminates with the final tape, or 
+ends up in a  new configuration.
+
+> step :: Q -> Configuration -> Either [A] Configuration
+
+The |steps| function runs |step| repeatedly
+until the machine terminates.
+
+> steps  :: Q -> Configuration -> [A]
+
+This function may of course not terminate, so
+the translated functions needs to insert a check,
+as described above.
+
+The entire machine can be run from a starting
+tape, by stepping it from the starting state |Zero| with |run|:
+
+> run         :: Q -> [A] -> [A]
+> run q tape  = steps q (Zero,[],tape)
+
+We used or system to find turing machines given an input-output pair.
+
+One example is to find the insert function, which puts an intial |B|
+to the right place in a sorted list with these input-output pairs:
+
+> run q [A]            == [A] && 
+> run q [B,A,A,A,A,B]  == [A,A,A,A,B,B]
+
+Asking our system to find such a |q|, we get this result (pretty-printed, with
+literals ints instead of Nats) in ten seconds:
+ 
+
+\begin{code}
+[  ((Succ Zero,         A),  (B,  Stp)),
+   ((Succ (Succ Zero),  A),  (A,  Rgt (Succ (Succ Zero)))),
+   ((Zero,              B),  (A,  Rgt (Succ (Succ Zero)))),
+   ((Succ (Succ Zero),  B),  (B,  Lft (Succ Zero))),
+   ((Zero,              A),  (A,  Stp)) ]
+\end{code}
+
+This machine contains a loop in state two, which is enters
+upon reading an inital |B| (which is replaced with an |A|).
+It then uses state two to skip by all the |A|s until 
+it comes to a |B|, where it backtracks, and replaces
+the last |A| it found with a |B|. If the tape starts with
+|A| the program terminates immediately.
+
+In the above example we found by experimentation that 
+it was necessary to have no less than four A in the example,
+otherwise it the returned machine would "cheat" and instead
+of creating a loop, just count.
+
+In this example it is crucial to use |check| to
+be able to handle the possibly non-terminating |steps| function.
+In systems like Reach \cite{reach}, it is possile
+to limit the expansion of the program on the number of unrollings
+of recursive functions. Our method with |check| does exactly
+this, but there is no need to decide beforehand how many
+unrollings are needed, it is all done dynamically.
 
 % ------------------------------------------------------------------------------
 
-\section{Experimental evaluations}
+\section{Experimental evaluation}
+
+And again, there is the merge sort times.
+
+Regexp was evaluated against leon and
+lazy small check. leon timed out on all of them
+
+We evaluated the type checker against 
+lazy small check with a timeout of 300s.
+
+Turing machines were evaluated...
+LSC timed out.
 
 \begin{table}[htd]
 \begin{center}
@@ -1076,7 +1188,7 @@ Also show higher-order functions?
 \multicolumn{3}{l}{Sorting} \\
 ...  & x.xs &  x.xs  \\
 ...  & x.xs &  x.xs  \\
-\multicolumn{3}{l}{Inverting type checker} \\
+\multicolumn{3}{l}{Inverting a type checker} \\
 \hline
 |(w)|         & 1.0s &  $>$300s \\
 |(.)|         & 6.7s &  $>$300s \\
