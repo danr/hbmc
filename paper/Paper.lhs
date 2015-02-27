@@ -31,6 +31,7 @@
 % authoryear    To obtain author/year citation style instead of numeric.
 
 \usepackage{amsmath}
+\usepackage{xcolor}
 \usepackage{graphicx}
 
 \newcommand{\comment}[1]{\emph{COMMENT: #1}}
@@ -206,14 +207,9 @@ For these reasons, we move from an {\em expression-based} view (using \ifthenels
 
 % ------------------------------------------------------------------------------
 
-\section{Generating Constraints}
+\section{A DSL for generating constraints}
 
-%format pSym = "\mathit{p}^\dagger"
-%format ASym = "\mathit{A}^\dagger"
-%format BSym = "\mathit{B}^\dagger"
-In this section, we explain how we can translate a program |p :: A -> B| in a simple functional programming language into a monadic program |pSym :: ASym -> C BSym| in Haskell, such that when |pSym| is run, it generates constraints in a SAT-solver that correspond to the behavior of |p|.
-
-For now, we assume that the datatypes and programs we deal with are first-order. We also assume that all definitions are total, i.e.\ terminating and non-crashing. We will later have a discussion on how these restrictions can be lifted.
+In this section, we present a small DSL that we will use later to generate constraints to a SAT-solver. We also show how it can be used to encode algebraic datatypes symbolically.
 
 \subsection{The Constraint monad}
 
@@ -255,7 +251,7 @@ These are logical equivalences, i.e.\ the expressions on the left and right hand
 
 \subsection{Finite choice}
 
-In order to help us define the translation from algebraic datatypes to monadic constraint generating code, we introduce the following abstraction. The type |Fin a| represents a symbolic choice between finitely many values of type |a|.
+In order to help us define the translation from algebraic datatypes to monadic constraint generating code, we introduce the following abstraction. The type |Fin a| represents a symbolic choice between finitely many concrete values of type |a|.
 \begin{code}
 newtype Fin a = Fin [(Prop,a)]
 
@@ -291,7 +287,7 @@ The way |Delay| is implemented is the standard way lazy thunks are implemented i
 data Delay a  =  Done a
               |  Delay (IORef (Either (IO ()) a))
 \end{code}
-Later in this section, we will see how |Delay| is used.
+In the next subsection, we will see how |Delay| is used.
 
 \subsection{Symbolic datatypes}
 
@@ -307,7 +303,7 @@ data Expr a  =  Var a
 The first thing we need to do to create a symbolic version of this datatype
 is to make a new datatype representing the choice of constructors:
 \begin{code}
-data ExprL = Var | Add | Mul | Neg
+data ExprL = Var | Add | Mul | Neg deriving ( Eq )
 \end{code}
 The second thing we do is to merge all constructor arguments into one symbolic constructor:
 %format ExprSym = "\mathit{Expr}^\dagger"
@@ -380,20 +376,21 @@ Now, to express a case expression of the following form on a symbolic datatype:
 %format P2
 %format P3
 %format P4
+%format //- = "\!"
 \begin{code}
 case e of
-  Var x    -> P1[x]
-  Add a b  -> P2[a,b]
-  Mul a b  -> P3[a,b]
-  Neg a    -> P4[a]
+  Var x    -> P1//-[x]
+  Add a b  -> P2//-[a,b]
+  Mul a b  -> P3//-[a,b]
+  Neg a    -> P4//-[a]
 \end{code}
 We write the following:
 \begin{code}
 wait e § \ec ->
-  do  when (isVar ec)  §  P1[sel1 ec]
-      when (isAdd ec)  §  P2[sel2 ec,sel3 ec]
-      when (isMul ec)  §  P3[sel2 ec,sel3 ec]
-      when (isNeg ec)  §  P4[sel2 ec]
+  do  when (isVar ec)  §  P1//-[sel1 ec]
+      when (isAdd ec)  §  P2//-[sel2 ec,sel3 ec]
+      when (isMul ec)  §  P3//-[sel2 ec,sel3 ec]
+      when (isNeg ec)  §  P4//-[sel2 ec]
 \end{code}
 First, we wait for the scrutinee to be defined, then we generate 4 sets of constraints, one for each constructor.
 
@@ -457,6 +454,7 @@ For |Delay a|, we wait until |s| gets defined, and as soon as this happens, we m
 At this stage, it may be interesting to look at an example of a combination of |new| and |>>>|. Consider the following two |C|-expressions:
 %format ¤ = "\phantom"
 %format /// = "\;\;\;"
+%format //  = "\;"
 \begin{code}
 do  y <- new  ///  ===  /// do x >>> z
     x >>> y
@@ -480,9 +478,18 @@ instance Copy a => Copy (ExprC a) where
 \end{code}
 We can see that copying runs the same recursive call to |>>>| multiple times in different branches. However, we should not be calling these branches, because in one general symbolic call to the above function, {\em all} ``branches'' will be executed! This means that the same recursive call will be executed several times, leading to an exponential blow-up. In Section \ref{sec:memo} we will see how to deal with this.
 
-\subsection{Translating a program into constraints}
+% ------------------------------------------------------------------------------
 
-We now have developed enough machinery to explain how we can translate a program in a functional language into a monadic program in Haskell that, when run on symbolic input, produces constraints. For now, we assume that this language is first-order.
+\section{Translating programs into constraints}
+
+%format pSym = "\mathit{p}^\dagger"
+%format ASym = "\mathit{A}^\dagger"
+%format BSym = "\mathit{B}^\dagger"
+In this section, we explain how we can translate a program |p :: A -> B| in a simple functional programming language into a monadic program |pSym :: ASym -> C BSym| in Haskell, such that when |pSym| is run on symbolic input, it generates constraints in a SAT-solver that correspond to the behavior of |p|.
+
+For now, we assume that the datatypes and programs we deal with are first-order. We also assume that all definitions are total, i.e.\ terminating and non-crashing. We will later have a discussion on how these restrictions can be lifted.
+
+\subsection{The language}
 
 We start by presenting the syntax of the language we translate. This language is very restricted syntactically, but it is easy to see that more expressive languages can be translated into this language.
 
@@ -513,6 +520,8 @@ e ::=  let x = f s1 ... sn in e
 \end{code}
 Function application can only happen inside a let-definition and only with simple expressions as arguments. Case-expressions can only match on constructors, the program has to use explicit selector functions to project out the arguments. 
 
+\subsection{Basic translation}
+
 %format (transr (e)) = "\llbracket" e "\rrbracket\!\!\!\Rightarrow\!\!\!"
 %format (trans (e))  = "\llbracket" e "\rrbracket"
 The translation revolves around the basic translation for expressions, denoted |transr e r|, where |e| is a (simple or regular) expression, and |r| is a variable. The idea is that |transr e r| is a monadic computation that will generate constraints that will put the value of the expression |e| into the variable |r|.
@@ -533,24 +542,51 @@ We simply copy the value of the simple expression into |r|.
 
 To translate let-expressions, we use the standard monadic transformation:
 \begin{code}
-transr (let f s1 ... sn in e) r /// = /// do  x <- f s1 ... sn
-                                              transr e r
+transr (let f s1 ... sn in e//) r /// = /// do  x <- f s1 ... sn
+                                                transr e r
 \end{code}
 To translate case-expressions, we use |wait| to wait for the result to become defined, and then generate code for all branches.
 %format isK1 = "\mathit{isK}_1"
 %format isKn = "\mathit{isK}_n"
 \begin{code}
-transr (case s of      ///  =  ///  wait s § \c ->
-          K1 -> e1     ///  ¤  ///  ///   do  when (isK1 c)  §  transr e1 r
-          ...          ///  ¤  ///            ...
-          Kn -> en) r  ///  ¤  ///            when (isKn c)  §  transr en r
+transr (case s of         ///  =  ///  wait s § \cs ->
+          K1 -> e1        ///  ¤  ///  ///   do  when (isK1 cs)  §  transr e1 r
+          ...             ///  ¤  ///            ...
+          Kn -> en //) r  ///  ¤  ///            when (isKn cs)  §  transr en r
 \end{code}
 
-\subsection{Selective delays}
+\subsection{An example}
 
-Not all datatypes need to use |Delay|. If they are finite, they don't. We decided not to do it for enumeration types (e.g. |Bool|).
+Consider the definition of the standard Haskell function |(++)|:
+\begin{code}
+(++) :: [a] -> [a] -> [a]
+[]      ++ ys  = ys
+(x:xs)  ++ ys  = x : (xs ++ ys)
+\end{code}
+Applying our translation to this function and using symbolic lists, yields the following code:
+\begin{code}
+(++?) :: Symbolic a => ListSym a -> ListSym a -> C (ListSym a)
+xs ++? ys = do  zs <- new
+                wait xs § \cxs ->
+                  when (isNil cxs) §
+                    do  ys >>> zs
+                  when (isCons cxs) §
+                    do  vs <- sel2 cxs ++ ys
+                        cons (sel1 cxs) vs >>> zs
+\end{code}
+An example property that we may want to find a counter example to may look like this:
+\begin{code}
+appendCommutative xs ys =
+  do  vs <-  xs ++ ys
+      ws <-  ys ++ xs
+      b  <-  vs == ws
+      insist (neg b)
+\end{code}
+
 
 \subsection{Memoization} \label{sec:memo}
+
+When performing symbolic evaluation, much more so than when running a program on concrete values, it is very common that functions get applied to the same arguments more than once.
 
 Memoization is good, and easy.
 
@@ -572,23 +608,16 @@ Show example.
 
 Add 'check'. Describe in words. Exact implementation is shown in the next section.
 
+\subsection{Other optimizations}
+
+Not all datatypes need to use |Delay|. If they are finite, they don't. We decided not to do it for enumeration types (e.g. |Bool|).
+
+For definitions that contain simple expressions, we can avoid the creation of a fresh symbolic value. Instead we can translate:
+\begin{code}
+trans (f x1 ... xn = s) /// = /// f x1 ... xn = do  return s
+\end{code}
+
 % ------------------------------------------------------------------------------
-
-\section{Incrementality}
-
-depth sucks. this is what we actually do.
-
-\subsection{The type Incr}
-
-show API for Incr (FKA Thunk).
-
-show how it should be used to do datatypes.
-
-one extra function when doing case analysis.
-
-show how equalHere is defined for Incr.
-
-show how new is defined for Incr. Hey, no depth needed anymore!
 
 \subsection{Solving strategies for problems using Incr}
 
