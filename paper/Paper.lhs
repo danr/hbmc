@@ -631,10 +631,11 @@ We perform a few other optimizations in our translation. Two of them are describ
 
 Not all algebraic datatypes need to use |Delay|. In principle, for any finite type we do not need to use |Delay| because we know the (maximum) size of the elements on beforehand. In our translator, we decided to not use |Delay| for enumeration types (e.g.\ |BoolSym|).
 
-For definitions that contain simple expressions, we can avoid the creation of a fresh symbolic value. Instead we can translate:
+For definitions that contain simple expressions, we can translate as follows:
 \begin{code}
 trans (f x1 ... xn = s) /// = /// f x1 ... xn = do  return s
 \end{code}
+This avoids the creation of an unnecessary helper value using |new|.
 
 % ------------------------------------------------------------------------------
 
