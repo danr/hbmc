@@ -288,7 +288,15 @@ The way |Delay| is implemented is the standard way lazy thunks are implemented i
 data Delay a  =  Done a
               |  Delay (IORef (Either (C ()) a))
 \end{code}
-A |Delay| is either an already evaluated value, or a mutable reference filled with either a constraint generator that, when run, will fill the reference with a value, or a value. In the next subsection, we will see how |Delay| is used.
+A |Delay| is either an already evaluated value, or a mutable reference filled with either a constraint generator that, when run, will fill the reference with a value, or a value.
+
+In order to use references in the |C|-monad, we lift the standard |IORef| functions into the |C|-monad:
+\begin{code}
+newRef    :: a -> C (IORef a)
+readRef   :: IORef a -> C a
+writeRef  :: IORef a -> a -> C ()
+\end{code}
+In Section \ref{sec:inputs}, a more detailed implementation of |Delay|s is given. In the next subsection, we will see how |Delay| is used.
 
 \subsection{Symbolic datatypes}
 
@@ -709,7 +717,7 @@ This avoids the creation of an unnecessary helper value using |new|.
 
 In the previous two sections, we have seen how to generate constraints in the |C| monad, and how to translate functional programs into constraint producing programs. However, we have not talked about how to actually generate symbolic inputs to programs, and how to use the SAT-solver to find solutions to these constraints. In order to do this, we have to make part of the code we have shown so far slightly more complicated.
 
-\subsection{Inputs and internal points}
+\subsection{Inputs and internal points} \ref{sec:inputs}
 
 In a symbolic program, there are two kinds of symbolic expressions: inputs and internal points. They are dealt with in two fundamentally different ways. Inputs are expressions that are created outside of the program, and that are controlled by the solver. If the solver determines that a certain input should be made bigger by expanding one of its delays, it can do so, and the program will react to this, by triggering constraint generators that are waiting for these delays to appear. These triggers may in turn define other delays (by using |>>>|), and a cascade of constraint generators will be set in motion. So, inputs are set on the outside, and internal points react to their stimuli.
 
@@ -718,11 +726,17 @@ We would like to make this difference explicit by introducing two functions to c
 data Mode = Input | Internal
 \end{code}
 The most important place where the label should occur is when we create a |Delay|. We make the following changes:
+%format mdo = "\mathbf{mdo}"
 \begin{code}
 data Delay a  =  Done a
               |  Delay Mode (IORef (Either (C ()) a))
 
 delay :: Mode -> C a -> C (Delay a)
+delay m c =
+  mdo  ref <-  newRef § Left §
+                 do  a <- c
+                     writeRef ref (Right a)
+       return (Delay m ref)
 \end{code}
 The function |delay| gets an extra |Mode| argument, which indicates what kind of delay we are creating.
 
@@ -753,35 +767,61 @@ instance Symbolic a => Symbolic (ExprC a) where
                    liftM3  (Expr c) (newMode m)
                            (newMode m) (newMode m)
 \end{code}
-What is now the different between delays that belong to inputs and delays that belong to internal points? Well, if the program decides to do a |wait| on an internal point, then the algorithm that controls the expansion of the input delays does not need to know this. But if the program decides to do a |wait| on an input delay, the  algorithm that controls the expansion needs to know about it, because now this delay is a candidate for expansion later on.
+What is now the different between delays that belong to inputs and delays that belong to internal points? Well, if the program decides to do a |wait| on an internal point, then the algorithm that controls the expansion of the input delays does not need to know this. Internal points are only expanded by the program. But if the program decides to do a |wait| on an input delay, the algorithm that controls the expansion needs to know about it, because now this delay is a candidate for expansion later on.
 
 To implement this, we introduce one more function to the |C| monad:
 \begin{code}
-triggered :: Delay a -> C ()
+enqueue :: Delay a -> C ()
 \end{code}
-We augment |C| to also be a state monad 
+We augment |C| to also be a state monad in a queue of pairs of contexts and delays. The function |enqueue| takes a delay and adds it to this queue together with the current context.
+
+The function |enqueue| is called by the function |wait| when it blocks on an input delay:
+\begin{code}
+wait :: Delay a -> (a -> C ()) -> C ()
+wait (Done x)         k = k x
+wait d@(Delay m ref)  k =
+  do  ecx <- readRef ref
+      case ecx of
+        Left cx  -> do  c <- ask
+                        writeRef ref § Left §
+                          do  cx
+                              Right x <- readRef ref
+                              with c § k x
+                        case m of
+                          Input     -> enqueue d
+                          Internal  -> return ()
+        
+        Right x  -> do  k x
+\end{code}
+When a |C| computation terminates and has generated constraints, we can look at the internal queue and see exactly which parts of the inputs (input delays) are requested by which parts of the program (contexts), and in which order this happened.
+
+\subsection{Solving and expanding}
 
 
-In the previous two sections, we have seen how to generate constraints
 
-queue of contexts that are blocking.
+assumption conflict, pick the first context.
 
-assumption conflict, pick the first context. use minimization.
+\subsection{Soundness and completeness}
+
+
+
+statement and proof of soundness.
+
 
 statement and proof of completeness.
 
-\subsection{Dynamic termination checks}
+\subsection{Dealing with non-termination}
 
 Even if input program terminates, symbolic program may not terminate without dynamic checks.
 
 Show example.
 
-Add 'check'.
+Add 'postpone'.
 
 \begin{code}
-check :: C () -> C ()
-check m =  do  x <- newInput
-               wait x § \ () -> m
+postpone :: C () -> C ()
+postpone m =  do  x <- newInput
+                  wait x § \ () -> m
 \end{code}
 
 % ------------------------------------------------------------------------------
