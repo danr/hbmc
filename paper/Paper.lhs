@@ -619,12 +619,48 @@ Our tool is \emph{opt} (using |merge'|), \emph{memo} (using |merge| and memoisat
 %format :-> = ":\rightarrow"
 %format env = "\rho"
 
+We will here consider a standard type-checker for 
+simply typed lambda calculus. It answers whether 
+a given expression has a given type, in an environment:
+
+> tc :: [Type] -> Expr -> Type -> Bool
+
+By now inverting this function, we can use it 
+both to infer the type of a given expression,
+or even synthesise programs of a given type!
+For instance, we can get the S combinator
+by asking for an |e| such that:
+
+> tc [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C)
+
+Upon which our tool answers this term, when pretty-printed:
+
 \begin{code}
-data Expr = App Expr Expr Ty | Lam Expr | Var Nat
+\x y z -> ((((\v w -> w) z) x) z) (y z)
+\end{code}
 
-data Ty = Ty :-> Ty | A | B | C 
+This takes about 7 seconds, but as can be seen above,
+it contains redexes! Interestingly, we can 
+avoid seeing redexes and reduce the search space by
+by adding a recursive predicate 
+|nf :: Expr -> Bool|
+that checks that there is no unreduced
+lambda in the expression. 
 
-tc :: [Ty] -> Expr -> Ty -> Bool
+And voila, with this modification, finding the s combinator
+takes less a fraction of a second.
+
+Both the code for the type checker and the
+normal form predicate contains calls that 
+can be merged in the fashion as the merge
+sort. Without merging these calls, finding the a normal 
+form of the s comibator takes about a second,
+and 30 seconds without the normal form predicate.
+
+\begin{code}
+data Expr = App Expr Expr Type | Lam Expr | Var Nat
+
+data Type = Type :-> Type | A | B | C 
 tc  env  (App f x tx)  t           = tc env f (tx :-> t) 
                                    && tc env x tx
 tc  env  (Lam e)       (tx :-> t)  = tc (tx:env) e t
@@ -642,15 +678,12 @@ nf (Lam e)           = nf e
 nf (Var _)           = True
 \end{code}
 
-> tc [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C)
-
-> nf e && tc [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C)
-
 \subsection{Regular expressions}
 
 %format :+: = ":\!\!+\!\!:"
 %format :&: = ":\!\&\!:"
 %format :>: = ":>:"
+%format .>. = ".\!>\!\!."
 
 \begin{code}
 step  :: R T -> T -> R T
@@ -741,35 +774,36 @@ Also show higher-order functions?
 
 \textit{
 \begin{tabular}{l r r r }
-\em Problem & \em Our tool & \em Lazy SC & \em Leon \\
+\em Problem & \em Our tool & \em Lazy SC \\
 \hline
 \hline
-\multicolumn{4}{l}{Sorting} \\
-...  & x.xs &  x.xs & x.xs \\
-...  & x.xs &  x.xs & x.xs \\
-\multicolumn{4}{l}{Inverting type checker} \\
+\multicolumn{3}{l}{Sorting} \\
+...  & x.xs &  x.xs  \\
+...  & x.xs &  x.xs  \\
+\multicolumn{3}{l}{Inverting type checker} \\
 \hline
-|(w)|         & 1.0s &  x.xs & x.xs \\
-|(.)|         & 6.7s &  x.xs & x.xs \\
-|s|           & 7.6s &  x.xs & x.xs \\
-|nf|, |w|     & 0.1s &  0.9s & x.xs \\
-|nf|, |(.)|   & 0.3s &  x.xs & x.xs \\
-|nf|, |s|     & 0.8s &  x.xs & x.xs \\
-\multicolumn{4}{l}{Regular expressions} \\
+|(w)|         & 1.0s &  $>$300s \\
+|(.)|         & 6.7s &  $>$300s \\
+|s|           & 7.6s &  $>$300s \\
+|nf|, |w|     & 0.1s &     0.9s \\
+|nf|, |(.)|   & 0.1s &  $>$300s \\
+|nf|, |s|     & 0.1s &  $>$300s \\
+\multicolumn{3}{l}{Regular expressions} \\
 \hline
-|p :&: (p :>: p)|        & 27.2s &  0.6s & x.xs \\
-|p .&. (p .>. p)|        &  2.0s &  0.4s & x.xs \\
-|iter i p :&: iter j p|  &  6.6s & 17.4s & x.xs \\
-|iter i p .&. iter j p|  & 12.6s & 18.8s & x.xs \\
-\multicolumn{4}{l}{Show} \\
+|p :&: (p :>: p)|        & 27.2s &  0.6s  \\
+|p .&. (p .>. p)|        &  2.0s &  0.4s  \\
+|iter i p :&: iter j p|  &  6.6s & 17.4s  \\
+|iter i p .&. iter j p|  & 12.6s & 18.8s  \\
+\multicolumn{3}{l}{Show} \\
 \hline
-ambig  & x.xs &  x.xs & x.xs \\
+ambig  & x.xs &  x.xs \\
 \end{tabular}
 }
 \end{center}
 \caption{Evaluation on the examples}
 \label{eval}
 \end{table}%
+
 
 Compare some examples against Leon.
 

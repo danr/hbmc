@@ -1,16 +1,29 @@
 module Turing where
 
-import Tip.DSL
+import HBMC
+import Test.LazySmallCheck hiding ((==>))
 
 data A = O | A | B
+ deriving (Eq,Ord,Show)
+
+instance Serial A where
+  series = cons0 O \/ cons0 A \/ cons0 B
 
 data Action = Lft Nat | Rgt Nat | Stp
+ deriving (Eq,Ord,Show)
+
+instance Serial Action where
+  series = cons1 Lft \/ cons1 Rgt \/ cons0 Stp
 
 type Q = [((Nat,A),(A,Action))]
 
 type State = (Nat,[A],[A])
 
 data Nat = Zero | Succ Nat
+ deriving (Eq,Ord,Show)
+
+instance Serial Nat where
+  series = cons0 Zero \/ cons1 Succ
 
 step :: Q -> State -> Either [A] State
 step q (s,lft,rgt) = act what lft x' rgt'
@@ -167,5 +180,9 @@ prog1 q = case runtN seven q [B,A,A,A,A,B,X] of
 
 prop q = prog0 q =:= False
 
---prop_help x y z v w = prog0 [((Zero,A),x),((Zero,B),y),((one,A),z),((one,B),v),((two,A),w){-  ,((two,B),u) -}] =:= False
+prop_prop q = neg (lift (prog0 q))
+
+prop_help x y z v w = prog0 [((Zero,A),x),((Zero,B),y),((one,A),z),((one,B),v),((two,A),w){-  ,((two,B),u) -}] =:= False
+
+prop_prop_help x y z v w = neg (lift (prog0 [((Zero,A),x),((Zero,B),y),((one,A),z),((one,B),v),((two,A),w){-  ,((two,B),u) -}]))
 
