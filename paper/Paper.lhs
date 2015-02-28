@@ -797,18 +797,20 @@ When a |C| computation terminates and has generated constraints, we can look at 
 
 \subsection{Solving and expanding}
 
+The main loop we use in our solving algorithm works as follows. We start by creating a SAT-solver, and
+running the main |C|-computation. This will produce a number of constraints in the SAT-solver. It will also produce a queue $Q$ of pairs of contexts and unexpanded input delays.
 
+We then enter our main loop.
 
-assumption conflict, pick the first context.
+The first step in the loop is to find out whether or not there exists an actual solution to the current constraints. The insight we employ here is that a real solution (i.e.\ one that corresponds to an actual run of the program) cannot enter any of the contexts that are currently in the queue. This is because those contexts all have pending input delays: case expressions that have not been triggered yet. In other words, the constraints belonging to those contexts are not finished yet; there may yet be more to come. So, when looking for a real solution, we ask the SAT-solver to find a solution to all constraints generated so far, under the assumption that all of the contexts that appear in the queue $Q$ are false. If we find a solution, we can from the model produced by the SAT-solver read off the actual values of the input that satisfy the constraints.
 
-\subsection{Soundness and completeness}
+If we do not find a solution, it may be because we still had to expand one of the contexts in the queue $Q$. So, we have to pick an element from the queue, for which we are going to expand the corresponding |Delay|. The simplest choice we can make here is just to pick the first element from the queue, expand the delay contained in it, remove all occurrences of that delay in the queue $Q$, and repeat the main loop. If we do this, we get a completely fair expansion, which leads to an algorithm that is both sound and complete. Soundness here means that any found solution actually corresponds to a real run of the program, and completeness means that we are guaranteed to find a solution if there exists one.
 
+But we can do better. The SAT-solver is able to give feedback about our question of finding a solution under the assumption that all contexts in the queue $Q$ are false. When the answer is no, we also get a {\em subset} of the assumptions for which the SAT-solver has discovered that there is no solution (this subset is called the {\em assumption conflict set} \cite{minisat}, or sometimes an {\em unsatisfiable core} \cite{unsat-core}). Typically, the assumption conflict set is much smaller than the original assumption set. An improved expansion strategy picks a context to expand from the assumption conflict set. It turns out that if always we pick the context from the conflict set that is closest to the front of the queue $Q$, then we also get a sound and complete expansion strategy.
 
+Why is this better? There may be lots of contexts that are waiting for an input to be expanded, but the SAT-solver has already seen that there is no reason to expand those contexts, because making those contexts true would violate a precondition for example. The assumption conflict set is a direct way for the solver to tell us: ``If you want to find a solution, you should make one of these propositions true''. We then pick the proposition from that set that leads to the most fair expansion strategy.
 
-statement and proof of soundness.
-
-
-statement and proof of completeness.
+To see why this strategy is complete, consider the case where the full constraint set has a solution, but we are not finding it because we are expanding the wrong delays. In that case, there must after a while exist a finite, non-empty set $S$ of delays in $Q$ that should be expanded in order to reach the desired solution, but that are never chosen when we do expand a delay. 
 
 \subsection{Dealing with non-termination}
 
@@ -1572,11 +1574,6 @@ It is perhaps surprising that this is even possible; coding a search problem ove
 
 %\appendix
 %\section{Appendix Title}
-
-
-\acks
-
-Acknowledgments, if needed.
 
 % We recommend abbrvnat bibliography style.
 
