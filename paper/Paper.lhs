@@ -1580,7 +1580,7 @@ it can be observed which parts of the input is actually
 demanded by the program. The forced parts of the value
 can be refined with concrete values and then repeated.
 This technique is called lazy narrowing, and is
-used in Curry \cite{curry}. The backtracking 
+used in Curry \cite{curry} and the theorem prover Agsy\cite{agsy}. The backtracking 
 techniques to stop exploring an unfruitful path 
 varies between different systems. Reach\cite{reach}, has two
 modes, starting backtracking on reaching a predetermined
