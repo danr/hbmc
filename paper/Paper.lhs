@@ -1423,13 +1423,11 @@ and a new head:
 
 > type Q' = (Nat,A) -> (A,Action)
 
-but we (currently) don't support functions we represent this 
+but we (currently) don't support functions, so we represent this 
 tabulated in a list instead:
 
 > type Q      = [((Nat,A),(A,Action))]
 
-(This transformation from lists to tables could be
-done automatically, with the addition of a default value.)
 A configuration of the machine is a state, and a zipper
 of the tape head: the reversed list of the symbols to
 the left, and the current symbol consed on to the symbols to the right:
@@ -1457,15 +1455,12 @@ tape, by stepping it from the starting state |Zero| with |run|:
 > run         :: Q -> [A] -> [A]
 > run q tape  = steps q (Zero,[],tape)
 
-We used or system to find Turing machines given an input-output pair.
-
-One example is to find the insert function, which puts an initial |B|
-to the right place in a sorted list with these input-output pairs:
+We used our system to find Turing machines given a list of expected inserts the first symbol on the tape into the (sorted) rest of the symbols:
 
 > run q [A]            == [A] && 
 > run q [B,A,A,A,A,B]  == [A,A,A,A,B,B]
 
-Asking our system to find such a |q|, we get this result in about thirty seconds:
+Asking to find such a |q|, we get this result in about thirty seconds:
 
 \begin{code}
 [  ((Succ Zero,         A),  (B,  Stp)),
@@ -1493,7 +1488,7 @@ In systems like Reach \cite{reach}, it is possible
 to limit the expansion of the program on the number of unrollings
 of recursive functions. Our method with |postpone| does exactly
 this, but there is no need to decide beforehand how many
-unrollings are needed, it is all done dynamically.
+unrollings are needed.
 
 
 % ------------------------------------------------------------------------------
