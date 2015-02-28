@@ -131,6 +131,7 @@ This paper contains the following contributions:
 % ------------------------------------------------------------------------------
 
 \section{Main Idea}
+\label{ite}
 
 \comment{Perhaps this section should be merged with the intro.}
 
@@ -211,6 +212,7 @@ For these reasons, we move from an {\em expression-based} view (using \ifthenels
 % ------------------------------------------------------------------------------
 
 \section{A DSL for generating constraints}
+\label{dsl}
 
 In this section, we present a small DSL, the constraint monad, that we will use later for generating constraints to a SAT-solver. We also show how it can be used to encode algebraic datatypes symbolically.
 
@@ -1598,37 +1600,39 @@ on the depth of the values as a DSL in Haskell.
 
 \section{Discussion and Future Work}
 
-We can lift our restriction to only consider
-total programs by introducing an extra constructor
-to each data type which correspons to a crash,
-and then making every case propagate this crash.
-With this technique 
+We can lift our restriction to only consider total programs by introducing an
+extra constructor to each data type which correspons to a crash, and then
+making every case propagate this crash.  By this techinique it can then be
+asked for values yielding crashes instead of returning |False|. 
 
+The restriction of the language is only first-order is easy to lift, and we
+already used a lookup-table encoding in of the Turing machine transition
+functions in Section \ref{turing}.  Systematically, the values of a higher
+order function in our setting would then be a lookup table plus a default
+value, or a closure of a concrete function occuring in the program.
 
+In the Reach\cite{reach} setting, it is possible to annotate a target
+expression. By making appropriate calls to the solver with the context bit
+corresponding to the target, and making sure that the necessary support logic
+is added to the solver, it should be expressible in our system as well. 
 
-Higher-order functions.
+Currently, we rely on the user to manually annotate function calls and
+data constructor arguments to be merged, and explicitly say 
+which function calls to memoize. This burden should be removed
+by appropriate default and automatic heuristics.
 
-Laziness.
+One interesting step is to incorporate integer reasoning from SMT
+solvers. An incremental SMT solver with support for
+conflict clauses or unsatisfiable cores would be needed.
+If primitve integers are used in a recursive position, it
+would be necessary to |postpone| them, or otherwise protect the
+expansion. It would also be interesting to see
+what our gain cold be from using equality and uninterpreted functions. 
 
-Crashing programs (and respecting laziness).
-
-
-Targets a la Reach.
-
-
-Parallelize expansion.
-
-Make choices of which constructor arguments to merge less arbitrary.
-
-Make choices of which function calls to merge automatic.
-
-Make choice of what to memoize automatic.
-
-
-
-Using SMT. Integers (trivial, but how to do recursion over integers that terminates? add check everywhere?). Equality and functions can be used to encode constructor functions, selector functions, function application. This is what Leon does. Gain?
-
-If-then-else vs. new and equalHere.
+We first sketched out a translation based on \ifthenelse{} in Section \ref{ite},
+but abandoned it for using |>>>| to be able to make incremental |new| (in Section \ref{dsl}.
+It is our current belief after working with this for some time that it is 
+not possible to implement incrementality in the \ifthenelse{} setting.
 
 Using BDDs. Incrementality would not work. But otherwise it is not a bad idea. Should use the if-then-else method. The only variables would be the ones created in the input.
 
