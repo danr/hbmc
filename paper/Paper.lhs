@@ -103,7 +103,7 @@ As an example, imagine we have made a large recursive datatype |T| and have just
 \begin{code}
 show :: T -> String
 \end{code}
-We would like to find out whether |show| function is ambiguous, i.e.\ are there different elements in |T| that map to the same string? A property in QuickCheck-style would look something like this:
+We would like to find out whether this |show| function is ambiguous, i.e.\ are there different elements in |T| that map to the same string? A property in QuickCheck-style would look something like this:
 \begin{code}
 prop_Unambiguous :: T -> T -> Property
 prop_Unambiguous x y = x /= y ==> show x /= show y
@@ -117,7 +117,7 @@ Implementing a parser is much harder than a |show| function, which makes this an
 
 The tool we present in this paper can easily find pairs of such elements on the original property |prop_Unambiguous|, even for quite large sets of mutually recursive datatypes.
 
-There already exist dedicated search procedures for inputs that lead to certain outputs. Most notably, there are a number of tools (such as Reach \cite{reach}, Lazy SmallCheck \cite{lazysc}, and Agsy \cite{agsy}) that employ a backtracking technique called {\em lazy narrowing} to search for inputs. These tools are much better than random testing at finding intricate inputs, but they have one big shortcoming: they employ a depth-limitation on the input. In order to use these tools, a maximum search depth has to be specified (or the tool itself can enumerate larger and larger depths). Increasing the maximum depth of a set of terms affects the size of the search space uncontrollably. For example, they time out for instances of |prop_Unambiguous| when the depth gets larger than ~4, because there are just too many cases to check.
+There already exist dedicated search procedures for inputs that lead to certain outputs. Most notably, there are a number of tools (such as Reach \cite{reach}, Lazy SmallCheck \cite{lazysc}, and Agsy \cite{agsy}) that employ a backtracking technique called {\em lazy narrowing} to search for inputs. These tools are much better than random testing at finding intricate inputs, but they have one big shortcoming: they employ a depth-limitation on the input. In order to use these tools, a maximum search depth has to be specified (or the tool itself can enumerate larger and larger depths). Increasing the maximum depth of a set of terms affects the size of the search space exponentially. For example, Lazy SmallCheck time out for instances of |prop_Unambiguous| when the depth gets larger than ~4, because there are just too many cases to check.
 
 To overcome this depth problem, we do not limit the search by depth. Rather, we provide a different way of bounding the input, namely by letting the solver carefully expand the input one (symbolic) constructor at a time, carving out an input shape rather than an maximal input depth. We also hope that the sophisticated search strategies in a SAT-solver are able to beat a backtracking search, as long as the encoding of the search problem in SAT is natural enough for the solver to work with.
 
@@ -125,7 +125,7 @@ This paper contains the following contributions:
 
 \begin{itemize}
 \item We present a monadic DSL for constraint generation that can be used
-to program SAT-solvers. (Section 3)
+to program with a SAT-solver. (Section 3)
 
 \item We show how to express values of arbitrary datatypes symbolically in a SAT-solver. (Section 3)
 
