@@ -97,42 +97,45 @@ Our aim in this paper is to take the first step towards bringing the power of SA
 
 There exist alternatives to using a SAT-solver for these problems. For example, QuickCheck \cite{quickcheck} is a tool for random property-based testing that has been shown to be quite effective at finding bugs in programs. However, to find intricate bugs, often a lot of work has to be spent on test data generators, and a lot of insight is required. A dedicated search procedure could alleviate some of that work. Also, random testing would not work at all for finding solutions to search problems, or inverting a function.
 
+%format ==> = "\Longrightarrow"
+
 As an example, imagine we have made a large recursive datatype |T| and have just written a |show| function for it:
 \begin{code}
 show :: T -> String
 \end{code}
-We would like to find out if this |show| function is ambiguous, i.e.\ are there different elements in |T| that map to the same string? A property in QuickCheck-style would look something like this:
+We would like to find out whether |show| function is ambiguous, i.e.\ are there different elements in |T| that map to the same string? A property in QuickCheck-style would look something like this:
 \begin{code}
-prop_Ambiguous :: T -> T -> Property
-prop_Ambiguous x y = x /= y ==> show x /= show y
+prop_Unambiguous :: T -> T -> Property
+prop_Unambiguous x y = x /= y ==> show x /= show y
 \end{code}
 Even if two such elements |x| and |y| exist, it is very unlikely that we would find them using random testing. Instead, one either has to write a dedicated generator for pairs of elements |(x,y)| that are likely to map to the same string (requiring deep insights about the |show| function and where the bug may be), or implement the inverse of the |show| function, a {\em parser}, to be able to say something like this:
 \begin{code}
-prop_Ambiguous' :: T -> Property
-prop_Ambiguous' x = all (x ==) (parse (show x))
+prop_Unambiguous' :: T -> Property
+prop_Unambiguous' x = all (x ==) (parse (show x))
 \end{code}
 Implementing a parser is much harder than a |show| function, which makes this an even less attractive option.
 
-The tool we present in this paper can easily find pairs of such elements on the original property |prop_Ambiguous|, even for quite large sets of mutually recursive datatypes.
+The tool we present in this paper can easily find pairs of such elements on the original property |prop_Unambiguous|, even for quite large sets of mutually recursive datatypes.
 
-There already exist dedicated search procedures for inputs that lead to certain outputs. Most notably, there are a number of tools (such as Reach \cite{reach}, Lazy SmallCheck \cite{lazysc}, and Agsy \cite{agsy}) that employ a backtracking technique called {\em lazy narrowing} to search for inputs. These tools are much better than random testing at finding intricate inputs, but they have one big shortcoming: they employ a depth-limitation on the input. In order to use these tools, a maximum search depth has to be specified (or the tool itself can enumerate larger and larger depths). Increasing the maximum depth of a set of terms affects the size of the search space uncontrollably. For example, they time out for instances of |prop_Ambiguous| when the depth gets larger than ~4, because there are just too many cases to check.
+There already exist dedicated search procedures for inputs that lead to certain outputs. Most notably, there are a number of tools (such as Reach \cite{reach}, Lazy SmallCheck \cite{lazysc}, and Agsy \cite{agsy}) that employ a backtracking technique called {\em lazy narrowing} to search for inputs. These tools are much better than random testing at finding intricate inputs, but they have one big shortcoming: they employ a depth-limitation on the input. In order to use these tools, a maximum search depth has to be specified (or the tool itself can enumerate larger and larger depths). Increasing the maximum depth of a set of terms affects the size of the search space uncontrollably. For example, they time out for instances of |prop_Unambiguous| when the depth gets larger than ~4, because there are just too many cases to check.
 
 To overcome this depth problem, we do not limit the search by depth. Rather, we provide a different way of bounding the input, namely by letting the solver carefully expand the input one (symbolic) constructor at a time, carving out an input shape rather than an maximal input depth. We also hope that the sophisticated search strategies in a SAT-solver are able to beat a backtracking search, as long as the encoding of the search problem in SAT is natural enough for the solver to work with.
 
 This paper contains the following contributions:
 
 \begin{itemize}
-\item We present a monadic DSL constraint generation that can be used program constraint generators for SAT-solvers. (Section 3)
+\item We present a monadic DSL for constraint generation that can be used
+to program SAT-solvers. (Section 3)
 
 \item We show how to express values of arbitrary datatypes symbolically in a SAT-solver. (Section 3)
 
-\item We show how a program containing recursive functions over datatypes can be symbolically executed, resulting in a SAT-problem. (Section 4)
+\item We show programs containing recursive functions over datatypes can be symbolically executed, resulting in a SAT-problem. (Section 4)
 
 \item We show how we can battle certain kinds of exponential blow-up that naturally happen in symbolic evaluation, by means of memoization and a novel program transformation. (Section 4)
 
 \item We show to perform bounded model checking {\em incrementally} for growing input sizes, by making use of feedback from the SAT-solver. (Section 5)
 \end{itemize}
-We also show a number of different examples, and experimental evaluations on these examples. (Section 6)
+We also show a number of different examples, and experimental evaluations on these examples (Section \ref{examples}).
 
 % ------------------------------------------------------------------------------
 
@@ -149,18 +152,18 @@ The idea behind |var| is that it creates a symbolic boolean value with the given
 What happens when we use \ifthenelse{} with these symbolic booleans to choose between, for example, two given lists? This is unfortunately disallowed in FL, and leads to a run-time error. The Haskell library Duct Logic \cite{duct-logic} provided a similar feature to FL, but used the type system to avoid mixing symbolic booleans with regular Haskell values, by making symbolic booleans |BoolSym| a different type from regular |Bool|.
 
 This paper aims to lift this restriction, and allow for all values in the program to be symbolic.
-The problem that an expression such as
+The problem presented by an expression such as:
 \begin{code}
 if var "a" then [1] else []
 \end{code}
-presents is that at symbolic evaluation time, we cannot decide what constructor to return. One of our main ideas in this paper is to transform algebraic datatypes with several constructors, such as for example:
+is that at symbolic evaluation time, we cannot decide which constructor to return. One of our main ideas in this paper is to transform algebraic datatypes with several constructors, for example:
 \begin{code}
 data List a = Nil | Cons a (List a)
 \end{code}
-into algebraic with one constructor which is the ``superposition state'' of all possible constructors, that contains enough symbolic boolean variables to decide which constructor we actually have, plus a ``superposition'' of all possible arguments. Here is what we could do for lists:
+into a algebraic datatype with only one constructor which is the ``superposition state'' of all possible constructors, that contains enough symbolic boolean variables to decide which constructor we actually have, plus a ``superposition'' of all possible arguments. Here is what we could do for lists:
 %format ListSym = "\mathit{List}^\dagger"
-%format FalseSym = "\mathit{False}^\dagger"
-%format TrueSym = "\mathit{True}^\dagger"
+%format FalseSym = "\mathit{false}^\dagger"
+%format TrueSym = "\mathit{true}^\dagger"
 \begin{code}
 data ListSym a = NilCons BoolSym (Maybe (a, ListSym a))
 
@@ -170,7 +173,7 @@ nil = NilCons FalseSym Nothing
 cons :: a -> ListSym a -> ListSym a
 cons x xs = NilCons TrueSym (Just (x, xs))
 \end{code}
-Here, |Maybe| is the regular Haskell datatype, not the symbolic datatype. A symbolic list is thus always built using the |NilCons| constructor. The first argument (a symbolic bool) indicates which constructor we are using (|False| for |Nil|, |True| for |Cons|), and the second argument contains the arguments to the |Cons| constructor (which are only used in the case when we actually have a |Cons| constructor).
+Here, |Maybe| is the regular Haskell datatype, not the symbolic datatype. A symbolic list is thus always built using the |NilCons| constructor. The first argument (a symbolic bool) indicates which constructor we are using (|FalseSym| for |Nil|, |TrueSym| for |Cons|), and the second argument contains the arguments to the |Cons| constructor (which are only used in the case when we actually have a |Cons| constructor).
 
 An extra datatype invariant has to be respected. For |ListSym| it is that whenever it is possible for the constructor to be |True|, the second argument cannot be |Nothing|.
 
@@ -207,8 +210,6 @@ let NilCons c ma = xs in
   if c then f (fromJust ma) else a
 \end{code}
 In this way, the user can use boolean variables to create a symbolic input to a program, for example representing all lists up to a particular length, containing elements up to a particular size, and run the program. The output will be another symbolic expression, about which we can ask questions. For example, if we want to do property checking, the output will be a symbolic boolean, and we can ask if it can ever be |FalseSym|.
-
-\comment{explain the limitations of static input size / depth, and how we want things to be: a completely free input that is ``expanded'' by the solver, completely automatically}
 
 In the remainder of the paper we will use the main idea described in this section, with a number of changes. Firstly, we are going to use a SAT-solver instead of BDDs. Also, we want to create inputs to the program {\em incrementally}, without deciding up-front how large the inputs should be.
 For these reasons, we move from an {\em expression-based} view (using \ifthenelse{}) to a {\em constraint-based} view.
@@ -850,6 +851,7 @@ Thus, we use |postpone| on any function which is not structurally recursive {\em
 % ------------------------------------------------------------------------------
 
 \section{Examples and Experiments}
+\label{examples}
 
 In this section we aim to describe how our system works in practice by
 looking at some examples.
