@@ -1461,7 +1461,6 @@ We used our system to find Turing machines given a list of expected inserts the 
 > run q [B,A,A,A,A,B]  == [A,A,A,A,B,B]
 
 Asking to find such a |q|, we get this result in about thirty seconds:
-
 \begin{code}
 [  ((Succ Zero,         A),  (B,  Stp)),
    ((Succ (Succ Zero),  A),  (A,  Rgt (Succ (Succ Zero)))),
@@ -1469,7 +1468,6 @@ Asking to find such a |q|, we get this result in about thirty seconds:
    ((Succ (Succ Zero),  B),  (B,  Lft (Succ Zero))),
    ((Zero,              A),  (A,  Stp)) ]
 \end{code}
-
 This machine contains a loop in state two, which is enters
 upon reading an inital |B| (which is replaced with an |A|).
 It then uses state two to skip by all the |A|s until 
@@ -1612,7 +1610,7 @@ We have decided to tackle a hard problem (finding program inputs that lead to ce
 
 We use the conflict set of the SAT-solver to decide how to expand the input incrementally until a suitable input is found. Our experiments have shown that this actually works rather well, very often just the right constructors are chosen. We also apply memoization and function call merging to battle exponential blow-up, and have experimentally shown that both of these have a positive effect, with function call merging being vital for certain problems to even succeed.
 
-Our method works well for cases where the generation of the SAT-problem does not blow up, it outperforms other methods if one gains something from the extra combinatorial search power. The method does not work well when the input expansion chooses the wrong thing to expand, or when the expansion needs too many steps to reach the correct input shape. We have not encountered any problem that turned out to be too hard for the SAT-solver itself; most SAT calls terminate almost immediately, and very few take more than, say, a second.
+Our method works well for cases where the generation of the SAT-problem does not blow up. It can outperform other methods in cases where one gains something from the extra combinatorial search power. The method does not work well when the input expansion chooses the wrong thing to expand, or when the expansion needs too many steps to reach the correct input shape. We have not encountered any problem that turned out to be too hard for the SAT-solver itself; most SAT calls terminate almost immediately (even for large problems), and very few calls take more than, say, a second.
 
 % ------------------------------------------------------------------------------
 
