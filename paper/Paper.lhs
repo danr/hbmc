@@ -115,9 +115,9 @@ Implementing a parser is much harder than a |show| function, which makes this an
 
 The tool we present in this paper can easily find pairs of such elements on the original property |prop_Ambiguous|, even for quite large sets of mutually recursive datatypes.
 
-There already exist dedicated search procedures for inputs that lead to certain outputs. Most notably, there are a number of tools (such as Reach \cite{reach}, Lazy SmallCheck \cite{lazysc}, and Agsy \cite{agsy}) that emply a backtracking technique called {\em lazy narrowing} to search for inputs. These tools are much better than random testing at finding intricate inputs, but they have one big shortcoming: they employ a depth-limitation on the input. In order to use these tools, a maximum search depth has to be specified (or the tool itself can enumerate larger and larger depths). Increasing the maximum depth of a set of terms affects the size of the search space uncontrollably. For example, they time out for instances of |prop_Ambiguous| when the depth gets larger than ~4, because there are just too many cases to check.
+There already exist dedicated search procedures for inputs that lead to certain outputs. Most notably, there are a number of tools (such as Reach \cite{reach}, Lazy SmallCheck \cite{lazysc}, and Agsy \cite{agsy}) that employ a backtracking technique called {\em lazy narrowing} to search for inputs. These tools are much better than random testing at finding intricate inputs, but they have one big shortcoming: they employ a depth-limitation on the input. In order to use these tools, a maximum search depth has to be specified (or the tool itself can enumerate larger and larger depths). Increasing the maximum depth of a set of terms affects the size of the search space uncontrollably. For example, they time out for instances of |prop_Ambiguous| when the depth gets larger than ~4, because there are just too many cases to check.
 
-To overcome this depth problem, we do not limit the search by depth. Rather, ee provide a different way of bounding the input, namely by letting the solver carefully expand the input one (symbolic) constructor at a time, carving out an input shape rather than an maximal input depth. We also hope that the sophisticated search strategies in a SAT-solver are able to beat a backtracking search, as long as the encoding of the search problem in SAT is natural enough for the solver to work with.
+To overcome this depth problem, we do not limit the search by depth. Rather, we provide a different way of bounding the input, namely by letting the solver carefully expand the input one (symbolic) constructor at a time, carving out an input shape rather than an maximal input depth. We also hope that the sophisticated search strategies in a SAT-solver are able to beat a backtracking search, as long as the encoding of the search problem in SAT is natural enough for the solver to work with.
 
 This paper contains the following contributions:
 
@@ -140,7 +140,7 @@ We also show a number of different examples, and experimental evaluations on the
 \section{Symbolic datatypes}
 \label{ite}
 
-The programming language FL, part of the formal verification system Forte \cite{forte} is an ML-like language with one particular distinghuishing feature: symbolic booleans. FL has a primitive function with the following type\footnote{Throughout the paper, we use Haskell notation for our examples, even though the examples may not actually be written in the Haskell language.}:
+The programming language FL, part of the formal verification system Forte \cite{forte} is an ML-like language with one particular distinguishing feature: symbolic booleans. FL has a primitive function with the following type\footnote{Throughout the paper, we use Haskell notation for our examples, even though the examples may not actually be written in the Haskell language.}:
 \begin{code}
 var :: String -> Bool
 \end{code}
