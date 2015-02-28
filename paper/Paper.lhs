@@ -1048,7 +1048,7 @@ one. We also compare our runtimes to Leon\cite{leon} and LazySmallCheck\cite{laz
 % We also applied the |merge| to |merge'| transformation 
 % by hand for them, but this did not improve their runtime. 
 
-\begin{figure}[htp] \centering{
+\begin{figure} \centering{
 \includegraphics[scale=0.60]{inj.pdf}}
 \caption{
 Run time to find |xs|, |ys| such that |xs /= ys|
@@ -1059,8 +1059,6 @@ and with LazySmallCheck\cite{lazysc} and Leon\cite{leon}.
 \label{inj}
 }
 \end{figure}
-
-\subsubsection{Termination of |merge'|}
 
 The original |merge| function is structurally recursive,
 but this property is destroyed when symbolically
@@ -1129,9 +1127,8 @@ sort. Without merging these calls, finding the normal
 form of the S combinator takes about a second,
 and 30 seconds without the normal form predicate.
 
-\begin{table}[htd]
+\begin{table}
 \begin{center}
-
 \textit{
 \begin{tabular}{l r r}
 \em Type & \em Our & \em LazySC \\
@@ -1248,18 +1245,15 @@ no string, but |rep p [A,A]| does hold.
 We list our and LazySmallCheck's run times on
 |prop_repeat| above and on two seemingly simpler 
 properties, namely: 
-
-|prop_conj: not (eps p) && rec (p :&: (p :>: p)) s|
-
-|prop_iter: i /= j && not (eps p) && rec (iter i p :&: iter j p) s|
-
+\begin{code}
+prop_conj:  not (eps p) && rec (p :&: (p :>: p)) s
+prop_iter:  i /= j && not (eps p) && rec (iter i p :&: iter j p) s
+\end{code}
 The last property uses a function |iter :: Nat -> RE -> RE| which
 repeats a regular expression a given number of times. The results are found
 in Table \ref{regexptable}.
-
-\begin{table}[htd]
+\begin{table}[]
 \begin{center}
-
 \textit{
 \begin{tabular}{l r r }
 \em Conjecture & \em Our tool & \em LazySC \\
@@ -1275,11 +1269,9 @@ to regular expression conjectures. The properties
 are defined in Section \ref{regexp}.}
 \label{regexptable}
 \end{table}%
-
 If we look more closely at the implementation of the regular expression library 
 we find that the calls are duplicated across the branches.
 For instance, the |eps| function looks like this:
-
 \begin{code}
 eps Eps          = True
 eps (p  :+:  q)  = eps p || eps q
@@ -1288,7 +1280,6 @@ eps (p  :>:  q)  = eps p && eps q
 eps (Star _)     = True
 eps _            = False
 \end{code}
-
 Here, we could collapse all the calls |eps p| as described
 in the section above, but it is actually enough to just
 memoize them as they are exactly the same. (The same holds for |eps q|).
