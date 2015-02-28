@@ -1427,6 +1427,7 @@ the same pattern as for |eps| and memoisation is enough there as well.
 % Deriving expressions, inverse.
 
 \subsection{Synthesising turing machines}
+\label{turing}
 
 Another example we considered was a simulator
 of turing machines. The tape symbols are
@@ -1550,7 +1551,7 @@ unrollings are needed, it is all done dynamically.
 
 \section{Related Work}
 
-One big source of inspiration for this work is Leon\cite{leon},
+One source of inspiration for this work is Leon\cite{leon},
 which uses an encoding from functional programs to
 uninterpreted functions in a SMT solver. Besides this, they differ
 in that their focus is mainly on proving properties (stated as contracts)
@@ -1597,6 +1598,24 @@ on the depth of the values as a DSL in Haskell.
 
 \section{Discussion and Future Work}
 
+We can lift our restriction to only consider
+total programs by introducing an extra constructor
+to each data type which correspons to a crash,
+and then making every case propagate this crash.
+With this technique 
+
+
+
+Higher-order functions.
+
+Laziness.
+
+Crashing programs (and respecting laziness).
+
+
+Targets a la Reach.
+
+
 Parallelize expansion.
 
 Make choices of which constructor arguments to merge less arbitrary.
@@ -1605,13 +1624,7 @@ Make choices of which function calls to merge automatic.
 
 Make choice of what to memoize automatic.
 
-Higher-order functions.
 
-Laziness.
-
-Crashing programs (and respecting laziness).
-
-Targets a la Reach.
 
 Using SMT. Integers (trivial, but how to do recursion over integers that terminates? add check everywhere?). Equality and functions can be used to encode constructor functions, selector functions, function application. This is what Leon does. Gain?
 
