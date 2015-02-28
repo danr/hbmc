@@ -821,7 +821,7 @@ In our experimental evaluation we show that this expansion strategy very often d
 \subsection{Dealing with non-termination}
 \label{postpone}
 
-So far, we have assumed that all functions terminate. However, it turns out that this restriction is unnecessary; there is a simple trick we can emply to deal with functions that may not terminate: For possibly non-terminating functions, we use a special function |postpone|:
+So far, we have assumed that all functions terminate. However, it turns out that this restriction is unnecessary; there is a simple trick we can employ to deal with functions that may not terminate: For possibly non-terminating functions, we use a special function |postpone|:
 \begin{code}
 postpone :: C () -> C ()
 postpone m =  do  x <- newInput
@@ -1009,7 +1009,7 @@ However, both of these will make the following call:
 > merge [x_2, ..., x_n] [y_2, ..., y_m] 
 
 We can avoid to twice calculate symbolic corresponding to those two merged, by
-memoising the function. The second time the merge of these two lists is
+memoizing the function. The second time the merge of these two lists is
 requested, the saved symbolic list is instead returned.
 
 Another observation is that the calls in |merge| 
@@ -1033,7 +1033,7 @@ Our compiler makes this transformation automatically given that the
 user annotates which calls in the program to collapse.
 
 We experimentally evaluated the performance of these three versions
-(without any optimisations, with memoisation, and with merged calls)
+(without any optimisations, with memoization, and with merged calls)
 by increasing a length bound |n|, and asking to find |xs|, |ys| satisfying:
 
 > xs /= ys && msort xs == msort ys && length xs >= n
@@ -1083,7 +1083,7 @@ is as big as the input |x:xs|. We overcome this
 introduced non-termination by introducing a |postpone|
 as described in Section \ref{postpone}.
 
-\subsection{From type checking to expressions}
+\subsection{Expressions from a type checker}
 
 %format :-> = ":\rightarrow"
 %format env = "\rho"
@@ -1139,8 +1139,8 @@ incrementally expanding the program.
 Both the code for the type checker and the
 normal form predicate contains calls that 
 can be merged in the fashion as the merge
-sort. Without merging these calls, finding the a normal 
-form of the s comibator takes about a second,
+sort. Without merging these calls, finding the normal 
+form of the S combinator takes about a second,
 and 30 seconds without the normal form predicate.
 
 \begin{table}[htd]
@@ -1229,7 +1229,7 @@ to falsify some plausible looking laws. The library has the following api:
 The |step| function does Brzozowski differentiation, |eps|
 answers if the expression contains the empty string, |rec|
 answers if the word is recognised, and |rep p i j| 
-repeats a regexp from |i| to |j| times. 
+repeats a regular expression from |i| to |j| times. 
 If |i > j|, then this regular expression does not recognize any string.
 
 We can now ask our system for variables satisfying:
@@ -1270,7 +1270,7 @@ properties, namely:
 |prop_iter: i /= j && not (eps p) && rec (iter i p :&: iter j p) s|
 
 The last property uses a function |iter :: Nat -> RE -> RE| which
-repeats a regexp a given number of times. The results are found
+repeats a regular expression a given number of times. The results are found
 in Table \ref{regexptable}.
 
 \begin{table}[htd]
@@ -1286,7 +1286,7 @@ in Table \ref{regexptable}.
 \end{tabular}
 }
 \end{center}
-\caption{Run times of finding conterexamples
+\caption{Run times of finding counterexamples
 to regular expression conjectures. The properties
 are defined in Section \ref{regexp}.}
 \label{regexptable}
@@ -1309,7 +1309,7 @@ Here, we could collapse all the calls |eps p| as described
 in the section above, but it is actually enough to just
 memoize them as they are exactly the same. (The same holds for |eps q|).
 The recursive call structure of the |step| function follows
-the same pattern as for |eps| and memoisation is enough there as well.
+the same pattern as for |eps| and memoization is enough there as well.
 
 % \begin{code}
 % step  :: RE Token -> Token -> RE Token
@@ -1428,11 +1428,11 @@ the same pattern as for |eps| and memoisation is enough there as well.
 % \subsection{Integration from Differentiation}
 % Deriving expressions, inverse.
 
-\subsection{Synthesising turing machines}
+\subsection{Synthesising Turing machines}
 \label{turing}
 
 Another example we considered was a simulator
-of turing machines. The tape symbols are
+of Turing machines. The tape symbols are
 either empty (|O|), or |A| or |B|:
 
 > data A = O | A | B
@@ -1443,7 +1443,7 @@ right or left and entering a new state represented with a |Nat|:
 > data Action = Lft Nat | Rgt Nat | Stp
 
 The machine is then a function from the state (a |Nat|), and
-a the symbol at the tape head |A|, to a symbol to be written
+the symbol at the tape head |A|, to a symbol to be written
 and a new head:
 
 > type Q' = (Nat,A) -> (A,Action)
@@ -1482,17 +1482,15 @@ tape, by stepping it from the starting state |Zero| with |run|:
 > run         :: Q -> [A] -> [A]
 > run q tape  = steps q (Zero,[],tape)
 
-We used or system to find turing machines given an input-output pair.
+We used or system to find Turing machines given an input-output pair.
 
-One example is to find the insert function, which puts an intial |B|
+One example is to find the insert function, which puts an initial |B|
 to the right place in a sorted list with these input-output pairs:
 
 > run q [A]            == [A] && 
 > run q [B,A,A,A,A,B]  == [A,A,A,A,B,B]
 
-Asking our system to find such a |q|, we get this result (pretty-printed, with
-literals ints instead of Nats) in ten seconds:
- 
+Asking our system to find such a |q|, we get this result in about thirty seconds:
 
 \begin{code}
 [  ((Succ Zero,         A),  (B,  Stp)),
@@ -1516,7 +1514,7 @@ of creating a loop, just count.
 
 In this example it is crucial to use |postpone| to
 be able to handle the possibly non-terminating |steps| function.
-In systems like Reach \cite{reach}, it is possile
+In systems like Reach \cite{reach}, it is possible
 to limit the expansion of the program on the number of unrollings
 of recursive functions. Our method with |postpone| does exactly
 this, but there is no need to decide beforehand how many
@@ -1586,7 +1584,7 @@ used in Curry \cite{curry} and the theorem prover Agsy\cite{agsy}. The backtrack
 techniques to stop exploring an unfruitful path 
 varies between different systems. Reach\cite{reach}, has two
 modes, starting backtracking on reaching a predetermined
-depth either of the intput values or the function call recursion. 
+depth either of the input values or the function call recursion. 
 LazySmallCheck\cite{lazysc}, combines the ideas from SmallCheck and Reach to do lazy narrowing
 on the depth of the values as a DSL in Haskell.
 
@@ -1601,15 +1599,15 @@ on the depth of the values as a DSL in Haskell.
 \section{Discussion and Future Work}
 
 We can lift our restriction to only consider total programs by introducing an
-extra constructor to each data type which correspons to a crash, and then
-making every case propagate this crash.  By this techinique it can then be
+extra constructor to each data type which corresponds to a crash, and then
+making every case propagate this crash.  By this technique it can then be
 asked for values yielding crashes instead of returning |False|. 
 
 The restriction of the language is only first-order is easy to lift, and we
 already used a lookup-table encoding in of the Turing machine transition
 functions in Section \ref{turing}.  Systematically, the values of a higher
 order function in our setting would then be a lookup table plus a default
-value, or a closure of a concrete function occuring in the program.
+value, or a closure of a concrete function occurring in the program.
 
 In the Reach\cite{reach} setting, it is possible to annotate a target
 expression. By making appropriate calls to the solver with the context bit
@@ -1624,7 +1622,7 @@ by appropriate default and automatic heuristics.
 One interesting step is to incorporate integer reasoning from SMT
 solvers. An incremental SMT solver with support for
 conflict clauses or unsatisfiable cores would be needed.
-If primitve integers are used in a recursive position, it
+If primitive integers are used in a recursive position, it
 would be necessary to |postpone| them, or otherwise protect the
 expansion. It would also be interesting to see
 what our gain cold be from using equality and uninterpreted functions. 
