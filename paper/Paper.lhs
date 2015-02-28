@@ -135,7 +135,6 @@ to program SAT-solvers. (Section 3)
 
 \item We show to perform bounded model checking {\em incrementally} for growing input sizes, by making use of feedback from the SAT-solver. (Section 5)
 \end{itemize}
-
 We also show a number of different examples, and experimental evaluations on these examples (Section \ref{examples}).
 
 % ------------------------------------------------------------------------------
@@ -1607,21 +1606,26 @@ on the depth of the values as a DSL in Haskell.
 
 \section{Discussion and Future Work}
 
-We can lift our restriction to only consider total programs by introducing an
-extra constructor to each data type which corresponds to a crash, and then
-making every case propagate this crash.  By this technique it can then be
-asked for values yielding crashes instead of returning |False|. 
+In the beginning of the paper, we made three assumptions about the language we are dealing with: (1) programs terminate, (2) programs don't crash, and (3) programs are first-order. We managed to lift restriction (1) by means of using |postpone|, as explained in Section \ref{sec:postpone}. For possibly non-terminating programs, the semantics of our language is lazy, and our counter examples are sound w.r.t. partial correctness.
 
-The restriction of the language is only first-order is easy to lift, and we
-already used a lookup-table encoding in of the Turing machine transition
-functions in Section \ref{turing}.  Systematically, the values of a higher
-order function in our setting would then be a lookup table plus a default
+Restriction (2) can be lifted also, but this is not shown in the paper. We can introduce an
+extra constructor to each data type that corresponds to a program crash. Every case should
+propagate program crashes. If we employ this technique, it will be possible to ask
+for values yielding crashes instead of returning |True| or |False|. 
+
+Restriction (3) can also be lifted. Already we can translate higher-order functions, by simply calling argument functions when they are applied. We can also synthesize functions if we represent them as a look-up table. The Turing machine example from the previous section shows the feasibility of this approach.
+Systematically, the values of a higher
+order function in our setting would be a datatype that is either a lookup table plus a default
 value, or a closure of a concrete function occurring in the program.
 
+We first sketched out a translation based on \ifthenelse{} in Section \ref{ite},
+but abandoned it for using |>>>| to be able to make incremental |new| (in Section \ref{dsl}.
+It is our current belief after working with this for some time that it is 
+not possible to implement incrementality in the \ifthenelse{} setting.
+
 In the Reach\cite{reach} setting, it is possible to annotate a target
-expression. By making appropriate calls to the solver with the context bit
-corresponding to the target, and making sure that the necessary support logic
-is added to the solver, it should be expressible in our system as well. 
+expression. We think this is a very convenient way of specifying all kinds of properties, and
+want to incorporate this feature in our tool as well. 
 
 Currently, we rely on the user to manually annotate function calls and
 data constructor arguments to be merged, and explicitly say 
@@ -1629,19 +1633,12 @@ which function calls to memoize. This burden should be removed
 by appropriate default and automatic heuristics.
 
 One interesting step is to incorporate integer reasoning from SMT
-solvers. An incremental SMT solver with support for
-conflict clauses or unsatisfiable cores would be needed.
-If primitive integers are used in a recursive position, it
-would be necessary to |postpone| them, or otherwise protect the
-expansion. It would also be interesting to see
-what our gain cold be from using equality and uninterpreted functions. 
-
-We first sketched out a translation based on \ifthenelse{} in Section \ref{ite},
-but abandoned it for using |>>>| to be able to make incremental |new| (in Section \ref{dsl}.
-It is our current belief after working with this for some time that it is 
-not possible to implement incrementality in the \ifthenelse{} setting.
-
-Using BDDs. Incrementality would not work. But otherwise it is not a bad idea. Should use the if-then-else method. The only variables would be the ones created in the input.
+solvers. We have already done this in one of our prototype implementations.
+However, it is unclear what should happen when performing recursion over such integers.
+Any function doing this, even if it is structurally recursive, would need to be guarded
+by an occurrence of |postpone|, otherwise the constraint generation may not terminate.
+It would also be interesting to see what our gain could be from other theories, in particular those for
+equality and uninterpreted functions. 
 
 % ------------------------------------------------------------------------------
 
