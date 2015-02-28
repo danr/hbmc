@@ -132,8 +132,7 @@ This paper contains the following contributions:
 
 \item We show to perform bounded model checking {\em incrementally} for growing input sizes, by making use of feedback from the SAT-solver. (Section 5)
 \end{itemize}
-
-We also show a number of different examples, and experimental evaluations on these examples.
+We also show a number of different examples, and experimental evaluations on these examples. (Section 6)
 
 % ------------------------------------------------------------------------------
 
