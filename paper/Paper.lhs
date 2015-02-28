@@ -142,6 +142,8 @@ We also show a number of different examples, and experimental evaluations on the
 \section{Symbolic datatypes}
 \label{ite}
 
+This section gives a some background and motivation to the techniques we use later in the paper.
+
 The programming language FL, part of the formal verification system Forte \cite{forte} is an ML-like language with one particular distinguishing feature: symbolic booleans. FL has a primitive function with the following type\footnote{Throughout the paper, we use Haskell notation for our examples, even though the examples may not actually be written in the Haskell language.}:
 \begin{code}
 var :: String -> Bool
