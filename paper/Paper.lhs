@@ -861,19 +861,16 @@ looking at some examples.
 
 Assume that we are given a predicate about unique and sorted lists,
 that all elements are pairwise larger than the next:
-
 \begin{code}
 usorted  ::  [Nat] -> Bool
 usorted (x:y:xs)  =  x < y && usorted (y:xs)
 usorted _         =  True
 \end{code}
-
 \noindent
-Now we can investigate the expansion strategy by asking for |xs|
-such that |usorted xs| and |length xs >= n|, given some bound |n|.
+Now we can investigate the expansion strategy based on the assumption conflict set, by asking for |xs|
+such that |usorted xs| and |length xs > n|, given some bound |n|.
 Our tool can output a trace showing how the incremental values
-has been expanded so far.  With |n=2|, the trace looks like this:
-
+have been expanded so far.  With |n=2|, the trace looks like this:
 \begin{verbatim}
 xs: _
 xs: Lst__
@@ -887,13 +884,12 @@ xs: Lst(Nat_)(Lst(Nat(Nat_))(Lst(Nat_)(Lst__)))
 xs: Lst(Nat_)(Lst(Nat(Nat_))(Lst(Nat(Nat_))(Lst__)))
 xs= [Z,S Z,S (S Delayed_Nat)]
 \end{verbatim}
-
 All but the last lines describe a partial view of the value.
 Delayed values are represented with a @_@, and other values
 with their type constructor and the arguments. The
 value @xs@ is first expanded to contain sufficiently many
-elements, namely two, and
-then the natural numbers starts to be expanded. Note that
+elements, namely three, and
+then the natural numbers start to be expanded. Note that
 in this case only the necessary values are evaluated.
 This can in general not be guaranteed.
 
@@ -906,7 +902,7 @@ a second, and the list |[0..24]| is indeed obtained.
 % sorted lists with |sort xs=xs|.... Later we will look at the more difficult
 % |sort xs=sort ys|. Sorting stuff
 
-\subsubsection{Terminate without counterexample}
+\subsubsection{Terminating without counterexample}
 
 Sometimes it can be noticed that there is no counterexample regardless how the
 program is expanded.  The simplest property when this happens is perhaps asking
@@ -917,9 +913,9 @@ unsatisfiable, it will never be expanded.
 
 Let's return to the previous example with asking for an |xs|, such that
 |usorted xs| and |length xs > n|, but with  the new constraint that |all (< n)
-xs|.  So the list must be sorted, but the upper bounds on the data is only
-local: namely that each element should be below |n|. The other constraint is a
-lower bound on the data: that it should at least have length |n|.
+xs|.  So the list must be sorted, but the upper bounds on the data are only
+local: namely that each element should be below |n|. We do not give an upper bound on the length of the list.
+The other constraint is a lower bound on the list: that it should at least have length |n|.
 
 When executing this, first the |length| constraint forces the program to expand
 to make the list at least that long.  Then the |unsorted| predicate will make
@@ -928,15 +924,14 @@ element to be at least |Z|, the one after that at least |S Z| and so un until
 the |n|th element. But then we will eventually enter the situation outlined
 above and the |n|th element cannot expand any more, and the system terminates
 cleanly with saying:
-
 \begin{verbatim}
 Contradiction!
 No value found.
 \end{verbatim}
-
 \noindent
-and thus efficiently proving the property (for a specific choice of |n|, not for all |n|.)
-So our system can be used with bounds written as boolean predicates, for instance depth.
+and thus efficiently proving the property (for a specific choice of |n|, not for all |n|.) This is perhaps surprising, because no explicit upper bound on the length of the list was given. 
+
+We can use boolean predicates in general to give all kinds of bounds on inputs, for instance depth. If the predicates bound the input sufficiently much, the tool is guaranteed to terminate.
 
 % \subsubsection{Limitations of termination discovery}
 % 
@@ -988,11 +983,10 @@ So our system can be used with bounds written as boolean predicates, for instanc
 % at the even and the odd positions, respectively. 
 
 
-This example about |merge| aims to highlight how important
+This example about the function |merge| from merge sort aims to highlight how important
 merging of function calls can be. We use
-this standard definition of |merge| that merges two lists,
-returning a sorted list of the inputs are:
-
+the following standard definition of |merge| that merges two lists,
+returning a sorted list of the inputs:
 \begin{code}
 merge :: [Nat] -> [Nat] -> [Nat]
 merge []      ys      = ys
@@ -1000,9 +994,8 @@ merge xs      []      = xs
 merge (x:xs)  (y:ys)  | x <= y     = x:merge xs (y:ys)
                       | otherwise  = y:merge (x:xs) ys
 \end{code}
-
 Evaluating merge on symbolic lists is expensive since |merge| 
-does two recursive calls, leading to an exponential behaviour. 
+performs two recursive calls, leading to an exponential behaviour. 
 One first observation
 of the situation reveals that evaluating this expression:
 
@@ -1011,38 +1004,30 @@ of the situation reveals that evaluating this expression:
 makes these two calls:
 
 > merge [x_1, x_2, ..., x_n]  [y_2, ..., y_m] 
-> merge [x_2, , ..., x_n]     [y_1, y_2, ..., y_m] 
+> merge [x_2, ..., x_n]       [y_1, y_2, ..., y_m] 
 
 However, both of these will make the following call:
 
 > merge [x_2, ..., x_n] [y_2, ..., y_m] 
 
-We can avoid to twice calculate symbolic corresponding to those two merged, by
-memoizing the function. The second time the merge of these two lists is
-requested, the saved symbolic list is instead returned.
+We can avoid to twice calculate this, by
+memoizing the function |merge|. This leads to quadratic behavior of the symbolic evaluator.
 
-Another observation is that the calls in |merge| 
-can be symbolically merged to make |merge'|:
-
+Another observation is that the two recursive calls in |merge| 
+can be merged into one:
 \begin{code}
 merge' :: [Nat] -> [Nat] -> [Nat]
 merge' []      ys      = ys
 merge' xs      []      = xs
-merge' (x:xs)  (y:ys)  = hd : merge' l r
-  where (hd,l,r)  | x <= y     = (x, xs, y:ys)
-                  | otherwise  = (y, x:xs, ys)
+merge' (x:xs)  (y:ys)  | x <= y     = x:(merge' xs (y:ys))@1
+                       | otherwise  = y:(merge' (x:xs) ys)@1
 \end{code}
-
-When evaluating the program strict, these versions of merge make no difference,
-but when evaluating it symbolically, the |merge'| version will make a
-\emph{linear} number of calls instead of \emph{exponential} in the length of
-the lists.
-
-Our compiler makes this transformation automatically given that the
-user annotates which calls in the program to collapse.
+After merging those two function calls, the function |merge'| will make a
+\emph{linear} number of calls instead of \emph{quadratic} for the memoized version, and
+\emph{exponential} for the unmemoized version.
 
 We experimentally evaluated the performance of these three versions
-(without any optimisations, with memoization, and with merged calls)
+(without any optimizations, with memoization, and with merged calls)
 by increasing a length bound |n|, and asking to find |xs|, |ys| satisfying:
 
 > xs /= ys && msort xs == msort ys && length xs >= n
@@ -1050,17 +1035,14 @@ by increasing a length bound |n|, and asking to find |xs|, |ys| satisfying:
 In words: two different lists that are permutations of each other,
 via a |msort| function that calls the different versions of |merge|.
 
-The results are in Figure \ref{inj}, and although we can conjecture
-that all versions are exponential from it, the merged function is
+The results are in Figure \ref{inj}. The merged function is
 significantly better: allowing to go up to lists over size 20 within
 reasonable time instead of size 10. We hypothesise that this is 
-due to the fact that we can move the exponential behaviour to the
+due to the fact that we can move the exponential behavior to the
 SAT solver rather than in the size of the SAT problem.
 
 The memoized version performs slightly better than the unmemoized
-one. The SAT problem is here quadratic in size rather than exponential.
-
-We also compare our runtimes to Leon\cite{leon} and LazySmallCheck\cite{lazysc}.
+one. We also compare our runtimes to Leon\cite{leon} and LazySmallCheck\cite{lazysc}.
 
 % The runtime is considerably better for the |merge'| version, and the memoised
 % version of |merge| is considerably better than the unmemoised version.
@@ -1109,8 +1091,8 @@ a given expression has a given type, in an environment:
 >                                         Just tx  -> tx == t 
 >                                         Nothing  -> False
 
-By now inverting this function, we can use it 
-both to infer the type of a given expression,
+By inverting this function, we can use it 
+to infer the type of a given expression,
 or even synthesise programs of a given type!
 For instance, we can get the S combinator
 by asking for an |e| such that:
@@ -1118,11 +1100,9 @@ by asking for an |e| such that:
 > tc [] e ((A :-> B :-> C) :-> (A :-> B) :-> A :-> C)
 
 Upon which our tool answers this term, when pretty-printed:
-
 \begin{code}
 \x y z -> ((((\v w -> w) z) x) z) (y z)
 \end{code}
-
 This takes about 7 seconds, but as can be seen above,
 it contains redexes. Interestingly, we can 
 avoid getting redexes \emph{and} reduce the search space by
@@ -1134,7 +1114,7 @@ for the same as above, and that |nf e|.
 With this modification, finding the s combinator,
 in normal form, takes less a fraction of a second. 
 Comparison with and without normal form and
-with LazySmallCheck can be found in Table \ref{typetable}.
+with LazySmallCheck can be found in Table \ref{typetable}\footnote{We also ran Leon on this example but it timed out.}.
 
 Constraining the data in this way allows 
 cutting away big parts of the search space (only normal 
@@ -1212,7 +1192,7 @@ is denoted with -.
 %format (minn (i) (j)) = i "\cup" j
 %format Mempset = "\emptyset"
 
-We used an regular expression library
+We used a regular expression library
 to falsify some plausible looking laws. The library has the following api:
 
 % We will call the main one |prop_repeat|:
@@ -1238,8 +1218,7 @@ to falsify some plausible looking laws. The library has the following api:
 The |step| function does Brzozowski differentiation, |eps|
 answers if the expression contains the empty string, |rec|
 answers if the word is recognised, and |rep p i j| 
-repeats a regular expression from |i| to |j| times. 
-If |i > j|, then this regular expression does not recognize any string.
+repeats a regular expression sequentially from |i| to |j| times.
 
 We can now ask our system for variables satisfying:
 
@@ -1257,7 +1236,6 @@ whereupon we get the following counterexample in about 30 seconds:
 % s:  (List(T)(List(T)(List(T)_)))
 
 \begin{verbatim}
-Counterexample!
 p:  (Atom A :>: Atom A) :+: Atom A
 i:  S (S Z)
 i': S Z
