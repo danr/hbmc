@@ -63,7 +63,7 @@
 \titlebanner{DRAFT}        % These are ignored unless
 \preprintfooter{}   % 'preprint' option specified.
 
-\title{SAT-based Bounded Model Checking\\of Functional Programs}
+\title{SAT-based Bounded Model Checking\\for Functional Programs}
 \subtitle{}
 
 \authorinfo{Koen Claessen \and Dan Ros{\'e}n}
@@ -304,7 +304,7 @@ newRef    :: a -> C (IORef a)
 readRef   :: IORef a -> C a
 writeRef  :: IORef a -> a -> C ()
 \end{code}
-In Section \ref{sec:inputs}, a more detailed implementation of |Delay|s is given. In the next subsection, we will see how |Delay| is used.
+In Section \ref{sec:input}, a more detailed implementation of |Delay|s is given. In the next subsection, we will see how |Delay| is used.
 
 \subsection{Symbolic datatypes}
 
@@ -725,7 +725,7 @@ This avoids the creation of an unnecessary helper value using |new|.
 
 In the previous two sections, we have seen how to generate constraints in the |C| monad, and how to translate functional programs into constraint producing programs. However, we have not talked about how to actually generate symbolic inputs to programs, and how to use the SAT-solver to find solutions to these constraints. In order to do this, we have to make part of the code we have shown so far slightly more complicated.
 
-\subsection{Inputs and internal points} \ref{sec:inputs}
+\subsection{Inputs and internal points} \label{sec:input}
 
 In a symbolic program, there are two kinds of symbolic expressions: inputs and internal points. They are dealt with in two fundamentally different ways. Inputs are expressions that are created outside of the program, and that are controlled by the solver. If the solver determines that a certain input should be made bigger by expanding one of its delays, it can do so, and the program will react to this, by triggering constraint generators that are waiting for these delays to appear. These triggers may in turn define other delays (by using |>>>|), and a cascade of constraint generators will be set in motion. So, inputs are set on the outside, and internal points react to their stimuli.
 
@@ -1641,6 +1641,10 @@ equality and uninterpreted functions.
 % ------------------------------------------------------------------------------
 
 \section{Conclusions}
+
+We have decided to tackle a hard problem (finding program inputs that lead to certain program outputs) in a new setting (functional programs with algebraic datatypes), in completely new way (using a SAT-solver). The first remark we can make is that it is surprising that it can be done at all; that we can generate constraints about general high-level programs, in terms of a logic for a finite number of binary choices, in a sound and complete way.
+
+Our method 
 
 This is a hard problem.
 
