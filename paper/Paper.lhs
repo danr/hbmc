@@ -586,7 +586,7 @@ transr (case s of         ///  =  ///  wait s § \cs ->
           Kn -> en //) r  ///  ¤  ///            when (isKn cs)  §  transr en r
 \end{code}
 
-\subsection{An translated example}
+\subsection{A translated example}
 
 Applying our translation to this function and using symbolic lists, yields the following code:
 %format ++? = ++"\!^\dagger"
@@ -1645,17 +1645,9 @@ equality and uninterpreted functions.
 
 We have decided to tackle a hard problem (finding program inputs that lead to certain program outputs) in a new setting (functional programs with algebraic datatypes), in completely new way (using a SAT-solver). The first remark we can make is that it is surprising that it can be done at all; that we can generate constraints about general high-level programs, in terms of a logic for a finite number of binary choices, in a sound and complete way.
 
-Our method 
+We use the conflict set of the SAT-solver to decide how to expand the input incrementally until a suitable input is found. Our experiments have shown that this actually works rather well, very often just the right constructors are chosen. We also apply memoization and function call merging to battle exponential blow-up, and have experimentally shown that both of these have a positive effect, with function call merging being vital for certain problems to even succeed.
 
-This is a hard problem.
-
-We have found a niche, works well (and better than others) for cases where the SAT problem is not too big, and one gains something from combinatorial search power.
-
-Still make some manual choices: what to memo, what to label.
-
-Our method does not work well when: (1) Expansion does the wrong thing (in which case you can do this by hand), (2) Expansion is too careful, too many small steps, (3) the SAT-problem becomes too big (all intermediate datastructures are remembered), or (4) the SAT-problem is too hard. 
-
-It is perhaps surprising that this is even possible; coding a search problem over a program containing recursive functions over recursive datastructures in terms of a SAT-problem, which is inherently finite.
+Our method works well for cases where the generation of the SAT-problem does not blow up, it outperforms other methods if one gains something from the extra combinatorial search power. The method does not work well when the input expansion chooses the wrong thing to expand, or when the expansion needs too many steps to reach the correct input shape. We have not encountered any problem that turned out to be too hard for the SAT-solver itself; most SAT calls terminate almost immediately, and very few take more than, say, a second.
 
 % ------------------------------------------------------------------------------
 
