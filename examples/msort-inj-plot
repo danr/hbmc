@@ -8,7 +8,7 @@ set xlabel "List length"
 set ylabel "Time (s)"
 set logscale y
 plot [0:25] [0.01:300] \
- 'minj-normal'     using 1:2 lw 3 title "opt",    \
+ 'minj-normal'     using 1:2 lw 3 title "merged",    \
  'minj-mmerge'     using 1:2 lw 3 title "memo",   \
  'minj-unlabel'    using 1:2 lw 3 title "unopt",  \
  'msort-inj-table' using 1:5 lw 3 title "lazysc", \

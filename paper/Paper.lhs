@@ -720,12 +720,13 @@ Show example.
 Add 'check'. Describe in words. Exact implementation is shown in the next section.
 
 \subsection{Dealing with check}
+\label{postpone}
 
 Just add to the queue!
 
 % ------------------------------------------------------------------------------
 
-\section{Examples}
+\section{Examples and Experiments}
 
 In this section we aim to describe how our system works in practice by
 looking at some examples.
@@ -866,42 +867,62 @@ No value found.
 and thus efficiently proving the property (for a specific choice of |n|, not for all |n|.)
 So our system can be used with bounds written as boolean predicates, for instance depth.
 
-\subsubsection{Limitations of termination discovery}
+% \subsubsection{Limitations of termination discovery}
+% 
+% Our system is not an inductive prover and will not terminate on
+% 
+% \begin{code}
+% nub xs = y:y:ys
+% \end{code}
+% 
+% \noindent
+% (Note that it does not help even if the element type is finite.)
+% 
+% nor on:
+% 
+% \begin{code}
+% usorted (rev xs) && all (< n) xs && length xs > n
+% \end{code}
+% 
+% \noindent
+% it keeps expanding the tail of the list, hoping for something....
+% 
+% \subsubsection{Discussion about contracts checking a'la Leon}
+% 
+% ....
 
-Our system is not an inductive prover and will not terminate on
+\subsection{Symbolically merging merge}
+\label{merge}
+
+%format x_1
+%format x_2
+%format x_3
+%format x_n
+%format y_1
+%format y_2
+%format y_3
+%format y_m
+
+% The section discusses some optimisations that can be done
+% to functions with more that one recursive call.
+% The topic is this implementation of merge sort:
+%
+% \begin{code}
+% msort      :: [Nat] -> [Nat]
+% msort []   = []
+% msort [x]  = [x]
+% msort xs   = merge (msort (evens xs)) (msort (odds xs))
+% 
+% Here, |evens, odds :: [Nat] -> [Nat]| picks ut the elements
+% at the even and the odd positions, respectively. 
+
+
+This example about |merge| aims to highlight how important
+symbolic merging of function calls can be. We use
+this standard definition of |merge| that merges two lists,
+returning a sorted list of the inputs are:
 
 \begin{code}
-nub xs = y:y:ys
-\end{code}
-
-\noindent
-(Note that it does not help even if the element type is finite.)
-
-nor on:
-
-\begin{code}
-usorted (rev xs) && all (< n) xs && length xs > n
-\end{code}
-
-\noindent
-it keeps expanding the tail of the list, hoping for something....
-
-\subsubsection{Discussion about contracts checking a'la Leon}
-
-....
-
-\subsection{Merge sort}
-
-The section discusses some optimisations that can be done
-to functions with more that one recursive call.
-The topic is this implementation of merge sort:
-
-\begin{code}
-msort      :: [Nat] -> [Nat]
-msort []   = []
-msort [x]  = [x]
-msort xs   = merge (msort (evens xs)) (msort (odds xs))
-
 merge :: [Nat] -> [Nat] -> [Nat]
 merge []      ys      = ys
 merge xs      []      = xs
@@ -909,27 +930,28 @@ merge (x:xs)  (y:ys)  | x <= y     = x:merge xs (y:ys)
                       | otherwise  = y:merge (x:xs) ys
 \end{code}
 
-Here, |evens, odds :: [Nat] -> [Nat]| picks ut the elements
-at the even and the odd positions, respectively. 
+Evaluating merge on symbolic lists is expensive since |merge| 
+does two recursive calls, leading to an exponential behaviour. 
+One first observation
+of the situation reveals that evaluating this expression:
 
-%format x_1
-%format x_2
-%format x_3
-%format y_1
-%format y_2
-%format y_3
+> merge [x_1, x_2, ..., x_n] [y_1, y_2, ..., y_m] 
 
-Symbolically evaluating merge is expensive since |merge| does two recursive
-calls. One observation is that evaluating |merge| from the tuple of arguments
-|([x_1, x_2, ...],[y_1, y_2, ...])| will make two calls to the pairs
-|([x_1, x_2, ...],[y_2, ...])| and
-|([x_2, , ...],[y_1, y_2, ...])|. However, both of these will make the call
-to the same symbolic lists |([x_2, ...],[y_2, ...])|. We can
-avoid to twice calculate symbolic corresponding to those two merged,
-by memoising the function. The second time the merge of these two lists
-is requested, the saved symbolic list is instead returned.
+makes these two calls:
 
-Another observation is that the calls in |merge| can be \emph{merged} to make |merge'|:
+> merge [x_1, x_2, ..., x_n]  [y_2, ..., y_m] 
+> merge [x_2, , ..., x_n]     [y_1, y_2, ..., y_m] 
+
+However, both of these will make the following call:
+
+> merge [x_2, ..., x_n] [y_2, ..., y_m] 
+
+We can avoid to twice calculate symbolic corresponding to those two merged, by
+memoising the function. The second time the merge of these two lists is
+requested, the saved symbolic list is instead returned.
+
+Another observation is that the calls in |merge| 
+can be symbolically merged to make |merge'|:
 
 \begin{code}
 merge' :: [Nat] -> [Nat] -> [Nat]
@@ -945,36 +967,61 @@ but when evaluating it symbolically, the |merge'| version will make a
 \emph{linear} number of calls instead of \emph{exponential} in the length of
 the lists.
 
-Our compiler can make this transformation automatically given that the
+Our compiler makes this transformation automatically given that the
 user annotates which calls in the program to collapse.
 
-In Figure \ref{inj} the task is, given a length bound |n|, to find |xs|, |ys| of type |[Nat]| subject to:
+We experimentally evaluated the performance of these three versions
+(without any optimisations, with memoisation, and with merged calls)
+by increasing a length bound |n|, and asking to find |xs|, |ys| satisfying:
 
 > xs /= ys && msort xs == msort ys && length xs >= n
 
-The runtime is considerably better for the |merge'| version, and the memoised
-version of |merge| is considerably better than the unmemoised version.
-The runtimes are compared to Leon and LazySmallCheck. Their 
-best runtime was chosen from the |evens|-|odds| version or the more standard
-|splitAt (length xs `div` 2)| version of |msort| (both favored the
-latter version). It should be said that our system works worse on
-that version.  
+In words: two different lists that are permutations of each other,
+via a |msort| function that calls the different versions of |merge|.
 
-We also applied the |merge| to |merge'| transformation 
-by hand for them, but this did not improve their runtime. 
+The results are in Figure \ref{inj}, and although we can conjecture
+that all versions are exponential from it, the merged function is
+significantly better: allowing to go up to lists over size 20 within
+reasonable time instead of size 10. We hypothesise that this is 
+due to the fact that we can move the exponential behaviour to the
+SAT solver rather than in the size of the SAT problem.
+
+The memoized version performs slightly better than the unmemoized
+one. The SAT problem is here quadratic in size rather than exponential.
+
+We also compare our runtimes to Leon\cite{leon} and LazySmallCheck\cite{lsc}.
+
+% The runtime is considerably better for the |merge'| version, and the memoised
+% version of |merge| is considerably better than the unmemoised version.
+% The runtimes are compared to Leon and LazySmallCheck.  
+
+% We also applied the |merge| to |merge'| transformation 
+% by hand for them, but this did not improve their runtime. 
 
 \begin{figure}[htp] \centering{
 \includegraphics[scale=0.60]{inj.pdf}}
 \caption{
-Run time to find |xs|, |ys :: [Nat]| such that |xs /= ys|
-and |msort xs == msort ys| with a constraint on |length xs|.
-Our tool is \emph{opt} (using |merge'|), \emph{memo} (using |merge| and memoisation),
-\emph{unopt} (using |merge|). The other tools are LazySmallCheck and Leon.
+Run time to find |xs|, |ys| such that |xs /= ys|
+and |msort xs == msort ys| with a |length| constraint on |xs|.
+We compare our tool with different settings (\emph{merged}, \emph{memo}, \emph{unopt})
+as described in Section \ref{merge}. 
+and with LazySmallCheck\cite{lsc} and Leon\cite{leon}.
 \label{inj}
 }
 \end{figure}
 
-\subsection{Inverting type checking}
+\subsubsection{Termination of |merge'|}
+
+The original |merge| function is structurally recursive,
+but this property is destroyed when symbolically
+merging to |merge'|. The symbolic values that are
+fed to the recursive calls are not smaller: for instance,
+the first one is |if x <= y then xs else x:xs| which 
+is as big as the input |x:xs|. We overcome this
+introduced non-termination by introducing a |postpone|
+as described in Section \ref{postpone}.
+
+\subsection{From type checking to expressions}
 
 %format :-> = ":\rightarrow"
 %format env = "\rho"
@@ -1015,6 +1062,8 @@ lambda in the expression. Now, we ask
 for the same as above, and that |nf e|.
 With this modification, finding the s combinator,
 in normal form, takes less a fraction of a second. 
+Comparison with and without normal form and
+with LazySmallCheck can be found in Table \ref{typetable}.
 
 Constraining the data in this way allows 
 cutting away big parts of the search space (only normal 
@@ -1031,6 +1080,30 @@ can be merged in the fashion as the merge
 sort. Without merging these calls, finding the a normal 
 form of the s comibator takes about a second,
 and 30 seconds without the normal form predicate.
+
+\begin{table}[htd]
+\begin{center}
+
+\textit{
+\begin{tabular}{l r r}
+\em Type & \em Our & \em LazySC \\
+\hline
+|w    ::(a->a->b)->a->b|         & 1.0s &  - \\
+|(.)  ::(b->c)->(a->b)->a->c|    & 6.7s &  - \\
+|s    ::(a->b->c)->(a->b)->a->c| & 7.6s &  - \\
+|w| in normal form   & $<$0.1s &     0.9s \\
+|(.)| in normal form   & $<$0.1s &  - \\
+|s| in normal form    & 0.1s &  - \\
+\end{tabular}
+}
+\end{center}
+\caption{Using the type checker to synthesise
+expressions. LazySmallCheck was given a 300s
+time limit for each depth 6, 7 and 8, timeout
+is denoted with -.
+}
+\label{typetable}
+\end{table}%
 
 % \begin{code}
 % data Expr = App Expr Expr Type | Lam Expr | Var Nat
@@ -1054,6 +1127,7 @@ and 30 seconds without the normal form predicate.
 % \end{code}
 
 \subsection{Regular expressions}
+\label{regexp}
 
 %format :+: = ":\!\!+\!\!:"
 %format :&: = ":\!\&\!:"
@@ -1067,42 +1141,42 @@ and 30 seconds without the normal form predicate.
 %format (minn (i) (j)) = i "\cup" j
 %format Mempset = "\emptyset"
 
-We used an regular expression recognizer
-to falsify some plausible looking regular
-expression laws.
+We used an regular expression library
+to falsify some plausible looking laws. The library has the following api:
 
-We will call the main one |prop_repeat|:
+% We will call the main one |prop_repeat|:
+% 
+% > Meps `notElem` p && s `elem` repp p i j & repp p i' j' ==> s `elem` repp p (maxx i i') (minn j j')
+% 
+% Here, |repp p i j| means repeat the regular expression |p| from |i| to |j| times. 
+% If |i > j|, then this regular expression does not recognize any string.
+% Conjunction of regular expressions is denoted by |&|.
+% 
+% This property is false for |i = 0|, |j = 1|, |i' = j' = 2|, |p = a+aa| and |s = aa|,
+% since |reppp (a+aa) (maxx 0 2) (minn 1 2) = reppp (a+aa) 2 1 = Mempset|.
 
-> Meps `notElem` p && s `elem` repp p i j & repp p i' j' ==> s `elem` repp p (maxx i i') (minn j j')
-
-Here, |repp p i j| means repeat the regular expression |p| from |i| to |j| times. 
-If |i > j|, then this regular expression does not recognize any string.
-Conjunction of regular expressions is denoted by |&|.
-
-This property is false for |i = 0|, |j = 1|, |i' = j' = 2|, |p = a+aa| and |s = aa|,
-since |reppp (a+aa) (maxx 0 2) (minn 1 2) = reppp (a+aa) 2 1 = Mempset|.
-
-The library has the following api:
 
 > data RE a  = a :>: a  | a :+: a  | a :&: a 
->            | Star a   | Eps      | Nil
+>            | Star a   | Eps      | Nil       | Atom Token
 
-> step  ::  RE Token -> Token -> RE Token
-> eps   ::  RE a -> Bool
-> rec   ::  RE Token -> [Token] -> Bool
-> rep   ::  RE Token -> Nat -> Nat -> RE Token
+> step  ::  RE -> Token -> RE 
+> eps   ::  RE -> Bool
+> rec   ::  RE -> [Token] -> Bool
+> rep   ::  RE -> Nat -> Nat -> RE
 
 The |step| function does Brzozowski differentiation, |eps|
 answers if the expression contains the empty string, |rec|
-answers if the word is recognised, and |rep| is the
-above repetition.
+answers if the word is recognised, and |rep p i j| 
+repeats a regexp from |i| to |j| times. 
+If |i > j|, then this regular expression does not recognize any string.
 
 We can now ask our system for variables satisfying:
 
-> not (eps p)  && rec s (rep p i j :&: repp p i' j') 
->              && not (rec (rep p (max i i') (min j j')) s)
+> prop_repeat:  not (eps p) &&
+>               rec s (rep p i j :&: rep p i' j') &&
+>               not (rec (rep p (max i i') (min j j')) s)
 
-whereupon we get the following counterexample in just over 30 seconds:
+whereupon we get the following counterexample in about 30 seconds:
 
 % p:  (R(R(R__(T))(R__(T))(T))(R__(T))(T))
 % i:  (Nat(Nat(Nat_)))
@@ -1118,23 +1192,55 @@ i:  S (S Z)
 i': S Z
 j:  S (S Z)
 j': S Z
-s:  Cons A (Cons A Nil)
+s:  [A,A]
 \end{verbatim}
 
-(This conterexample is essentially the same as outlined above.)
+This is a counterexample since 
+|rep p (max i i') (min j j')| = |rep p 2 1|, which recognizes
+no string, but |rep p [A,A]| does hold.
 
-The implementation of the regular expression library contains
-lots of calls that are the same across the branches. For instance,
-the |eps| function looks like this:
+We list our and LazySmallCheck's run times on
+|prop_repeat| above and on two seemingly simpler 
+properties, namely: 
+
+|prop_conj: not (eps p) && rec (p :&: (p :>: p)) s|
+
+|prop_iter: i /= j && not (eps p) && rec (iter i p :&: iter j p) s|
+
+The last property uses a function |iter :: Nat -> RE -> RE| which
+repeats a regexp a given number of times. The results are found
+in Table \ref{regexptable}.
+
+\begin{table}[htd]
+\begin{center}
+
+\textit{
+\begin{tabular}{l r r }
+\em Conjecture & \em Our tool & \em LazySC \\
+\hline
+|prop_conj|   & 27.2s &  0.6s \\
+|prop_iter|   &  6.6s & 17.4s \\
+|prop_repeat| & 35.7s & 103s  \\
+\end{tabular}
+}
+\end{center}
+\caption{Run times of finding conterexamples
+to regular expression conjectures. The properties
+are defined in Section \ref{regexp}.}
+\label{regexptable}
+\end{table}%
+
+If we look more closely at the implementation of the regular expression library 
+we find that the calls are duplicated across the branches.
+For instance, the |eps| function looks like this:
 
 \begin{code}
-eps :: R T -> Bool
-eps Eps        = True
-eps (p :+: q)  = eps p || eps q
-eps (p :&: q)  = eps p && eps q
-eps (p :>: q)  = eps p && eps q
-eps (Star _)   = True
-eps _          = False
+eps Eps          = True
+eps (p  :+:  q)  = eps p || eps q
+eps (p  :&:  q)  = eps p && eps q
+eps (p  :>:  q)  = eps p && eps q
+eps (Star _)     = True
+eps _            = False
 \end{code}
 
 Here, we could collapse all the calls |eps p| as described
@@ -1304,7 +1410,7 @@ until the machine terminates.
 > steps  :: Q -> Configuration -> [A]
 
 This function may of course not terminate, so
-the translated functions needs to insert a check,
+the translated functions needs to insert a |postpone|,
 as described above.
 
 The entire machine can be run from a starting
@@ -1345,62 +1451,28 @@ it was necessary to have no less than four A in the example,
 otherwise it the returned machine would "cheat" and instead
 of creating a loop, just count.
 
-In this example it is crucial to use |check| to
+In this example it is crucial to use |postpone| to
 be able to handle the possibly non-terminating |steps| function.
 In systems like Reach \cite{reach}, it is possile
 to limit the expansion of the program on the number of unrollings
-of recursive functions. Our method with |check| does exactly
+of recursive functions. Our method with |postpone| does exactly
 this, but there is no need to decide beforehand how many
 unrollings are needed, it is all done dynamically.
 
 % ------------------------------------------------------------------------------
 
-\section{Experimental evaluation}
-
-And again, there is the merge sort times.
-
-Regexp was evaluated against leon and
-lazy small check. leon timed out on all of them
-
-We evaluated the type checker against 
-lazy small check with a timeout of 300s.
-
-Turing machines were evaluated...
-LSC timed out.
-
-\begin{table}[htd]
-\begin{center}
-
-\textit{
-\begin{tabular}{l r r r }
-\em Problem & \em Our tool & \em Lazy SC \\
-\hline
-\hline
-\multicolumn{3}{l}{Sorting} \\
-...  & x.xs &  x.xs  \\
-...  & x.xs &  x.xs  \\
-\multicolumn{3}{l}{Inverting a type checker} \\
-\hline
-|(w)|         & 1.0s &  $>$300s \\
-|(.)|         & 6.7s &  $>$300s \\
-|s|           & 7.6s &  $>$300s \\
-|nf|, |w|     & 0.1s &     0.9s \\
-|nf|, |(.)|   & 0.1s &  $>$300s \\
-|nf|, |s|     & 0.1s &  $>$300s \\
-\multicolumn{3}{l}{Regular expressions} \\
-\hline
-|p :&: (p :>: p)|        & 27.2s &  0.6s  \\
-|iter i p :&: iter j p|  &  6.6s & 17.4s  \\
-|rep p i j :&: rep p i' j'| & 35.7s & 103s \\
-\multicolumn{3}{l}{Show} \\
-\hline
-ambig  & x.xs &  x.xs \\
-\end{tabular}
-}
-\end{center}
-\caption{Evaluation on the examples}
-\label{eval}
-\end{table}%
+% \section{Experimental evaluation}
+% 
+% And again, there is the merge sort times.
+% 
+% Regexp was evaluated against leon and
+% lazy small check. leon timed out on all of them
+% 
+% We evaluated the type checker against 
+% lazy small check with a timeout of 300s.
+% 
+% Turing machines were evaluated...
+% LSC timed out.
 
 
 Compare some examples against Leon.
