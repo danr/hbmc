@@ -76,7 +76,8 @@
 We present a new symbolic evaluation method for functional programs that generates input to a SAT-solver. The result is a bounded model checking method for functional programs that can find concrete inputs that cause the program to produce certain outputs, or show the inexistence of such inputs under certain bounds. SAT-solvers have long been used for bounded model checking of hardware and low-level software. This paper presents the first method for SAT-based bounded model checking for high-level programs containing recursive algebraic datatypes and unlimited recursion. Our method works {\em incrementally}, i.e. it increases bounds on inputs until it finds a solution. We also present a novel optimization, namely {\em function call merging}, that can greatly reduce the complexity of symbolic evaluation for recursive functions over datatypes with multiple recursive constructors.
 \end{abstract}
 
-\category{CR-number}{subcategory}{third-level}
+%% DO THIS FOR THE FINAL VERSION!!!
+%\category{CR-number}{subcategory}{third-level}
 
 % general terms are not compulsory anymore,
 % you may leave them out
@@ -90,50 +91,54 @@ bounded model checking, SAT, symbolic evaluation
 
 \section{Introduction}
 
-SAT-based Bounded Model Checking for hardware, revolution.
+At the end of the 1990s, SAT-based Bounded Model Checking (BMC \cite{bmc}) was introduced as an alternative to BDD-based hardware model checking. BMC revolutionized the field; SAT-solvers by means of BMC provided a scalable and efficient search method for finding bugs. Deep bug finding was one thing BDD-based methods were not good at. Since then, BMC techniques have also found their way into software model checkers, of particular interest here is the C model checker CBMC \cite{cbmc}. BMC techniques work well for software that is low-level (reasoning about bits, words, and arrays), and well at all for software with higher-level features (pointers, recursive datastructures). 
 
-Finding {\em counter examples}, {\em examples}, {\em inverting functions}, for prototype programming, primarily. Also: see Reach paper. Secondarily, for showing their absence.
+Our aim in this paper is to take the first step towards bringing the power of SAT-based BMC to a high-level functional programming language, with algebraic datatypes and recursion. The goal is to provide a tool that can find inputs to programs that result in outputs with certain properties. Applications include property testing (where we can find counter examples as well as bugs), finding solutions to search problems which are expressed as a predicate in a functional language, inverting functions in a program, finding test data that satisfies certain constraints, etc.
 
-Bounded Model Checking for C. Difference here: recursive data structures. Doing this by modelling pointers and the heap does not work.
+There exist alternatives to using a SAT-solver for these problems. For example, QuickCheck \cite{quickcheck} is a tool for random property-based testing that has been shown to be quite effective at finding bugs in programs. However, to find intricate bugs, often a lot of work has to be spent on test data generators, and a lot of insight is required. A dedicated search procedure could alleviate some of that work. Also, random testing would not work at all for finding solutions to search problems, or inverting a function.
 
-Motivating example: Finding 2 different inputs for which a show function returns the same result.
+As an example, imagine we have made a large recursive datatype |T| and have just written a |show| function for it:
+\begin{code}
+show :: T -> String
+\end{code}
+We would like to find out if this |show| function is ambiguous, i.e.\ are there different elements in |T| that map to the same string? A property in QuickCheck-style would look something like this:
+\begin{code}
+prop_Ambiguous :: T -> T -> Property
+prop_Ambiguous x y = x /= y ==> show x /= show y
+\end{code}
+Even if two such elements |x| and |y| exist, it is very unlikely that we would find them using random testing. Instead, one either has to write a dedicated generator for pairs of elements |(x,y)| that are likely to map to the same string (requiring deep insights about the |show| function and where the bug may be), or implement the inverse of the |show| function, a {\em parser}, to be able to say something like this:
+\begin{code}
+prop_Ambiguous' :: T -> Property
+prop_Ambiguous' x = all (x ==) (parse (show x))
+\end{code}
+Implementing a parser is much harder than a |show| function, which makes this an even less attractive option.
 
-QuickCheck, need to write generators, cannot find intricate examples where things have to correspond.
+The tool we present in this paper can easily find pairs of such elements on the original property |prop_Ambiguous|, even for quite large sets of mutually recursive datatypes.
 
-SmallCheck, only for very small examples, depth bound. FEAT is not depth bound, still size limit.
+There already exist dedicated search procedures for inputs that lead to certain outputs. Most notably, there are a number of tools (such as Reach \cite{reach}, Lazy SmallCheck \cite{lazysc}, and Agsy \cite{agsy}) that emply a backtracking technique called {\em lazy narrowing} to search for inputs. These tools are much better than random testing at finding intricate inputs, but they have one big shortcoming: they employ a depth-limitation on the input. In order to use these tools, a maximum search depth has to be specified (or the tool itself can enumerate larger and larger depths). Increasing the maximum depth of a set of terms affects the size of the search space uncontrollably. For example, they time out for instances of |prop_Ambiguous| when the depth gets larger than ~4, because there are just too many cases to check.
 
-Lazy narrowing, (e.g. Lazy SmallCheck, Lindblad, Reach), exploit the lazy structure of programs + backtracking. Still not good enough for combinatorial search. Could be adapted to
-
-Old text:
-
-Bounded model checking for hardware has been a great success. Idea: find bugs efficiently, and show absence of bugs up to size bound, exploiting efficient search in SAT-solvers.
-
-This paper we want to bring this power to function programming.
-
-Example of use (sorting).
-
-Motivational talk about in what situations to use this: (1) Instead of QuickCheck/SmallCheck. Gain: no complicated generators. (2) Computing inverses in programming / prototype programs. (3) FP as a metalanguage for generating constraints, to solve a problem.
+To overcome this depth problem, we do not limit the search by depth. Rather, ee provide a different way of bounding the input, namely by letting the solver carefully expand the input one (symbolic) constructor at a time, carving out an input shape rather than an maximal input depth. We also hope that the sophisticated search strategies in a SAT-solver are able to beat a backtracking search, as long as the encoding of the search problem in SAT is natural enough for the solver to work with.
 
 This paper contains the following contributions:
 
 \begin{itemize}
-\item We present a monad for constraint generation that can be used to generate constraints for a SAT-solver.
+\item We present a monadic DSL constraint generation that can be used program constraint generators for SAT-solvers. (Section 3)
 
-\item We show how to express values of arbitrary datatypes symbolically in a SAT-solver.
+\item We show how to express values of arbitrary datatypes symbolically in a SAT-solver. (Section 3)
 
-\item We show how a program containing recursive functions over datatypes can be symbolically executed, resulting in a SAT-problem.
+\item We show how a program containing recursive functions over datatypes can be symbolically executed, resulting in a SAT-problem. (Section 4)
 
-\item We show how we can battle certain kinds of exponential blow-up that naturally happen in symbolic evaluation, by means of a novel program transformation.
+\item We show how we can battle certain kinds of exponential blow-up that naturally happen in symbolic evaluation, by means of memoization and a novel program transformation. (Section 4)
 
-\item We show to perform bounded model checking {\em incrementally} for growing input sizes, by making use of feedback from the SAT-solver.
+\item We show to perform bounded model checking {\em incrementally} for growing input sizes, by making use of feedback from the SAT-solver. (Section 5)
 \end{itemize}
+
+We also show a number of different examples, and experimental evaluations on these examples.
 
 % ------------------------------------------------------------------------------
 
-\section{Main Idea}
+\section{Symbolic datatypes}
 \label{ite}
-
-\comment{Perhaps this section should be merged with the intro.}
 
 The programming language FL, part of the formal verification system Forte \cite{forte} is an ML-like language with one particular distinghuishing feature: symbolic booleans. FL has a primitive function with the following type\footnote{Throughout the paper, we use Haskell notation for our examples, even though the examples may not actually be written in the Haskell language.}:
 \begin{code}
@@ -817,6 +822,8 @@ Why is this better? There may be lots of contexts that are waiting for an input 
 To see why this strategy is complete, consider the case where the full constraint set has a solution $s$, but we are not finding it because we are expanding the wrong delays. In that case, there must after a while exist a finite, non-empty set $S$ of delays in $Q$ that should be expanded in order to reach the desired solution, but that are never chosen when we do choose to expand a delay. (If this does not happen, we will find the solution eventually.) The first observation we make is that for every conflict set that is found, at least one element from $S$ must be a part of it. (If not, this would imply that $s$ was not a solution after all.) Since the expansion strategy does not pick points from $S$ to expand, it picks points that lie closer to the front of the queue instead. But it cannot pick such points infinitely often; eventually the points in $S$ must be the ones closest to the head.
 
 In our experimental evaluation we show that this expansion strategy very often defines just the right constructors in the input in order to find the counter example, even for large examples. We thus avoid having to pick a depth-limit up-front, and even avoid reasoning about depth altogether.
+
+An additional bonus of using the assumption conflict set is that when that set is empty, it is guaranteed that no solution can be found, ever, and the search can terminate. This typically happens if the user constrained the input using size and/or depth constraints, but it can happen in other cases as well.
 
 \subsection{Dealing with non-termination}
 \label{postpone}
