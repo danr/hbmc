@@ -73,7 +73,7 @@
 \maketitle
 
 \begin{abstract}
-We present a new symbolic evaluation method for functional programs that generates input to a SAT-solver. The result is a bounded model checking method for functional programs that can find concrete inputs that cause the program to produce certain outputs, or show the inexistence of such inputs under certain bounds. SAT-solvers have long been used for bounded model checking of hardware and also low-level software. This paper presents the first method for SAT-based bounded model checking for high-level programs containing recursive algebraic datatypes and unlimited recursion. Our method works {\em incrementally}, i.e. it increases bounds on inputs until it finds a solution. We also present a novel optimization
+We present a new symbolic evaluation method for functional programs that generates input to a SAT-solver. The result is a bounded model checking method for functional programs that can find concrete inputs that cause the program to produce certain outputs, or show the inexistence of such inputs under certain bounds. SAT-solvers have long been used for bounded model checking of hardware and low-level software. This paper presents the first method for SAT-based bounded model checking for high-level programs containing recursive algebraic datatypes and unlimited recursion. Our method works {\em incrementally}, i.e. it increases bounds on inputs until it finds a solution. We also present a novel optimization, namely {\em function call merging}, that can greatly reduce the complexity of symbolic evaluation for recursive functions over datatypes with multiple recursive constructors.
 \end{abstract}
 
 \category{CR-number}{subcategory}{third-level}
@@ -203,6 +203,8 @@ let NilCons c ma = xs in
 \end{code}
 In this way, the user can use boolean variables to create a symbolic input to a program, for example representing all lists up to a particular length, containing elements up to a particular size, and run the program. The output will be another symbolic expression, about which we can ask questions. For example, if we want to do property checking, the output will be a symbolic boolean, and we can ask if it can ever be |FalseSym|.
 
+\comment{explain the limitations of static input size / depth, and how we want things to be: a completely free input that is ``expanded'' by the solver, completely automatically}
+
 In the remainder of the paper we will use the main idea described in this section, with a number of changes. Firstly, we are going to use a SAT-solver instead of BDDs. Also, we want to create inputs to the program {\em incrementally}, without deciding up-front how large the inputs should be.
 For these reasons, we move from an {\em expression-based} view (using \ifthenelse{}) to a {\em constraint-based} view.
 
@@ -210,7 +212,7 @@ For these reasons, we move from an {\em expression-based} view (using \ifthenels
 
 \section{A DSL for generating constraints}
 
-In this section, we present a small DSL that we will use later to generate constraints to a SAT-solver. We also show how it can be used to encode algebraic datatypes symbolically.
+In this section, we present a small DSL, the constraint monad, that we will use later for generating constraints to a SAT-solver. We also show how it can be used to encode algebraic datatypes symbolically.
 
 \subsection{The Constraint monad}
 
@@ -810,22 +812,32 @@ But we can do better. The SAT-solver is able to give feedback about our question
 
 Why is this better? There may be lots of contexts that are waiting for an input to be expanded, but the SAT-solver has already seen that there is no reason to expand those contexts, because making those contexts true would violate a precondition for example. The assumption conflict set is a direct way for the solver to tell us: ``If you want to find a solution, you should make one of these propositions true''. We then pick the proposition from that set that leads to the most fair expansion strategy.
 
-To see why this strategy is complete, consider the case where the full constraint set has a solution, but we are not finding it because we are expanding the wrong delays. In that case, there must after a while exist a finite, non-empty set $S$ of delays in $Q$ that should be expanded in order to reach the desired solution, but that are never chosen when we do expand a delay. 
+To see why this strategy is complete, consider the case where the full constraint set has a solution $s$, but we are not finding it because we are expanding the wrong delays. In that case, there must after a while exist a finite, non-empty set $S$ of delays in $Q$ that should be expanded in order to reach the desired solution, but that are never chosen when we do choose to expand a delay. (If this does not happen, we will find the solution eventually.) The first observation we make is that for every conflict set that is found, at least one element from $S$ must be a part of it. (If not, this would imply that $s$ was not a solution after all.) Since the expansion strategy does not pick points from $S$ to expand, it picks points that lie closer to the front of the queue instead. But it cannot pick such points infinitely often; eventually the points in $S$ must be the ones closest to the head.
+
+In our experimental evaluation we show that this expansion strategy very often defines just the right constructors in the input in order to find the counter example, even for large examples. We thus avoid having to pick a depth-limit up-front, and even avoid reasoning about depth altogether.
 
 \subsection{Dealing with non-termination}
 \label{postpone}
 
-Even if input program terminates, symbolic program may not terminate without dynamic checks.
-
-Show example.
-
-Add 'postpone'.
-
+So far, we have assumed that all functions terminate. However, it turns out that this restriction is unnecessary; there is a simple trick we can emply to deal with functions that may not terminate: For possibly non-terminating functions, we use a special function |postpone|:
 \begin{code}
 postpone :: C () -> C ()
 postpone m =  do  x <- newInput
                   wait x § \ () -> m
 \end{code}
+This function takes a constraint generator as an argument, and postpones it for later execution, by simply constructing a new {\em input} to the program, and blocking in that input. The result is that the expansion of the input in the current context now lies in the expansion $Q$, and it is guaranteed that it will be picked some time in the future, if the solver deems the current context part of a promising path to a solution.
+
+For possibly non-terminating functions |f|, |postpone| is used in the following way:
+\begin{code}
+trans (f x1 ... xn = e) /// = /// f x1 ... xn = do  y <- new
+                                                    postpone § transr e y
+                                                    return y
+\end{code}
+The generation of constraints for the body |e| of |f| is postponed until a later time.
+
+It is good that we have postpone; sometimes, even though our input program clearly terminates, the transformed symbolic program may not terminate. This can happen when the static sizes of symbolic arguments to recursive functions do not shrink, whereas they would shrink in any concrete case. An example is the function |merge| after merging recursive function calls, as explained in the experimental evaluation section. The function |postpone| also works in those cases.
+
+Thus, we use |postpone| on any function which is not structurally recursive {\em after} transformation into a symbolic program.
 
 % ------------------------------------------------------------------------------
 
