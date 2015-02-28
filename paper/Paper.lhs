@@ -934,7 +934,7 @@ So our system can be used with bounds written as boolean predicates, for instanc
 % 
 % ....
 
-\subsection{Symbolically merging merge}
+\subsection{Merging the calls in merge}
 \label{merge}
 
 %format x_1
@@ -961,7 +961,7 @@ So our system can be used with bounds written as boolean predicates, for instanc
 
 
 This example about |merge| aims to highlight how important
-symbolic merging of function calls can be. We use
+merging of function calls can be. We use
 this standard definition of |merge| that merges two lists,
 returning a sorted list of the inputs are:
 
@@ -1533,15 +1533,52 @@ unrollings are needed, it is all done dynamically.
 
 \section{Related Work}
 
-Leon.
+One big source of inspiration for this work is the Leon system\cite{leon},
+Their setup is similar to ours, but encodes the problem into 
+uninterpreted functions in a SMT solver. Another difference
+is that their focus is mainly on proving properties (stated as contracts)
+rather than finding counterexamples. Using uninterpreted
+functions in a SMT solver helps in this regard in that it can
+see equivalences between values that are "far apart".
 
-QuickCheck.
+QuickCheck\cite{quickcheck} is an embedded DSL for finding 
+counterexamples for Haskell by using randomized testing.
+A potential drawback of that approach is that you
+have to write generators of random values suitable 
+for the domain. This becomes especially important in 
+the presence of preconditions, where the generator can
+essentially become the inverse of the predicate.
 
-Enumeration (SmallCheck, FEAT).
+One way to avoid the generator problem is to enumerate
+input values for testing. This is the approach taken in
+for instance SmallCheck \cite{smallcheck} which
+enumerates values on depth, and can also handle nested quantifiers.
+Another work is Feat \cite{feat},
+which develops an algebra for enumerating values based on size.
+Using size instead of depth as measure can sometimes be 
+beneficial as it grows slower, allowing for greater granularity.
 
-Lazy narrowing (Lazy SmallCheck, Reach, Lindblad).
+By evaluating tagged undefined values (in a lazy language),
+it can be observed which parts of the input is actually
+demanded by the program. The forced parts of the value
+can be refined with concrete values and then repeated.
+This technique is called lazy narrowing. 
+When refining the values, it 
+might be the case that you start exploring a path which
+does not lead to a counterexample. 
+One example of this is \cite{reach}, which allows
+to do this backtracking either upon reaching a predetermined
+depth of the value or of the recursion. LazySmallCheck\cite{lazysc}, 
+combined the ideas from SmallCheck and Reach to do lazy narrowing
+on the depth of the values as a DSL in Haskell.
 
 Liquid types.
+
+Curry (lazy narrowing?)
+
+EasyCheck
+
+Catch
 
 % ------------------------------------------------------------------------------
 
