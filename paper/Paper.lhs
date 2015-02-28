@@ -846,97 +846,37 @@ usorted _         =  True
 \noindent
 Now we can investigate the expansion strategy by asking for |xs|
 such that |usorted xs| and |length xs >= n|, given some bound |n|.
-With |n|, the trace looks like this:
+Our tool can output a trace showing how the incremental values
+has been expanded so far.  With |n=2|, the trace looks like this:
 
 \begin{verbatim}
 xs: _
-xs: (List__)
-xs: (List_(List__))
-xs: (List_(List_(List__)))
-xs: (List_(List_(List_(List__))))
-xs: (List_(List(Nat_)(List_(List__))))
-xs: (List_(List(Nat_)(List(Nat_)(List__))))
-xs: (List(Nat_)(List(Nat_)(List(Nat_)(List__))))
-xs: (List(Nat_)(List(Nat(Nat_))(List(Nat_)(List__))))
-xs: (List(Nat_)(List(Nat(Nat_))(List(Nat(Nat_))(List__))))
-xs= Cons Z (Cons (S Z) (Cons (S (S Thunk_Nat)) Nil))
+xs: Lst__
+xs: Lst_(Lst__)
+xs: Lst_(Lst_(Lst__))
+xs: Lst_(Lst_(Lst_(Lst__)))
+xs: Lst_(Lst(Nat_)(Lst_(Lst__)))
+xs: Lst_(Lst(Nat_)(Lst(Nat_)(Lst__)))
+xs: Lst(Nat_)(Lst(Nat_)(Lst(Nat_)(Lst__)))
+xs: Lst(Nat_)(Lst(Nat(Nat_))(Lst(Nat_)(Lst__)))
+xs: Lst(Nat_)(Lst(Nat(Nat_))(Lst(Nat(Nat_))(Lst__)))
+xs= [Z,S Z,S (S Thunk_Nat)]
 \end{verbatim}
 
 All but the last lines describe a partial view of the value.
 Delayed values are represented with a @_@, and other values
 with their type constructor and the arguments. The
-value is first expanded to be sufficiently wide, and
-then the natural number elements are. Note that
-no values except for the needed ones are evaluated.
-We are not always that lucky as we shall see later.
+value @xs@ is first expanded to contain sufficiently many
+elements, namely two, and
+then the natural numbers starts to be expanded. Note that
+in this case only the necessary values are evaluated.
+This can in general not be guaranteed.
 
-Can also generate reverese and qrev lists, can generate
-sorted lists with |sort xs=xs|.... Later we will look at the more difficult
-|sort xs=sort ys|. Sorting stuff
+% Can also generate reverese and qrev lists, can generate
+% sorted lists with |sort xs=xs|.... Later we will look at the more difficult
+% |sort xs=sort ys|. Sorting stuff
 
-\subsubsection{Terminate without example}
-Also show examples of (depth-bound and/or size-bound and/or other-bound) things that terminate without example.
-
-If we again ask for |xs|, such that |usorted xs|,
-|length xs >= n|, but add that |all (< n) xs|, i.e.
-the list must be sorted, it must \emph{at least}
-have some length |n| (an upper bound), but also
-every element must be below |n|, the system
-will terminate
-
-
-\subsubsection{Discussion about nub and delete}
-
-\begin{code}
-nub xs = y:y:ys
-\end{code}
-
-Note that it does not help even if the element type is finite.
-
-\subsubsection{Discussion about contracts checking a'la Leon}
-
-\subsection{Merge sort}
-
-\subsection{Inverting type checking}
-
-\begin{code}
-usorted  ::  [Nat] -> Bool
-usorted (x:y:xs)  =  x < y && usorted (y:xs)
-usorted _         =  True
-\end{code}
-
-\noindent
-Now we can investigate the expansion strategy by asking for |xs|
-such that |usorted xs| and |length xs > n|, given some bound |n|.
-With |n|, the trace looks like this:
-
-\begin{verbatim}
-xs: _
-xs: (List__)
-xs: (List_(List__))
-xs: (List_(List_(List__)))
-xs: (List_(List_(List_(List__))))
-xs: (List_(List(Nat_)(List_(List__))))
-xs: (List_(List(Nat_)(List(Nat_)(List__))))
-xs: (List(Nat_)(List(Nat_)(List(Nat_)(List__))))
-xs: (List(Nat_)(List(Nat(Nat_))(List(Nat_)(List__))))
-xs: (List(Nat_)(List(Nat(Nat_))(List(Nat(Nat_))(List__))))
-xs= Cons Z (Cons (S Z) (Cons (S (S Thunk_Nat)) Nil))
-\end{verbatim}
-
-All but the last lines describe a partial view of the value.
-Delayed values are represented with a @_@, and other values
-with their type constructor and the arguments. The
-value is first expanded to be sufficiently wide, and
-then the natural number elements are. Note that
-no values except for the needed ones are evaluated.
-We are not always that lucky as we shall see later.
-
-Can also generate reverese and qrev lists, can generate
-sorted lists with |sort xs=xs|.... Later we will look at the more difficult
-|sort xs=sort ys|. Sorting stuff
-
-\subsubsection{Terminate without example}
+\subsubsection{Terminate without counterexample}
 
 Sometimes it can be noticed that there is no counterexample regardless how the
 program is expanded.  The simplest property when this happens is perhaps asking
@@ -1560,6 +1500,7 @@ of recursive functions. Our method with |postpone| does exactly
 this, but there is no need to decide beforehand how many
 unrollings are needed, it is all done dynamically.
 
+
 % ------------------------------------------------------------------------------
 
 % \section{Experimental evaluation}
@@ -1575,16 +1516,16 @@ unrollings are needed, it is all done dynamically.
 % Turing machines were evaluated...
 % LSC timed out.
 
-
-Compare some examples against Leon.
-
-Compare some examples against Lazy SmallCheck.
-
-Compare with/without memoization and with/without merging function calls.
-
-Compare with/without conflict minimization?
-
-Show timings of the above examples.
+% 
+% Compare some examples against Leon.
+% 
+% Compare some examples against Lazy SmallCheck.
+% 
+% Compare with/without memoization and with/without merging function calls.
+% 
+% Compare with/without conflict minimization?
+% 
+% Show timings of the above examples.
 
 % ------------------------------------------------------------------------------
 
