@@ -221,7 +221,7 @@ For these reasons, we move from an {\em expression-based} view (using \ifthenels
 \section{A DSL for generating constraints}
 \label{dsl}
 
-In this section, we present a small DSL, the constraint monad, that we will use later for generating constraints to a SAT-solver. We also show how it can be used to encode algebraic datatypes symbolically.
+In this section, we present a small DSL, the constraint monad, that we will use later for generating constraints to a SAT-solver. We also show, by means of examples, how it can be used to encode algebraic datatypes symbolically.
 
 \subsection{The Constraint monad}
 
