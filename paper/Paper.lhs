@@ -91,6 +91,8 @@ bounded model checking, SAT, symbolic evaluation
 
 \section{Introduction}
 
+At the end of the 1990s, SAT-based Bounded Model Checking (BMC \cite{bmc}) was introduced as an alternative to BDD-based hardware model checking. BMC took the community by storm: 
+
 SAT-based Bounded Model Checking for hardware, revolution.
 
 Finding {\em counter examples}, {\em examples}, {\em inverting functions}, for prototype programming, primarily. Also: see Reach paper. Secondarily, for showing their absence.

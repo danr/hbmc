@@ -102,12 +102,12 @@ atMost _                             = True
 --lim (((s1,_),(s2,_),_):q) = if atMost s1 then if atMost s2 then lim q else False else False
 
 prog0 :: Q -> Bool
-prog0 q = --case runt q [A] of
-          --  [A] ->
+prog0 q = case runt q [A] of
+            [A] ->
               case runt q [B,A,A,A,A,B] of
                  [A,A,A,A,B,B] -> True
                  _ -> False
-          --  _ -> False
+            _ -> False
 
 {-
 
