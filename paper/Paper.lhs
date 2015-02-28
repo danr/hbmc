@@ -137,6 +137,9 @@ We also show a number of different examples, and experimental evaluations on the
 
 % ------------------------------------------------------------------------------
 
+\section{Main Idea}
+\label{ite}
+
 \section{Symbolic datatypes}
 
 The programming language FL, part of the formal verification system Forte \cite{forte} is an ML-like language with one particular distinghuishing feature: symbolic booleans. FL has a primitive function with the following type\footnote{Throughout the paper, we use Haskell notation for our examples, even though the examples may not actually be written in the Haskell language.}:
@@ -216,6 +219,7 @@ For these reasons, we move from an {\em expression-based} view (using \ifthenels
 % ------------------------------------------------------------------------------
 
 \section{A DSL for generating constraints}
+\label{dsl}
 
 In this section, we present a small DSL, the constraint monad, that we will use later for generating constraints to a SAT-solver. We also show how it can be used to encode algebraic datatypes symbolically.
 
@@ -881,7 +885,7 @@ xs: Lst_(Lst(Nat_)(Lst(Nat_)(Lst__)))
 xs: Lst(Nat_)(Lst(Nat_)(Lst(Nat_)(Lst__)))
 xs: Lst(Nat_)(Lst(Nat(Nat_))(Lst(Nat_)(Lst__)))
 xs: Lst(Nat_)(Lst(Nat(Nat_))(Lst(Nat(Nat_))(Lst__)))
-xs= [Z,S Z,S (S Thunk_Nat)]
+xs= [Z,S Z,S (S Delayed_Nat)]
 \end{verbatim}
 
 All but the last lines describe a partial view of the value.
@@ -893,6 +897,11 @@ then the natural numbers starts to be expanded. Note that
 in this case only the necessary values are evaluated.
 This can in general not be guaranteed.
 
+The same expansion behaviour happens also when increasing 
+the list length, |n|. The run time is also low, generating
+a sorted list of length at least 25 takes a little less than
+a second, and the list |[0..24]| is indeed obtained.
+
 % Can also generate reverese and qrev lists, can generate
 % sorted lists with |sort xs=xs|.... Later we will look at the more difficult
 % |sort xs=sort ys|. Sorting stuff
@@ -903,7 +912,7 @@ Sometimes it can be noticed that there is no counterexample regardless how the
 program is expanded.  The simplest property when this happens is perhaps asking
 for an |x| such that |x < Z|. The standard definition of |(<)| returns |False|
 for any |y < Z|, so there is a contradiction in this context. This is also the
-same context that the Thunk in |x| is waiting for, but since this is
+same context that the incremental value in |x| is waiting for, but since this is
 unsatisfiable, it will never be expanded.
 
 Let's return to the previous example with asking for an |xs|, such that
@@ -1429,6 +1438,7 @@ the same pattern as for |eps| and memoisation is enough there as well.
 % Deriving expressions, inverse.
 
 \subsection{Synthesising turing machines}
+\label{turing}
 
 Another example we considered was a simulator
 of turing machines. The tape symbols are
@@ -1552,10 +1562,10 @@ unrollings are needed, it is all done dynamically.
 
 \section{Related Work}
 
-One big source of inspiration for this work is the Leon system\cite{leon},
-Their setup is similar to ours, but encodes the problem into 
-uninterpreted functions in a SMT solver. Another difference
-is that their focus is mainly on proving properties (stated as contracts)
+One source of inspiration for this work is Leon\cite{leon},
+which uses an encoding from functional programs to
+uninterpreted functions in a SMT solver. Besides this, they differ
+in that their focus is mainly on proving properties (stated as contracts)
 rather than finding counterexamples. Using uninterpreted
 functions in a SMT solver helps in this regard in that it can
 see equivalences between values that are "far apart".
@@ -1570,10 +1580,9 @@ essentially become the inverse of the predicate.
 
 One way to avoid the generator problem is to enumerate
 input values for testing. This is the approach taken in
-for instance SmallCheck \cite{smallcheck} which
+SmallCheck\cite{smallcheck} which
 enumerates values on depth, and can also handle nested quantifiers.
-Another work is Feat \cite{feat},
-which develops an algebra for enumerating values based on size.
+Feat\cite{feat} instead enumerates values based on size.
 Using size instead of depth as measure can sometimes be 
 beneficial as it grows slower, allowing for greater granularity.
 
@@ -1581,47 +1590,58 @@ By evaluating tagged undefined values (in a lazy language),
 it can be observed which parts of the input is actually
 demanded by the program. The forced parts of the value
 can be refined with concrete values and then repeated.
-This technique is called lazy narrowing. 
-When refining the values, it 
-might be the case that you start exploring a path which
-does not lead to a counterexample. 
-One example of this is \cite{reach}, which allows
-to do this backtracking either upon reaching a predetermined
-depth of the value or of the recursion. LazySmallCheck\cite{lazysc}, 
-combined the ideas from SmallCheck and Reach to do lazy narrowing
+This technique is called lazy narrowing, and is
+used in Curry \cite{curry} and the theorem prover Agsy\cite{agsy}. The backtracking 
+techniques to stop exploring an unfruitful path 
+varies between different systems. Reach\cite{reach}, has two
+modes, starting backtracking on reaching a predetermined
+depth either of the intput values or the function call recursion. 
+LazySmallCheck\cite{lazysc}, combines the ideas from SmallCheck and Reach to do lazy narrowing
 on the depth of the values as a DSL in Haskell.
 
-Liquid types.
+%Liquid types. (and other contracts checkers)
 
-Curry (lazy narrowing?)
+%EasyCheck (Curry enumeration)
 
-EasyCheck
-
-Catch
+%Catch
 
 % ------------------------------------------------------------------------------
 
 \section{Discussion and Future Work}
 
-Parallelize expansion.
+We can lift our restriction to only consider total programs by introducing an
+extra constructor to each data type which correspons to a crash, and then
+making every case propagate this crash.  By this techinique it can then be
+asked for values yielding crashes instead of returning |False|. 
 
-Make choices of which constructor arguments to merge less arbitrary.
+The restriction of the language is only first-order is easy to lift, and we
+already used a lookup-table encoding in of the Turing machine transition
+functions in Section \ref{turing}.  Systematically, the values of a higher
+order function in our setting would then be a lookup table plus a default
+value, or a closure of a concrete function occuring in the program.
 
-Make choices of which function calls to merge automatic.
+In the Reach\cite{reach} setting, it is possible to annotate a target
+expression. By making appropriate calls to the solver with the context bit
+corresponding to the target, and making sure that the necessary support logic
+is added to the solver, it should be expressible in our system as well. 
 
-Make choice of what to memoize automatic.
+Currently, we rely on the user to manually annotate function calls and
+data constructor arguments to be merged, and explicitly say 
+which function calls to memoize. This burden should be removed
+by appropriate default and automatic heuristics.
 
-Higher-order functions.
+One interesting step is to incorporate integer reasoning from SMT
+solvers. An incremental SMT solver with support for
+conflict clauses or unsatisfiable cores would be needed.
+If primitve integers are used in a recursive position, it
+would be necessary to |postpone| them, or otherwise protect the
+expansion. It would also be interesting to see
+what our gain cold be from using equality and uninterpreted functions. 
 
-Laziness.
-
-Crashing programs (and respecting laziness).
-
-Targets a la Reach.
-
-Using SMT. Integers (trivial, but how to do recursion over integers that terminates? add check everywhere?). Equality and functions can be used to encode constructor functions, selector functions, function application. This is what Leon does. Gain?
-
-If-then-else vs. new and equalHere.
+We first sketched out a translation based on \ifthenelse{} in Section \ref{ite},
+but abandoned it for using |>>>| to be able to make incremental |new| (in Section \ref{dsl}.
+It is our current belief after working with this for some time that it is 
+not possible to implement incrementality in the \ifthenelse{} setting.
 
 Using BDDs. Incrementality would not work. But otherwise it is not a bad idea. Should use the if-then-else method. The only variables would be the ones created in the input.
 
