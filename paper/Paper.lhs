@@ -874,7 +874,7 @@ xs: Lst_(Lst(Nat_)(Lst(Nat_)(Lst__)))
 xs: Lst(Nat_)(Lst(Nat_)(Lst(Nat_)(Lst__)))
 xs: Lst(Nat_)(Lst(Nat(Nat_))(Lst(Nat_)(Lst__)))
 xs: Lst(Nat_)(Lst(Nat(Nat_))(Lst(Nat(Nat_))(Lst__)))
-xs= [Z,S Z,S (S Thunk_Nat)]
+xs= [Z,S Z,S (S Delayed_Nat)]
 \end{verbatim}
 
 All but the last lines describe a partial view of the value.
@@ -886,6 +886,11 @@ then the natural numbers starts to be expanded. Note that
 in this case only the necessary values are evaluated.
 This can in general not be guaranteed.
 
+The same expansion behaviour happens also when increasing 
+the list length, |n|. The run time is also low, generating
+a sorted list of length at least 25 takes a little less than
+a second, and the list |[0..24]| is indeed obtained.
+
 % Can also generate reverese and qrev lists, can generate
 % sorted lists with |sort xs=xs|.... Later we will look at the more difficult
 % |sort xs=sort ys|. Sorting stuff
@@ -896,7 +901,7 @@ Sometimes it can be noticed that there is no counterexample regardless how the
 program is expanded.  The simplest property when this happens is perhaps asking
 for an |x| such that |x < Z|. The standard definition of |(<)| returns |False|
 for any |y < Z|, so there is a contradiction in this context. This is also the
-same context that the Thunk in |x| is waiting for, but since this is
+same context that the incremental value in |x| is waiting for, but since this is
 unsatisfiable, it will never be expanded.
 
 Let's return to the previous example with asking for an |xs|, such that
