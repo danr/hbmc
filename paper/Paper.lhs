@@ -149,7 +149,7 @@ var :: String -> Bool
 The idea behind |var| is that it creates a symbolic boolean value with the given name. It is possible to use the normal boolean operators (|(/\)|, |(\/)|, |(not)|, |(==)|, etc.) on these symbolic booleans, and the result is then computed as a normalized boolean formula in terms of the variables created by |var|. The implementation of FL uses BDDs \cite{bdd} for this.
 
 %format BoolSym = "\mathit{Bool}^\dagger"
-What happens when we use \ifthenelse{} with these symbolic booleans to choose between, for example, two given lists? This is unfortunately disallowed in FL, and leads to a run-time error. The Haskell library Duct Logic \cite{duct-logic} provided a similar feature to FL, but used the type system to avoid mixing symbolic booleans with regular Haskell values, by making symbolic booleans |BoolSym| a different type from regular |Bool|.
+What happens when we use \ifthenelse{} with these symbolic booleans to choose between, for example, two given lists? This is unfortunately disallowed in FL, and leads to a run-time error. The Haskell library Duck Logic \cite{duck-logic} provided a similar feature to FL, but used the type system to avoid mixing symbolic booleans with regular Haskell values, by making symbolic booleans |BoolSym| a different type from regular |Bool|.
 
 This paper aims to lift this restriction, and allow for all values in the program to be symbolic.
 The problem presented by an expression such as:
@@ -334,7 +334,7 @@ data ExprC s  = Expr (Fin ExprL)  (Arg a)
 The new constructor |Expr| has one argument of type |Fin ExprL| that indicates (symbolically) which constructor we are using. The other arguments are the (multi-set) union of all arguments that are used by any of the original constructors. We use the type |Arg|, which is isomorphic to the Haskell |Maybe| type to indicate that some arguments may not always be present.
 In the merged constructor |Expr|, we reuse argument positions as much as possible; for example the first arguments of |Add|, |Mul|, and |Minus| are all represented by one argument of the symbolic |Expr| constructor.
 
-We are assuming a datatype invariant that guarantees that an |Arg| argument is not |X| when it is possible that the constructor argument 
+We are enforcing a datatype invariant that guarantees that an |Arg| argument is not |X| when it is possible that the constructor has the corresponding argument.
 
 Finally, we define the actual type of symbolic expressions, by using the |Delay| type:
 \begin{code}
@@ -356,7 +356,7 @@ mul a b  = done (Expr (one Add) X       (An a)  (An b))
 neg a    = done (Expr (one Neg) X       (An a)  X)
 \end{code}
 %format TypeSym = "\mathit{Type}^\dagger"
-In general, to make a symbolic version of an algebraic datatype |Type|, we create three new types: |TypeL|, which enumerates all constructor functions from |Type|; |TypeC|, which has one argument |Fin TypeL| and moreover the union of all constructor arguments tagged with |Arg|, and |TypeSym|, which is just |Delay TypeC|. Note that this construction also works for mutally recursive datatypes.
+In general, to make a symbolic version of an algebraic datatype |Type|, we create three new types: |TypeL|, which enumerates all constructor functions from |Type|; |TypeC|, which has one argument of type |Fin TypeL| and moreover the union of all constructor arguments tagged with |Arg|, and |TypeSym|, which is just |Delay TypeC|. Note that this construction also works for mutally recursive datatypes.
 
 We have seen how to construct concrete values in these symbolic datatypes. What is left is to show how to do case analysis on symbolic datatypes, how to construct symbolic values, and how to state equality between . This is presented in the next two subsections.
 
@@ -546,9 +546,9 @@ As an example, consider the definition of the standard Haskell function |(++)|:
 In our restricted language, this function definition looks like:
 \begin{code}
 xs ++ ys = case xs of
-             Nil   -> ys
-             Cons  -> let vs = sel2 xs ++ ys
-                      in Cons (sel1 xs) vs
+             Nil   ->  ys
+             Cons  ->  let vs = sel2 xs ++ ys
+                       in Cons (sel1 xs) vs
 \end{code}
 
 \subsection{Basic translation}
@@ -636,7 +636,7 @@ f x1 ... xn =
 \end{code}
 The functions |lookMemo_f| and |storeMemo_f| perform lookup and storage in |f|'s memo table, respectively. The function |with| locally sets the context for its second argument.
 
-Second, we also memoize the copy function |(>>>)|. This function is not a function that returns a result, but it generates constraints instead. However, we treat |(>>>)| as if it was a top-level function returning |()|, and memoize it in the same way.
+Second, we also memoize the copy function |(>>>)|. This function is not a function that returns a result, but it generates constraints instead. However, we treat |(>>>)| as if it were a top-level function returning |()|, and memoize it in the same way.
 
 Memoization can have big consequences for the performance of constraint generation and solving, as shown in the experimental evaluation.
 We allow memoization to be turned on and off manually for each top-level function. We always memoize |(>>>)| on |Delay|.
@@ -1058,7 +1058,7 @@ SAT solver rather than in the size of the SAT problem.
 The memoized version performs slightly better than the unmemoized
 one. The SAT problem is here quadratic in size rather than exponential.
 
-We also compare our runtimes to Leon\cite{leon} and LazySmallCheck\cite{lsc}.
+We also compare our runtimes to Leon\cite{leon} and LazySmallCheck\cite{lazysc}.
 
 % The runtime is considerably better for the |merge'| version, and the memoised
 % version of |merge| is considerably better than the unmemoised version.
@@ -1074,7 +1074,7 @@ Run time to find |xs|, |ys| such that |xs /= ys|
 and |msort xs == msort ys| with a |length| constraint on |xs|.
 We compare our tool with different settings (\emph{merged}, \emph{memo}, \emph{unopt})
 as described in Section \ref{merge}. 
-and with LazySmallCheck\cite{lsc} and Leon\cite{leon}.
+and with LazySmallCheck\cite{lazysc} and Leon\cite{leon}.
 \label{inj}
 }
 \end{figure}
