@@ -686,20 +686,16 @@ fSym e = do  r <- new
                    x <- new
                    y <- with c § fSym x
                 
-                   when (isVar ce) §
-                     do  sel1 ce >>> r
-                   when (isAdd ce) §
-                     do  insist c
-                         sel2 ce >>> x
-                         y >>> r
-                   when (isMul ce) §
-                     do  insist c
-                         sel3 ce >>> x
-                         y >>> r
-                   when (isNeg ce) §
-                     do  insist c
-                         sel2 ce >>> x
-                         y >>> r
+                   when (isVar ce) §  do  sel1 ce >>> r
+                   when (isAdd ce) §  do  insist c
+                                          sel2 ce >>> x
+                                          y >>> r
+                   when (isMul ce) §  do  insist c
+                                          sel3 ce >>> x
+                                          y >>> r
+                   when (isNeg ce) §  do  insist c
+                                          sel2 ce >>> x
+                                          y >>> r
 \end{code}
 The above function first waits for its argument to be defined, and then creates a fresh context |c| and a fresh input |x|, and then it evaluates |fSym| with the input |x| in the context |c|. Then, the normal part of the case expression progresses, but instead of calling |fSym|, the branches simply use |insist| to make sure the context of the merged call is set, and copy the argument they need into |x|. This guarantees that |y| gets the correct value. An interesting thing to notice is that, because we are generating constraints and not evaluating values, 
 
@@ -853,7 +849,8 @@ Thus, we use |postpone| on any function which is not structurally recursive {\em
 \label{examples}
 
 In this section we aim to describe how our system works in practice by
-looking at some examples.
+looking at some examples. All experiments were run on 
+a laptop with a Intel Xeon E3-1200 processor.
 
 \subsection{Generating sorted lists}
 
