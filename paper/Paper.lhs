@@ -1545,10 +1545,10 @@ unrollings are needed, it is all done dynamically.
 
 \section{Related Work}
 
-One big source of inspiration for this work is the Leon system\cite{leon},
-Their setup is similar to ours, but encodes the problem into 
-uninterpreted functions in a SMT solver. Another difference
-is that their focus is mainly on proving properties (stated as contracts)
+One big source of inspiration for this work is Leon\cite{leon},
+which uses an encoding from functional programs to
+uninterpreted functions in a SMT solver. Besides this, they differ
+in that their focus is mainly on proving properties (stated as contracts)
 rather than finding counterexamples. Using uninterpreted
 functions in a SMT solver helps in this regard in that it can
 see equivalences between values that are "far apart".
@@ -1563,10 +1563,9 @@ essentially become the inverse of the predicate.
 
 One way to avoid the generator problem is to enumerate
 input values for testing. This is the approach taken in
-for instance SmallCheck \cite{smallcheck} which
+SmallCheck\cite{smallcheck} which
 enumerates values on depth, and can also handle nested quantifiers.
-Another work is Feat \cite{feat},
-which develops an algebra for enumerating values based on size.
+Feat\cite{feat} instead enumerates values based on size.
 Using size instead of depth as measure can sometimes be 
 beneficial as it grows slower, allowing for greater granularity.
 
@@ -1574,23 +1573,20 @@ By evaluating tagged undefined values (in a lazy language),
 it can be observed which parts of the input is actually
 demanded by the program. The forced parts of the value
 can be refined with concrete values and then repeated.
-This technique is called lazy narrowing. 
-When refining the values, it 
-might be the case that you start exploring a path which
-does not lead to a counterexample. 
-One example of this is \cite{reach}, which allows
-to do this backtracking either upon reaching a predetermined
-depth of the value or of the recursion. LazySmallCheck\cite{lazysc}, 
-combined the ideas from SmallCheck and Reach to do lazy narrowing
+This technique is called lazy narrowing, and is
+used in Curry \cite{curry}. The backtracking 
+techniques to stop exploring an unfruitful path 
+varies between different systems. Reach\cite{reach}, has two
+modes, starting backtracking on reaching a predetermined
+depth either of the intput values or the function call recursion. 
+LazySmallCheck\cite{lazysc}, combines the ideas from SmallCheck and Reach to do lazy narrowing
 on the depth of the values as a DSL in Haskell.
 
-Liquid types.
+%Liquid types. (and other contracts checkers)
 
-Curry (lazy narrowing?)
+%EasyCheck (Curry enumeration)
 
-EasyCheck
-
-Catch
+%Catch
 
 % ------------------------------------------------------------------------------
 
