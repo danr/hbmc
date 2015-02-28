@@ -1582,7 +1582,7 @@ on the depth of the values as a DSL in Haskell.
 
 \section{Discussion and Future Work}
 
-In the beginning of the paper, we made three assumptions about the language we are dealing with: (1) programs terminate, (2) programs don't crash, and (3) programs are first-order. We managed to lift restriction (1) by means of using |postpone|, as explained in Section \ref{sec:postpone}. For possibly non-terminating programs, the semantics of our language is lazy, and our counter examples are sound w.r.t. partial correctness.
+In the beginning of the paper, we made three assumptions about the language we are dealing with: (1) programs terminate, (2) programs don't crash, and (3) programs are first-order. We managed to lift restriction (1) by means of using |postpone|, as explained in Section \ref{postpone}. For possibly non-terminating programs, the semantics of our language is lazy, and our counter examples are sound w.r.t. partial correctness.
 
 Restriction (2) can be lifted also, but this is not shown in the paper. We can introduce an
 extra constructor to each data type that corresponds to a program crash. Every case should
