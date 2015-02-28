@@ -251,7 +251,6 @@ The function |when| provides a way of keeping track of local assumptions. The ex
 %format === = "\Longleftrightarrow"
 \begin{code}
 when a (insist b)  ===  insist (a ==> b)
-when a (m >>= k)   ===  when a m >>= (when a . k)
 when a (when b m)  ===  when (a /\ b) m
 when false m       ===  return ()
 \end{code}
