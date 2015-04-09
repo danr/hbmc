@@ -114,10 +114,10 @@ step _         x           = Nil
 
 step :: R T -> T -> R T
 step (Atom a)  x | a === x = Eps
-step (p :+: q) x           =  label 1 (step p x) :+: label 2 (step q x)
-step (p :&: q) x           =  label 1 (step p x) :&: label 2 (step q x)
-step (p :>: q) x           = (label 1 (step p x) :>: q) :+: if eps p then label 2 (step q x) else Nil
-step (Star p)  x           =  label 1 (step p x) :>: Star p
+step (p :+: q) x           =  label 1 (step p x) .+. label 2 (step q x)
+step (p :&: q) x           =  label 1 (step p x) .&. label 2 (step q x)
+step (p :>: q) x           = (label 1 (step p x) .>. q) .+. if eps p then label 2 (step q x) else Nil
+step (Star p)  x           =  label 1 (step p x) .>. Star p
 step _         x           = Nil
 
 rec :: R T -> [T] -> Bool
@@ -146,20 +146,14 @@ prop_Conj' p s =
   eps p =:= False ==>
     rec (p .&. (p .>. p)) s =:= False
 
-{-
-prop_FromToConj p i i' j j' s =
+prop_FromToConj_difficult p i i' j j' s =
   eps p =:= False ==>
-  i  =:= S Z ==>
-  i' =:= S (S Z) ==>
-  j  =:= S (S Z) ==>
-  j' =:= S (S (S Z)) ==>
-    rec (rep p i j .&. rep p i' j') s =:= rec (rep p (maxx i i') (minn j j')) s
--}
+    rec (rep p i j :&: rep p i' j') s =:= rec (rep p (maxx i i') (minn j j')) s
 
-i  = S Z
+i  = Z
+j  = S Z
 i' = S (S Z)
-j  = S (S Z)
-j' = S (S (S Z))
+j' = S (S Z)
 
 {-
 prop_FromToConj p s =
@@ -167,9 +161,9 @@ prop_FromToConj p s =
     rec (rep p i j .&. rep p i' j') s =:= rec (rep p (S (S Z)) (S (S Z)) {- (maxx i i') (minn j j') -}) s
     -}
 
-prop_FromToConj p a b =
+prop_FromToConj p s =
   eps p =:= False ==>
-    rec (rep p i j .&. rep p i' j') [a,b] =:= rec (rep p (S (S Z)) (S (S Z)) {- (maxx i i') (minn j j') -}) [a,b]
+    rec (rep p i j :&: rep p i' j') s =:= rec (rep p (maxx i i') (minn j j')) s
 
 maxx :: Nat -> Nat -> Nat
 maxx Z     b     = b

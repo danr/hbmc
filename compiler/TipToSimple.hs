@@ -8,7 +8,7 @@ import Tip.Fresh
 import Tip.Pretty
 import Control.Monad.Writer
 import Control.Applicative
-import TipTarget (Interface(proj,unproj))
+import TipTarget (Interface(proj,unproj,isCon))
 
 toExpr :: Interface a => T.Expr a -> Fresh (S.Expr a)
 toExpr e0 =
@@ -35,8 +35,8 @@ toExpr e0 =
            sequence
              [ do rhs' <- toExpr rhs
                   return $ (S.:=> su rhs') $ case pat of
-                    T.Default                   -> S.Default
-                    T.ConPat (Global k _ _ _) _ -> S.ConPat k
+                    T.Default                 -> S.Default
+                    T.ConPat (Global k _ _) _ -> S.ConPat k
              | T.Case pat rhs <- alts
              ]
 
@@ -66,17 +66,17 @@ toSimple' e0 =
   case e0 of
     Lcl (Local x _) -> return (Var x)
 
-    Gbl (Global f _ _ ns) :@: args ->
+    Gbl (Global f _ _) :@: args ->
       do xn <- mapM toSimple' args
-         case ns of
-           ConstructorNS -> do return (Con f xn)
-           FunctionNS    -> do a <- lift fresh
-                               let lt = case unproj f of
-                                          Just (tc,i) -> let [Var x] = xn
-                                                         in  Proj tc i (S.Var x)
-                                          Nothing     -> S.Apply f xn
-                               tell [(a,lt)]
-                               return (Var a)
+         if isCon f
+           then do return (Con f xn)
+           else do a <- lift fresh
+                   let lt = case unproj f of
+                              Just (tc,i) -> let [Var x] = xn
+                                             in  Proj tc i (S.Var x)
+                              Nothing     -> S.Apply f xn
+                   tell [(a,lt)]
+                   return (Var a)
 
     T.Let (T.Local x _) e1 e2 ->
       do s1 <- toSimple' e1

@@ -2,7 +2,8 @@
 {-# LANGUAGE RecordWildCards #-}
 module TipMonadic where
 
-import Tip.Pretty (Pretty,ppRender)
+import Tip.Pretty (PrettyVar,ppRender)
+import Tip.Pretty.SMT ()
 import Tip.Fresh
 
 import TipSimple as S
@@ -81,8 +82,13 @@ superSimple (S.Let _ S.Apply{} e) = superSimple e
 superSimple S.Match{}             = False
 superSimple S.Simple{}            = True
 
+collectQuant :: Tip.Expr a -> ([Tip.Local a],Tip.Expr a)
+collectQuant (Tip.Quant _ Tip.Forall ls e) = (ls,e)
+collectQuant e = ([],e)
+
 trProp :: Interface a => Tip.Formula a -> Fresh (a,H.Decl a)
-trProp (Tip.Formula Tip.Prove [] (Tip.collectQuant -> (lcls,tm)))
+trProp (Tip.Formula Tip.Assert [] (Tip.Builtin Tip.Not Tip.:@: [tm])) = trProp (Tip.Formula Tip.Prove [] tm)
+trProp (Tip.Formula Tip.Prove [] (collectQuant -> (lcls,tm)))
   = do let input = [ BindTyped x (modTyCon wrapData (trType t)) (var (api "newInput"))
                    | Tip.Local x t <- lcls ]
        terms <- mapM trTerm (collectTerms tm)
@@ -95,13 +101,13 @@ trProp fm = error $ "Invalid property: " ++ ppRender fm ++ "\n(cannot be polymor
 
 type Term a = (Bool,Tip.Expr a,Tip.Expr a)
 
-collectTerms :: Pretty a => Tip.Expr a -> [Term a]
+collectTerms :: (Ord a,PrettyVar a) => Tip.Expr a -> [Term a]
 collectTerms (Tip.Builtin Tip.Implies Tip.:@: [pre,post])
   = let (l,r) = collectEqual pre
     in  (False,l,r):collectTerms post
 collectTerms t = let (l,r) = collectEqual t in [(True,l,r)]
 
-collectEqual :: Pretty a => Tip.Expr a -> (Tip.Expr a,Tip.Expr a)
+collectEqual :: (Ord a,PrettyVar a) => Tip.Expr a -> (Tip.Expr a,Tip.Expr a)
 collectEqual (Tip.Builtin Tip.Equal Tip.:@: [l,r]) = (l,r)
 collectEqual p = error $ "Cannot understand property: " ++ ppRender p
 

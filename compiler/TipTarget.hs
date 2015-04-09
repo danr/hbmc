@@ -21,7 +21,7 @@ import TipLift (Call)
 -- get
 -- getData
 
-class TipLift.Call a => Interface a where
+class (Show a,TipLift.Call a) => Interface a where
   prelude   :: String -> a
   api       :: String -> a
 
@@ -37,6 +37,8 @@ class TipLift.Call a => Interface a where
   wrapData  :: a -> a
   caseData  :: a -> a -- caseNat
   mkCon     :: a -> a -- the pure constructors
+
+  isCon     :: a -> Bool -- is this a constructor?
 
 data Decls a = Decls [Decl a]
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
@@ -104,18 +106,18 @@ data Pat a = VarPat a | ConPat a [Pat a] | TupPat [Pat a] | WildPat
 data Stmt a = Bind a (Expr a) | BindTyped a (Type a) (Expr a) | Stmt (Expr a)
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
-instance Pretty a => Pretty (Expr a) where
+instance PrettyVar a => Pretty (Expr a) where
   pp e =
     case e of
-      Apply x [] -> pp x
-      Apply x es | Lam ps b <- last es -> ((pp x $\ fsep (map pp_par (init es))) $\ "(\\" <+> fsep (map pp ps) <+> "->") $\ pp b <> ")"
-      Apply x es -> pp x $\ fsep (map pp_par es)
+      Apply x [] -> ppVar x
+      Apply x es | Lam ps b <- last es -> ((ppVar x $\ fsep (map pp_par (init es))) $\ "(\\" <+> fsep (map pp ps) <+> "->") $\ pp b <> ")"
+      Apply x es -> ppVar x $\ fsep (map pp_par es)
       Do ss e    -> "do" <+> (vcat (map pp (ss ++ [Stmt e])))
       Lam ps e   -> "\\" <+> fsep (map pp ps) <+> "->" $\ pp e
       List es    -> brackets (fsep (punctuate "," (map pp es)))
       Tup es     -> tuple (map pp es)
       LinearTup es -> parens (fsep (punctuate "," (map pp es)))
-      String s   -> "\"" <> pp s <> "\""
+      String s   -> "\"" <> ppVar s <> "\""
       Noop       -> "Prelude.return ()"
    where
     pp_par e0 =
@@ -127,16 +129,16 @@ instance Pretty a => Pretty (Expr a) where
         String{}    -> pp e0
         _           -> parens (pp e0)
 
-instance Pretty a => Pretty (Stmt a) where
-  pp (Bind x e)        = pp x <+> "<-" $\ pp e
-  pp (BindTyped x t e) = (pp x <+> "::" $\ pp t <+> "<-") $\ pp e
+instance PrettyVar a => Pretty (Stmt a) where
+  pp (Bind x e)        = ppVar x <+> "<-" $\ pp e
+  pp (BindTyped x t e) = (ppVar x <+> "::" $\ pp t <+> "<-") $\ pp e
   pp (Stmt e)          = pp e
 
-instance Pretty a => Pretty (Pat a) where
+instance PrettyVar a => Pretty (Pat a) where
   pp p =
     case p of
-      VarPat x    -> pp x
-      ConPat k ps -> parens (pp k $\ fsep (map pp ps))
+      VarPat x    -> ppVar x
+      ConPat k ps -> parens (ppVar k $\ fsep (map pp ps))
       TupPat ps   -> tuple (map pp ps)
       WildPat     -> "_"
 
@@ -144,22 +146,22 @@ tuple :: [Doc] -> Doc
 tuple []     = "()"
 tuple (d:ds) = parens (sep [d <> ",",tuple ds])
 
-instance Pretty a => Pretty (Decl a) where
+instance PrettyVar a => Pretty (Decl a) where
   pp d =
     case d of
-      TySig f ctx t -> (pp f <+> "::" $\ parens (fsep (punctuate "," (map pp ctx))) <+> "=>") $\ pp t
+      TySig f ctx t -> (ppVar f <+> "::" $\ parens (fsep (punctuate "," (map pp ctx))) <+> "=>") $\ pp t
       FunDecl f xs ->
         vcat
-          [ (pp f $\ fsep (map pp ps) <+> "=") $\ pp b
+          [ (ppVar f $\ fsep (map pp ps) <+> "=") $\ pp b
           | (ps,b) <- xs
           ]
       DataDecl tc tvs cons derivs ->
         (((case cons of
              [(_,[_])] -> "newtype"
-             _         -> "data") $\ pp tc) $\ fsep (map pp tvs) <+> "=") $\
+             _         -> "data") $\ ppVar tc) $\ fsep (map ppVar tvs) <+> "=") $\
           (fsep (punctuate " |" [ ppCon c ts | (c,ts) <- cons ]) $$
           (if null derivs then empty
-           else "deriving" <+> parens (fsep (punctuate "," (map pp derivs)))))
+           else "deriving" <+> parens (fsep (punctuate "," (map ppVar derivs)))))
       InstDecl ctx head ds ->
         (("instance" $\
           ((if null ctx then empty else
@@ -168,20 +170,20 @@ instance Pretty a => Pretty (Decl a) where
       AssociatedType lhs rhs -> "type" <+> pp lhs <+> "=" $\ pp rhs
       decl `Where` ds -> pp decl $\ "where" $\ vcat (map pp ds)
 
-ppCon :: Pretty a => a -> [Type a] -> Doc
-ppCon c ts = case ppRender c of
+ppCon :: PrettyVar a => a -> [Type a] -> Doc
+ppCon c ts = case varStr c of
   '(':':':xs | [t1,t2] <- ts -> pp t1 <+> (":" <> text (init xs)) $\ pp t2
-  _                          -> pp c $\ fsep (map (parens . pp) ts)
+  _                          -> ppVar c $\ fsep (map (parens . pp) ts)
 
-instance Pretty a => Pretty (Decls a) where
+instance PrettyVar a => Pretty (Decls a) where
   pp (Decls ds) = vcat (map pp ds)
 
-instance Pretty a => Pretty (Type a) where
+instance PrettyVar a => Pretty (Type a) where
   pp t0 =
     case t0 of
-      TyCon t []  -> pp t
-      TyCon t ts  -> pp t $\ fsep (map (parens . pp) ts)
-      TyVar x     -> pp x
+      TyCon t []  -> ppVar t
+      TyCon t ts  -> ppVar t $\ fsep (map (parens . pp) ts)
+      TyVar x     -> ppVar x
       TyTup ts    -> tuple (map pp ts)
       TyArr t1 t2 -> parens (pp t1 <+> "->" $\ pp t2)
 

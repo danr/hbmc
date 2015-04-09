@@ -16,11 +16,11 @@ dataInfo :: forall a . Eq a => Datatype a -> (DataInfo a,[Type a])
 dataInfo (Datatype tc _tvs cons) = (indexes,types)
   where
     types :: [Type a]
-    types = merge [ map trType args | Constructor _ args <- cons ]
+    types = merge [ map (trType . snd) args | Constructor _ _ args <- cons ]
 
     indexes =
-        [ (c,(tc,index (map trType args) (types `zip` [0..])))
-        | Constructor c args <- cons
+        [ (c,(tc,index (map (trType . snd) args) (types `zip` [0..])))
+        | Constructor c _ args <- cons
         ]
 
     index :: [Type a] -> [(Type a,Int)] -> [Int]
@@ -52,7 +52,7 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
  where
   (indexes,types) = dataInfo dt
 
-  strict = not lazy && and [ null args | Constructor _ args <- cons ]
+  strict = not lazy && and [ null args | Constructor _ _ args <- cons ]
 
   a ! b | strict    = b
         | otherwise = a
@@ -90,7 +90,7 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
   --  deriving ( Eq, Ord, Show )
   labels :: Decl a
   labels = DataDecl (conLabel tc) []
-    [ (conLabel c,[]) | Constructor c _ <- cons ]
+    [ (conLabel c,[]) | Constructor c _ _ <- cons ]
     (map prelude ["Eq","Ord","Show"])
 
   -- instance ConstructiveData L where
@@ -99,7 +99,7 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
   constructive = InstDecl []
     (TyCon (api "ConstructiveData") [TyCon (conLabel tc) []])
     [funDecl (api "constrs") []
-      (List [var (conLabel c) | Constructor c _ <- cons ])]
+      (List [var (conLabel c) | Constructor c _ _ <- cons ])]
 
   -- instance Equal a => EqualData R (Maybe a, (Maybe (RE a), (Maybe (RE a), ()))) where
   --   equalData h =
@@ -130,8 +130,8 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
   -- data Nat_Repr = Zero_Repr | Succ_Repr Nat_Repr | Nat_Thunk
   repr :: Decl a
   repr = DataDecl (conRepr tc) tvs
-    ( [ (conRepr c,map (modTyCon conRepr . trType) args)
-      | Constructor c args <- cons
+    ( [ (conRepr c,map (modTyCon conRepr . trType . snd) args)
+      | Constructor c _ args <- cons
       ] ++
       [ (thunkRepr tc,[]) ])
     [prelude "Show"]
@@ -146,7 +146,7 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
   -- zer   = Nat (con Zero (Nothing, ()))
   -- suc n = Nat (con Succ (Just n, ()))
   make_con :: Constructor a -> Fresh (Decl a)
-  make_con (Constructor c _) =
+  make_con (Constructor c _ _) =
     do (xn,prenex) <- con_prenex c
        let tuple =
              [ case mx of
@@ -163,7 +163,7 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
 
   -- f Succ (Just n, ()) = do n' <- get n; return (Succ_Repr n')
   make_get_row :: Constructor a -> Fresh ([Pat a],Expr a)
-  make_get_row (Constructor c _) =
+  make_get_row (Constructor c _ _) =
     do (xn,prenex) <- con_prenex c
        let tuple =
              [ case mx of

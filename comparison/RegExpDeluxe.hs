@@ -171,29 +171,27 @@ Z{} ==== S{} = False
 S{} ==== Z{} = False
 S n ==== S m = n ==== m
 
-{-
 prop_FromToConj p i i' j j' s =
-  eps p *=* False ==>
-  i  *=* S Z ==>
-  i' *=* S (S Z) ==>
-  j  *=* S (S Z) ==>
-  j' *=* S (S (S Z)) ==>
-    rec (rep p i j .&. rep p i' j') s *=* rec (rep p (maxx i i') (minn j j')) s
--}
+  neg (epsProp p) *=>*
+    rec (rep p i j :&: rep p i' j') s *=* rec (rep p (maxx i i') (minn j j')) s
 
-i  = S Z
+prop_FromToConj_ p i i' j j' a b =
+  neg (epsProp p) *=>*
+    rec (rep p i j :&: rep p i' j') [a,b] *=* rec (rep p (maxx i i') (minn j j')) [a,b]
+
+i  = Z
+j  = S Z
 i' = S (S Z)
-j  = S (S Z)
-j' = S (S (S Z))
+j' = S (S Z)
 
 prop_FromToConj' p s =
   neg (epsProp p)
-    *=>* rec (rep p i j .&. rep p i' j') s
+    *=>* rec (rep p i j :&: rep p i' j') s
     *=*  rec (rep p (maxx i i') (minn j j')) s
 
-prop_FromToConj p a b =
+prop_FromToConj_easy p a b =
   neg (epsProp p)
-    *=>* rec (rep p i j .&. rep p i' j') [a,b]
+    *=>* rec (rep p i j :&: rep p i' j') [a,b]
     *=>* rec (rep p (maxx i i') (minn j j')) [a,b]
 
 maxx :: Nat -> Nat -> Nat

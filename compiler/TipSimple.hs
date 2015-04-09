@@ -61,30 +61,30 @@ substProj su =
 bindLets :: [(a,Let a)] -> Expr a -> Expr a
 bindLets = flip (foldr (\ (x,lt) e -> Let x lt e))
 
-instance Pretty a => Pretty (Expr a) where
+instance PrettyVar a => Pretty (Expr a) where
   pp (Simple s) = pp s
-  pp (Let x lt e) = sep ["let" $\ pp x <+> "=" $\ pp lt <> ";",pp e]
+  pp (Let x lt e) = sep ["let" $\ ppVar x <+> "=" $\ pp lt <> ";",pp e]
   pp (Match tc s s' calls alts) =
-    ("case" <+> "{-" <+> pp tc <+> "-}" $\ pp s <+> "of")
+    ("case" <+> "{-" <+> ppVar tc <+> "-}" $\ pp s <+> "of")
       $\ (if null calls then empty else braces (vcat (punctuate ";" (map pp calls))))
-      $$ vcat [pp s' <> "@" <> pp alt | alt <- alts]
+      $$ vcat [ppVar s' <> "@" <> pp alt | alt <- alts]
 
-instance Pretty a => Pretty (Let a) where
-  pp (Apply f args) = pp f <+> fsep (map pp args)
-  pp (Proj t i x)   = "proj" <> pp t <> "_" <> pp i <+> pp x
+instance PrettyVar a => Pretty (Let a) where
+  pp (Apply f args) = ppVar f <+> fsep (map pp args)
+  pp (Proj t i x)   = "proj" <> ppVar t <> "_" <> int i <+> pp x
 
-instance Pretty a => Pretty (Simple a) where
-  pp (Var a)        = pp a
-  pp (Con k [])     = pp k
-  pp (Con k ss)     = parens (pp k $\ fsep (map pp ss))
+instance PrettyVar a => Pretty (Simple a) where
+  pp (Var a)        = ppVar a
+  pp (Con k [])     = ppVar k
+  pp (Con k ss)     = parens (ppVar k $\ fsep (map pp ss))
 
-instance Pretty a => Pretty (Call a) where
-  pp (Call f xs e) = (pp f $\ fsep (map pp xs)) $\ "=" <+> pp e
+instance PrettyVar a => Pretty (Call a) where
+  pp (Call f xs e) = (ppVar f $\ fsep (map ppVar xs)) $\ "=" <+> pp e
 
-instance Pretty a => Pretty (Alt a) where
+instance PrettyVar a => Pretty (Alt a) where
   pp (p :=> e) = pp p <+> "->" $\ pp e
 
-instance Pretty a => Pretty (Pat a) where
+instance PrettyVar a => Pretty (Pat a) where
   pp Default    = "_"
-  pp (ConPat k) = pp k
+  pp (ConPat k) = ppVar k
 

@@ -4,6 +4,7 @@ module TipLift where
 
 import Tip
 import Tip.Pretty
+import Tip.Pretty.SMT hiding (apply)
 import Tip.Fresh
 import Tip.Simplify
 
@@ -24,17 +25,17 @@ class Name a => Call a where
 type Label = Expr
 
 labels :: Call a => Expr a -> [Label a]
-labels e = nub [ lbl | Gbl (Global f _ _ _) :@: [lbl,_] <- universeBi e, f == labelName ]
+labels e = nub [ lbl | Gbl (Global f _ _) :@: [lbl,_] <- universeBi e, f == labelName ]
 
 labelled :: Call a => Expr a -> Label a -> [Expr a]
-e `labelled` l = [ el | Gbl (Global f _ _ _) :@: [lbl,el] <- universeBi e, f == labelName, l == lbl ]
+e `labelled` l = [ el | Gbl (Global f _ _) :@: [lbl,el] <- universeBi e, f == labelName, l == lbl ]
 
 antiMatch :: Call a => [Expr a] -> Fresh ((Local a,Expr a),Expr a)
 antiMatch xs =
   do let (Local f ft:_fs,argss) =
            unzip
              [ (Local fx (exprType x),args)
-             | x <- xs, let Gbl (Global fx _ _ _) :@: args = x
+             | x <- xs, let Gbl (Global fx _ _) :@: args = x
              ]
 
      g <- refresh f
@@ -56,7 +57,7 @@ antiMatch xs =
      return
        ( (lg, Lam rights (Gbl (fun f) :@: args))
        , Lam (map (either id id) vars)
-             (Gbl (Global callName (PolyType [] [] ft) [] FunctionNS)
+             (Gbl (Global callName (PolyType [] [] ft) [])
                :@: (Lcl lg:map Lcl rights))
        )
 
@@ -65,12 +66,12 @@ liftCall l e =
   do ((g,g_def),f_repl) <- antiMatch (e `labelled` l)
      e' <- flip transformBiM e $
              \ e0 -> case e0 of
-                       Gbl (Global f _ _ _) :@: [lbl,_ :@: args]
+                       Gbl (Global f _ _) :@: [lbl,_ :@: args]
                          | f == labelName
                          , l == lbl
                          -> do f_repl' <- freshen f_repl
                                return (f_repl' `apply` args)
-                       Gbl (Global f _ _ _) :@: [lbl,rest]
+                       Gbl (Global f _ _) :@: [lbl,rest]
                          | f == skipName
                          , l == lbl
                          -> return (Gbl (fun cancelName) :@: [Lcl g,rest])
@@ -121,5 +122,5 @@ removeLabelsFromTheory
                      ]
      return Theory{thy_func_decls=fns,..}
 
-fun a = Global a NoPolyType [] FunctionNS
+fun a = Global a NoPolyType []
 

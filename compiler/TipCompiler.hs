@@ -12,8 +12,8 @@ import Data.Ord
 import qualified Data.Foldable as F
 import System.Environment
 import Text.PrettyPrint
-import Text.Show.Pretty hiding (Name)
-import Tip
+import Text.Show.Pretty hiding (Name,Con)
+import Tip hiding (bool)
 import Tip.CommuteMatch
 import Tip.Delambda
 import Tip.Fresh
@@ -24,6 +24,8 @@ import Tip.Params
 import Tip.Pretty
 import Tip.Simplify
 import Tip.Utils.Renamer
+
+import qualified Data.Set as S
 
 import Control.Monad.Writer hiding ((<>))
 
@@ -38,18 +40,25 @@ import TipToSimple
 import TipData
 -- Main
 
+import Tip.Parser
 
 main :: IO ()
 main = do
     f:es <- getArgs
-    thy <- readHaskellFile Params
-      { file = f
-      , include = []
-      , flags = [] -- [PrintCore,PrintProps,PrintExtraIds]
-      , only = [ s | 'o':s <- es ]
-      , extra = []
-      , extra_trans = [] -- es
-      }
+    thy <- case reverse f of
+        's':'h':'.':_ ->
+          do renameTheory <$>
+               readHaskellFile Params
+                 { file = f
+                 , include = []
+                 , flags = [] -- [PrintCore,PrintProps,PrintExtraIds]
+                 , only = [ s | 'o':s <- es ]
+                 , extra = []
+                 , extra_trans = [] -- es
+                 }
+        _ ->
+          do mthy <- parse <$> readFile f
+             return (either error renameTheory mthy)
     -- putStrLn (ppRender thy)
     let remove_labels = any (== "unlabel") es
     let memos  = [ Var s | 'm':s <- es ]
@@ -58,9 +67,9 @@ main = do
 
     let mcs = (memos,checks)
 
-    let thy0 = straightLabel remove_labels (addBoolToTheory (renameWith disambigId thy))
+    let thy0 = straightLabel remove_labels (addBoolToTheory thy)
 
-    let thy1 = (simplifyExpr aggressively <=< delambda) `vifne` thy0
+    let thy1 = (simplifyExpr aggressively <=< delambda) `freshPass` thy0
 
 
     putStrLn "{-"
@@ -74,12 +83,12 @@ main = do
     ppp thy1
     putStrLn "-}"
 
-    let thy2 = commuteMatch `vifne` thy1
+    let thy2 = commuteMatch `freshPass` thy1
 
     let (dis,_) = unzip (map dataInfo (thy_data_decls thy2))
         di      = concat dis
 
-    let thy3 = (removeLabelsFromTheory <=< projectPatterns di) `vifne` thy2
+    let thy3 = (removeLabelsFromTheory <=< projectPatterns di) `freshPass` thy2
 
     putStrLn "{-"
     ppp thy3
@@ -109,14 +118,9 @@ main = do
     putStrLn "import LibHBMC"
     ppp decls
 
-vifne :: F.Foldable f => (f Var -> Fresh a) -> f Var -> a
-f `vifne` x = runFreshFrom (maximumOn varMax x) (f x)
-
-maximumOn :: (F.Foldable f,Ord b) => (a -> b) -> f a -> b
-maximumOn f = f . F.maximumBy (comparing f)
-
 data Var
   = Var String | Refresh Var Int
+  | Con String
   | Api String | Prelude String
   | Label | Skip | Call | Cancel | Proj Var Int | MProj Var Int
  deriving (Show,Eq,Ord)
@@ -142,24 +146,29 @@ instance Interface Var where
 
   mainFun     = Var "main"
 
-  conLabel  f = Var $ "L_" ++ ppRender f
-  conRepr   f = f
-  thunkRepr f = Var $ "Thunk_" ++ ppRender f
-  wrapData  f = Var $ "D_" ++ ppRender f
-  caseData  f = Var $ "case" ++ ppRender f
-  mkCon     f = Var $ "con" ++ ppRender f
+  conLabel  f = Var $ "L_" ++ varStr f
+  conRepr   f = Var $ "R_" ++ varStr f
+  thunkRepr f = Var $ "Thunk_" ++ varStr f
+  wrapData  f = Var $ "D_" ++ varStr f
+  caseData  f = Var $ "case" ++ varStr f
+  mkCon     f = Var $ "con" ++ varStr f
 
-instance Pretty Var where
-  pp x =
+  isCon (Refresh v _) = isCon v
+  isCon Con{}         = True
+  isCon _             = False
+
+instance PrettyVar Var where
+  varStr x =
     case x of
-      Var ""      -> text "x"
-      Var xs      -> text (escape xs)
-      Refresh v i -> pp v <> int i
-      Proj x i    -> "proj" {- <> pp x <> "_" -} <> pp (i+1)
-      MProj x i   -> "mproj" {- <> pp x <> "_" -} <> pp (i+1)
-      Api x       -> text x
-      Prelude x   -> "Prelude." <> text x
-      _           -> text (show x)
+      Var ""      -> "x"
+      Var xs      -> escape xs
+      Con x       -> varStr (Var x)
+      Refresh v i -> varStr v ++ show i
+      Proj x i    -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
+      MProj x i   -> "mproj" {- <> pp x <> "_" -} ++ show (i+1)
+      Api x       -> x
+      Prelude x   -> "Prelude." ++ x
+      _           -> show x
 
 
 isSym x = x `elem` ":!@#$%^&*\\/=?><+-"
@@ -175,17 +184,27 @@ escChar :: Char -> String
 escChar x | isAlphaNum x || x == '\'' || x == '_' = [x]
           | otherwise = show (ord x)
 
-disambigId :: Id -> [Var]
-disambigId i = vs : [ Refresh vs x | x <- [0..] ]
-  where
-    vs = case ppId i of
-           "label" -> Label
-           []      -> Var "x"
-           xs      -> Var xs
+renameTheory :: forall a . (Ord a,PrettyVar a) => Theory a -> Theory Var
+renameTheory thy = renameWith disambigId thy
+ where
+  cons = S.fromList [ c | Constructor c _ _ <- universeBi thy ]
+
+  disambigId :: a -> [Var]
+  disambigId i = vs : [ Refresh vs x | x <- [0..] ]
+    where
+      var_or_con
+        | i `S.member` cons = Con
+        | otherwise         = Var
+
+      vs = case varStr i of
+             "label" -> Label
+             []      -> var_or_con "x"
+             xs      -> var_or_con xs
 
 instance Name Var where
   fresh     = refresh (Var "")
   refresh v = Refresh v `fmap` fresh
+  getUnique = varMax
 
 instance Call Var where
   labelName  = Label
@@ -196,19 +215,20 @@ instance Call Var where
 straightLabel :: forall f a . (TransformBi (Expr a) (f a),Call a) => Bool -> f a -> f a
 straightLabel remove_labels = transformExprIn $ \ e0 ->
   case e0 of
-    (projAt -> Just (projAt -> Just (projGlobal -> Just (x,g),e1),e2))
+    (projAt' -> Just (projAt' -> Just (projGlobal' -> Just (x,g),e1),e2))
       | x == labelName
       -> if remove_labels then e2 else g :@: [e1,e2]
     _ -> e0
 
 
-projAt :: Expr a -> Maybe (Expr a,Expr a)
-projAt (Builtin (At 1) :@: [a,b]) = Just (a,b)
-projAt _                          = Nothing
+projAt' :: Expr a -> Maybe (Expr a,Expr a)
+projAt' (Builtin At :@: [a,b]) = Just (a,b)
+projAt' _                      = Nothing
 
-projGlobal :: Expr a -> Maybe (a,Head a)
-projGlobal (hd@(Gbl (Global x _ _ _)) :@: []) = Just (x,hd)
-projGlobal _                                  = Nothing
+projGlobal' :: Expr a -> Maybe (a,Head a)
+projGlobal' (hd@(Gbl (Global x _ _)) :@: []) = Just (x,hd)
+projGlobal' _                                = Nothing
+
 
 {-
 memosAndChecks :: Theory Var -> (Theory Var,([Var],[Var]))
@@ -252,12 +272,11 @@ addBool = transformBi f . transformBi g
         (if b then true else false)
         (PolyType [] [] (Tip.TyCon bool []))
         []
-        ConstructorNS
 
 addBoolToTheory :: Booly a => Theory a -> Theory a
 addBoolToTheory Theory{..} = addBool Theory{thy_data_decls=bool_decl:thy_data_decls,..}
   where
-    bool_decl = Datatype bool [] [Constructor false [],Constructor true []]
+    bool_decl = Datatype bool [] [Constructor false false [],Constructor true true []]
 
 -- project
 
@@ -288,7 +307,7 @@ projectExpr di = go
                                [ (v,Gbl (Global
                                            (proj tc i)
                                            (PolyType [] [] (lcl_type v))
-                                           [] FunctionNS)
+                                           [])
                                     :@: [Lcl lx])
                                | (v,i) <- vars `zip` ixs
                                ]
@@ -300,7 +319,7 @@ projectExpr di = go
       hd :@: args -> (hd :@:) <$> mapM go args
       Lam args e  -> Lam args <$> go e
       Let l e1 e2 -> Let l <$> go e1 <*> go e2
-      Quant q l e -> Quant q l <$> go e
+      Quant qi q l e -> Quant qi q l <$> go e
       Lcl l       -> return (Lcl l)
 
   make_let x (Lcl y) e = (Lcl y // x) e
@@ -314,6 +333,7 @@ pprint = putStrLn . ppShow
 ppp :: Pretty a => a -> IO ()
 ppp = putStrLn . ppRender
 
+{-
 instance Pretty String where
   pp = text
 
@@ -326,6 +346,7 @@ instance Call String where
 instance Name String where
   fresh     = refresh "u"
   refresh x = fresh >>= \ i -> return (x ++ "_" ++ show (i :: Int))
+-}
 
 {-
 instance Proj String where
