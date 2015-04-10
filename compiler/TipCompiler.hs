@@ -64,10 +64,11 @@ main = do
     let memos  = [ Var s | 'm':s <- es ]
     let checks = [ Var s | 'c':s <- es ]
     let lazy   = any (== "lazy") es
+    let quiet  = any (== "quiet") es
 
     let mcs = (memos,checks)
 
-    let thy0 = straightLabel remove_labels (addBoolToTheory thy)
+    let thy0 = straightLabel remove_labels (addNatToTheory (addBoolToTheory thy))
 
     let thy1 = (simplifyExpr aggressively <=< delambda) `freshPass` thy0
 
@@ -104,7 +105,7 @@ main = do
     let decls = runFreshFrom (maximumOn varMax thy3) $
           do fn_decls <- mapM (trFun mcs) func_decls
              dt_decls <- mapM (trDatatype lazy) data_decls
-             (prop_names,prop_decls) <- mapAndUnzipM trProp (thy_form_decls thy3)
+             (prop_names,prop_decls) <- mapAndUnzipM (trProp (Con "SkNat") quiet) (thy_form_decls thy3)
              let main_decl = funDecl mainFun []
                    (mkDo [Stmt (Apply (api "run") [var p]) | p <- prop_names] Noop)
              return (Decls (concat fn_decls ++ concat dt_decls ++ prop_decls ++ [main_decl]))
@@ -174,6 +175,8 @@ instance PrettyVar Var where
 isSym x = x `elem` ("_:!@#$%^&*\\/=?><+-" :: String)
 
 escape :: String -> String
+escope "equals" = "eqls"
+escope "equal"  = "eql"
 escape (':':xs) | all isSym xs = "(:" ++ xs ++ ")"
 escape (':':xs) = 'K':escape xs
 escape xs = case concatMap escChar xs of
@@ -281,6 +284,15 @@ addBoolToTheory :: Booly a => Theory a -> Theory a
 addBoolToTheory Theory{..} = addBool Theory{thy_data_decls=bool_decl:thy_data_decls,..}
   where
     bool_decl = Datatype bool [] [Constructor false false [],Constructor true true []]
+
+addNatToTheory :: Theory Var -> Theory Var
+addNatToTheory Theory{..} = addBool Theory{thy_data_decls=nat_decl:thy_data_decls,..}
+  where
+    nat_decl =
+      Datatype (Con "SkNat") []
+        [Constructor (Con "SkZero") (Var "isSkZero") []
+        ,Constructor (Con "SkSucc") (Var "isSkSucc") [(Var "predSk",Tip.TyCon (Con "SkNat") [])]
+        ]
 
 -- project
 

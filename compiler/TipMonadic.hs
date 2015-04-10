@@ -86,9 +86,18 @@ collectQuant :: Tip.Expr a -> ([Tip.Local a],Tip.Expr a)
 collectQuant (Tip.Quant _ Tip.Forall ls e) = (ls,e)
 collectQuant e = ([],e)
 
-trProp :: Interface a => Tip.Formula a -> Fresh (a,H.Decl a)
-trProp (Tip.Formula Tip.Assert [] (Tip.Builtin Tip.Not Tip.:@: [tm])) = trProp (Tip.Formula Tip.Prove [] tm)
-trProp (Tip.Formula Tip.Prove [] (collectQuant -> (lcls,tm)))
+trProp :: Interface a => a -> Bool -> Tip.Formula a -> Fresh (a,H.Decl a)
+trProp sk quiet (Tip.Formula r tvs term) | not (null tvs) =
+  let su = Tip.transformTypeInExpr $ \ty ->
+             case ty of
+               Tip.TyVar tv | tv `elem` tvs -> Tip.TyCon sk []
+               _ -> ty
+  in trProp sk quiet (Tip.Formula r [] (su term))
+  -- NB: Better way is just to run deprove, and the make all abstract sorts
+  -- to be skolemised nats
+
+trProp sk quiet (Tip.Formula Tip.Assert [] (Tip.Builtin Tip.Not Tip.:@: [tm])) = trProp sk quiet (Tip.Formula Tip.Prove [] tm)
+trProp sk quiet (Tip.Formula Tip.Prove [] (collectQuant -> (lcls,tm)))
   = do let input = [ BindTyped x (modTyCon wrapData (trType t)) (var (api "newInput"))
                    | Tip.Local x t <- lcls ]
        terms <- mapM trTerm (collectTerms tm)
@@ -96,8 +105,11 @@ trProp (Tip.Formula Tip.Prove [] (collectQuant -> (lcls,tm)))
        return $ (,) f $ funDecl f [] $
          mkDo (input ++ concat terms)
            (H.Apply (api "solveAndSee")
-             [tagShow (map Tip.lcl_name lcls)])
-trProp fm = error $ "Invalid property: " ++ ppRender fm ++ "\n(cannot be polymorphic)"
+             [var $ prelude $ if quiet then "True" else "False"
+             ,var $ prelude $ if quiet then "False" else "True"
+             ,tagShow (map Tip.lcl_name lcls)
+             ])
+trProp _ _ fm = error $ "Invalid property: " ++ ppRender fm ++ "\n(cannot be polymorphic)"
 
 type Term a = (Bool,Tip.Expr a,Tip.Expr a)
 

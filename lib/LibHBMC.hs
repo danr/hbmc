@@ -75,8 +75,8 @@ miniConflict xs ys =
            xs1 = drop k xs
 -}
 
-trySolve :: H (Maybe Bool)
-trySolve = H (\env ->
+trySolve :: Bool -> H (Maybe Bool)
+trySolve quiet = H (\env ->
   do ws <- reverse `fmap` readIORef (waits env)
      putStrLn $ "== Try solve with " ++ show (length ws) ++ " waits =="
      b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws ])
@@ -92,21 +92,25 @@ trySolve = H (\env ->
                       return (Just False)
                   else
                    let p0:_ = [ p | (p,_,_) <- ws, p `elem` qs ] in
-                     do putStrLn ("Conflict: " ++ show (length qs))
+                     do verbose ("Conflict: " ++ show (length qs))
                         b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws, p `elem` qs, p /= p0 ])
                         --b <- return True
                         if b then
                           let (p,unq,H h):_ = [ t | t@(p,_,_) <- ws, p `elem` qs ] in
                             do let ws' = [ t | t@(_,unq',_) <- reverse ws, unq /= unq' ]
-                               putStrLn ("Points: " ++ show (length ws'))
+                               verbose ("Points: " ++ show (length ws'))
                                writeIORef (waits env) ws'
-                               putStrLn "Expanding..."
+                               verbose "Expanding..."
                                h env{ here = p }
-                               putStrLn "Expansion done"
+                               verbose "Expansion done"
                                return Nothing
                         else
                          do mini
          in mini
+  )
+ where
+  verbose | quiet     = const (return ())
+          | otherwise = putStrLn
 
 {-
        do putStrLn "Finding a contradiction..."
@@ -133,22 +137,21 @@ trySolve = H (\env ->
                    putStrLn "Finding a point to expand..."
                    find (reverse ws)
 -}
-  )
 
-solve' :: H () -> H Bool
-solve' h =
+solve' :: Bool -> H () -> H Bool
+solve' quiet h =
   do h
-     mb <- trySolve
+     mb <- trySolve quiet
      case mb of
-       Nothing -> solve' h
+       Nothing -> solve' quiet h
        Just b  -> return b
 
 solve :: H Bool
-solve = solve' (return ())
+solve = solve' False (return ())
 
-solveAndSee :: (Value a,Show (Type a),IncrView a) => a -> H ()
-solveAndSee see =
-  do b <- solve' (io . putStrLn =<< incrView see)
+solveAndSee :: (Value a,Show (Type a),IncrView a) => Bool -> Bool -> a -> H ()
+solveAndSee quiet incremental see =
+  do b <- solve' quiet (if incremental then io . putStrLn =<< incrView see else return ())
      if b then
        do get see >>= (io . print)
      else
