@@ -171,7 +171,7 @@ instance PrettyVar Var where
       _           -> show x
 
 
-isSym x = x `elem` ":!@#$%^&*\\/=?><+-"
+isSym x = x `elem` (":!@#$%^&*\\/=?><+-" :: String)
 
 escape :: String -> String
 escape (':':xs) | all isSym xs = "(:" ++ xs ++ ")"
