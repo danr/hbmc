@@ -126,9 +126,9 @@ data Var
  deriving (Show,Eq,Ord)
 
 instance Booly Var where
-  true  = Var "True"
-  false = Var "False"
-  bool  = Var "Bool"
+  true  = Con "True"
+  false = Con "False"
+  bool  = Con "Bool"
 
 varMax :: Var -> Int
 varMax Var{}         = 0
@@ -163,7 +163,7 @@ instance PrettyVar Var where
       Var ""      -> "x"
       Var xs      -> escape xs
       Con x       -> varStr (Var x)
-      Refresh v i -> varStr v ++ show i
+      Refresh v i -> varStr v ++ "_" ++ show i
       Proj x i    -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
       MProj x i   -> "mproj" {- <> pp x <> "_" -} ++ show (i+1)
       Api x       -> x
@@ -171,7 +171,7 @@ instance PrettyVar Var where
       _           -> show x
 
 
-isSym x = x `elem` (":!@#$%^&*\\/=?><+-" :: String)
+isSym x = x `elem` ("_:!@#$%^&*\\/=?><+-" :: String)
 
 escape :: String -> String
 escape (':':xs) | all isSym xs = "(:" ++ xs ++ ")"
@@ -256,8 +256,8 @@ instance Booly String where
   true  = "True"
   false = "False"
 
-addBool :: forall f a . (TransformBi (Pattern a) (f a),TransformBi (Head a) (f a),Booly a) => f a -> f a
-addBool = transformBi f . transformBi g
+addBool :: forall f a . (TransformBi (Tip.Type a) (f a),TransformBi (Pattern a) (f a),TransformBi (Head a) (f a),Booly a) => f a -> f a
+addBool = transformBi h . transformBi f . transformBi g
   where
     f :: Head a -> Head a
     f (Builtin (Lit (Bool b))) = Gbl (gbl b)
@@ -266,6 +266,10 @@ addBool = transformBi f . transformBi g
     g :: Pattern a -> Pattern a
     g (Tip.LitPat (Bool b))    = Tip.ConPat (gbl b) []
     g pat                      = pat
+
+    h :: Tip.Type a -> Tip.Type a
+    h (Tip.BuiltinType Boolean) = Tip.TyCon bool []
+    h ty                        = ty
 
     gbl b =
       Global

@@ -16,9 +16,10 @@ fi
 
 echo "== Compiling$NOTE =="
 
-EXEC=$(basename $BASE .hs)
+EXEC=$(basename $(basename $BASE .smt2) .hs)
+TMPHS=${EXEC}.hs
 
-hbmcc $FILE $FLAGS $@ > tmp/$BASE && (cd tmp; ghc --make $BASE -O2 || exit
+hbmcc $FILE $FLAGS $@ > tmp/$TMPHS && (cd tmp; ghc --make $TMPHS -O2 || exit
 
 echo "== Running =="
 
