@@ -78,7 +78,7 @@ miniConflict xs ys =
 trySolve :: Bool -> H (Maybe Bool)
 trySolve quiet = H (\env ->
   do ws <- reverse `fmap` readIORef (waits env)
-     putStrLn $ "== Try solve with " ++ show (length ws) ++ " waits =="
+     verbose $ "== Try solve with " ++ show (length ws) ++ " waits =="
      b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws ])
      if b then
        do putStrLn "Counterexample!"
