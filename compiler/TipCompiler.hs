@@ -14,16 +14,13 @@ import System.Environment
 import Text.PrettyPrint
 import Text.Show.Pretty hiding (Name,Con)
 import Tip hiding (bool)
-import Tip.CommuteMatch
-import Tip.Delambda
+import Tip.Passes
 import Tip.Fresh
 import Tip.HaskellFrontend
-import Tip.Id
-import Tip.Lift
-import Tip.Params
 import Tip.Pretty
 import Tip.Simplify
 import Tip.Utils.Renamer
+import Tip.Utils
 
 import qualified Data.Set as S
 
@@ -48,14 +45,7 @@ main = do
     thy <- case reverse f of
         's':'h':'.':_ ->
           do renameTheory <$>
-               readHaskellFile Params
-                 { file = f
-                 , include = []
-                 , flags = [] -- [PrintCore,PrintProps,PrintExtraIds]
-                 , only = [ s | 'o':s <- es ]
-                 , extra = []
-                 , extra_trans = [] -- es
-                 }
+               readHaskellFile (defaultParams f){ only = [ s | 'o':s <- es ] }
         _ ->
           do mthy <- parse <$> readFile f
              return (either error renameTheory mthy)
@@ -68,9 +58,9 @@ main = do
 
     let mcs = (memos,checks)
 
-    let thy0 = straightLabel remove_labels (addNatToTheory (addBoolToTheory thy))
+    let thy0 = straightLabel remove_labels (addNatToTheory (addBoolToTheory (boolOpsToIf thy)))
 
-    let thy1 = (simplifyExpr aggressively <=< delambda) `freshPass` thy0
+    let thy1 = (simplifyExpr aggressively <=< uncurryTheory) `freshPass` thy0
 
 
     putStrLn "{-"
@@ -86,7 +76,7 @@ main = do
 
     let thy2 = commuteMatch `freshPass` thy1
 
-    let (dis,_) = unzip (map dataInfo (thy_data_decls thy2))
+    let (dis,_) = unzip (map dataInfo (thy_datatypes thy2))
         di      = concat dis
 
     let thy3 = (removeLabelsFromTheory <=< projectPatterns di) `freshPass` thy2
@@ -95,17 +85,17 @@ main = do
     ppp thy3
     putStrLn "-}"
 
-    let func_decls = [ fn | fn <- thy_func_decls thy3, Tip.func_name fn /= labelName ]
+    let func_decls = [ fn | fn <- thy_funcs thy3, Tip.func_name fn /= labelName ]
 
     let data_decls =
-          [ d | d <- thy_data_decls thy3
+          [ d | d <- thy_datatypes thy3
               , and [ False | Tip.BuiltinType Tip.Integer :: Tip.Type Var <- universeBi d ]
               ]
 
-    let decls = runFreshFrom (maximumOn varMax thy3) $
+    let decls = runFreshFrom (maximumOn getUnique thy3) $
           do fn_decls <- mapM (trFun mcs) func_decls
              dt_decls <- mapM (trDatatype lazy) data_decls
-             (prop_names,prop_decls) <- mapAndUnzipM (trProp (Con "SkNat") quiet) (thy_form_decls thy3)
+             (prop_names,prop_decls) <- mapAndUnzipM (trProp (Con "SkNat") quiet) (thy_asserts thy3)
              let main_decl = funDecl mainFun []
                    (mkDo [Stmt (Apply (api "run") [var p]) | p <- prop_names] Noop)
              return (Decls (concat fn_decls ++ concat dt_decls ++ prop_decls ++ [main_decl]))
@@ -175,8 +165,8 @@ instance PrettyVar Var where
 isSym x = x `elem` ("_:!@#$%^&*\\/=?><+-" :: String)
 
 escape :: String -> String
-escope "equals" = "eqls"
-escope "equal"  = "eql"
+escape "equals" = "eqls"
+escape "equal"  = "eql"
 escape (':':xs) | all isSym xs = "(:" ++ xs ++ ")"
 escape (':':xs) = 'K':escape xs
 escape xs = case concatMap escChar xs of
@@ -280,13 +270,13 @@ addBool = transformBi h . transformBi f . transformBi g
         (PolyType [] [] (Tip.TyCon bool []))
         []
 
-addBoolToTheory :: Booly a => Theory a -> Theory a
-addBoolToTheory Theory{..} = addBool Theory{thy_data_decls=bool_decl:thy_data_decls,..}
+addBoolToTheory :: Theory Var -> Theory Var
+addBoolToTheory Theory{..} = addBool Theory{thy_datatypes=bool_decl:thy_datatypes,..}
   where
-    bool_decl = Datatype bool [] [Constructor false false [],Constructor true true []]
+    bool_decl = Datatype bool [] [Constructor false (Var "isFalse") [],Constructor true (Var "isTrue") []]
 
 addNatToTheory :: Theory Var -> Theory Var
-addNatToTheory Theory{..} = addBool Theory{thy_data_decls=nat_decl:thy_data_decls,..}
+addNatToTheory Theory{..} = addBool Theory{thy_datatypes=nat_decl:thy_datatypes,..}
   where
     nat_decl =
       Datatype (Con "SkNat") []
@@ -301,8 +291,8 @@ projectPatterns di Theory{..}
   = do fns <- sequence
          [ do body <- projectExpr di func_body
               return Function{func_body=body,..}
-         | Function{..} <- thy_func_decls ]
-       return Theory{thy_func_decls=fns,..}
+         | Function{..} <- thy_funcs ]
+       return Theory{thy_funcs=fns,..}
 
 projectExpr :: Interface a => DataInfo a -> Tip.Expr a -> Fresh (Tip.Expr a)
 projectExpr di = go

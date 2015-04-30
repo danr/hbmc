@@ -118,9 +118,10 @@ removeLabelsFromTheory
   Theory{..} =
   do fns <- sequence [ do b <- removeLabels func_body
                           return Function{func_body=b,..}
-                     | Function{..} <- thy_func_decls
+                     | Function{..} <- thy_funcs
                      ]
-     return Theory{thy_func_decls=fns,..}
+     return Theory{thy_funcs=fns,..}
 
-fun a = Global a NoPolyType []
+fun a = Global a noPolyType []
+noPolyType = PolyType [] [] boolType
 
