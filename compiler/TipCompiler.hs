@@ -23,6 +23,14 @@ import Tip.Simplify
 import Tip.Utils.Rename
 import Tip.Utils
 
+import TipTarget (Interface(..))
+
+import Tip.Pretty.Haskell
+import Tip.Haskell.Repr (Decls(..), Decl(..))
+import qualified Tip.Haskell.Repr as H
+import Tip.Haskell.Translate (HsId(..), addImports)
+import Tip.Haskell.Rename
+
 import qualified Data.Set as S
 
 import Control.Monad.Writer hiding ((<>))
@@ -32,7 +40,6 @@ import Data.Char
 
 import TipLift
 import TipMonadic
-import TipTarget hiding (Expr(Lam))
 -- import TipExample
 import TipToSimple
 import TipData
@@ -98,24 +105,31 @@ main = do
           do fn_decls <- mapM (trFun mcs) func_decls
              dt_decls <- mapM (trDatatype lazy) data_decls
              (prop_names,prop_decls) <- mapAndUnzipM (trProp (Con "SkNat") quiet) (thy_asserts thy3)
-             let main_decl = funDecl mainFun []
-                   (mkDo [Stmt (Apply (api "run") [var p]) | p <- prop_names] Noop)
+             let main_decl = H.funDecl mainFun []
+                   (H.mkDo [H.Stmt (H.Apply (api "run") [H.var p]) | p <- prop_names] H.Noop)
              return (Decls (concat fn_decls ++ concat dt_decls ++ prop_decls ++ [main_decl]))
 
-    putStrLn "{-# LANGUAGE ScopedTypeVariables #-}"
-    putStrLn "{-# LANGUAGE TypeFamilies #-}"
-    putStrLn "{-# LANGUAGE FlexibleInstances #-}"
-    putStrLn "{-# LANGUAGE MultiParamTypeClasses #-}"
-    putStrLn "{-# LANGUAGE GeneralizedNewtypeDeriving #-}"
-    putStrLn "import qualified Prelude"
-    putStrLn "import LibHBMC"
-    ppp decls
+    let Decls ds = addImports $ fst $ renameDecls $ fmap toHsId decls
+
+    let langs = map LANGUAGE ["ScopedTypeVariables", "TypeFamilies", "FlexibleInstances",
+                              "MultiParamTypeClasses", "GeneralizedNewtypeDeriving"]
+
+    ppp (Decls (langs ++ Module "Main" : ds))
+
+
+toHsId :: Var -> HsId Var
+toHsId (Prelude x)  = Qualified "Prelude" (Just "P") x
+toHsId (Api x)      = Qualified "LibHBMC" (Just "H") x
+toHsId (Proj x)     = Qualified "LibHBMC" (Just "H") ("proj" ++ show (x+1))
+toHsId (MProj x)    = Qualified "LibHBMC" (Just "H") ("mproj" ++ show (x+1))
+toHsId (Var "main") = Exact "main"
+toHsId x            = Other x
 
 data Var
   = Var String | Refresh Var Int
   | Con String
   | Api String | Prelude String
-  | Label | Skip | Call | Cancel | Proj Var Int | MProj Var Int
+  | Label | Skip | Call | Cancel | Proj {- Var -} Int | MProj {- Var -} Int
  deriving (Show,Eq,Ord)
 
 instance Booly Var where
@@ -132,15 +146,15 @@ instance Interface Var where
   api     = Api
   prelude = Prelude
 
-  proj = Proj
-  unproj (Proj v i) = Just (v,i)
+  proj _ = Proj
+  unproj (Proj {- v -} i) = Just (error "unproj",i)
   unproj _          = Nothing
-  mproj = MProj
+  mproj _ = MProj
 
   mainFun     = Var "main"
 
   conLabel  f = Var $ "L_" ++ varStr f
-  conRepr   f = Var $ "R_" ++ varStr f
+  conRepr   f = Var $ varStr f
   thunkRepr f = Var $ "Thunk_" ++ varStr f
   wrapData  f = Var $ "D_" ++ varStr f
   caseData  f = Var $ "case" ++ varStr f
@@ -154,30 +168,14 @@ instance PrettyVar Var where
   varStr x =
     case x of
       Var ""      -> "x"
-      Var xs      -> escape xs
+      Var x       -> x
       Con x       -> varStr (Var x)
-      Refresh v i -> varStr v ++ "_" ++ show i
-      Proj x i    -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
-      MProj x i   -> "mproj" {- <> pp x <> "_" -} ++ show (i+1)
+      Refresh v i -> varStr v
+      Proj {- x -} i    -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
+      MProj {- x -} i   -> "mproj" {- <> pp x <> "_" -} ++ show (i+1)
       Api x       -> x
-      Prelude x   -> "Prelude." ++ x
+      Prelude x   -> x
       _           -> show x
-
-
-isSym x = x `elem` ("_:!@#$%^&*\\/=?><+-" :: String)
-
-escape :: String -> String
-escape "equals" = "eqls"
-escape "equal"  = "eql"
-escape (':':xs) | all isSym xs = "(:" ++ xs ++ ")"
-escape (':':xs) = 'K':escape xs
-escape xs = case concatMap escChar xs of
-               y:ys | not (isAlpha y) -> 'a':y:ys
-               ys                     -> ys
-
-escChar :: Char -> String
-escChar x | isAlphaNum x || x == '\'' || x == '_' = [x]
-          | otherwise = show (ord x)
 
 renameTheory :: forall a . (Ord a,PrettyVar a) => Theory a -> Theory Var
 renameTheory thy = renameWith disambigId thy
@@ -272,9 +270,8 @@ projectExpr di = go
   go e0 =
     case e0 of
       Match e alts ->
-        do x <- fresh
-           let lx = Local x (exprType e)
-           make_let lx e =<< fmap (Match (Lcl lx))
+        letExpr e $ \ lx ->
+        do fmap (Match (Lcl lx))
              (sequence
                [ case pat of
                    Default -> Case Default <$> go rhs
@@ -299,9 +296,6 @@ projectExpr di = go
       Let l e1 e2 -> Let l <$> go e1 <*> go e2
       Quant qi q l e -> Quant qi q l <$> go e
       Lcl l       -> return (Lcl l)
-
-  make_let x (Lcl y) e = (Lcl y // x) e
-  make_let x b       e = return (Let x b e)
 
 -- example
 

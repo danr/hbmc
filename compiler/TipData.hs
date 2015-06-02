@@ -59,7 +59,7 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
 
   me = TyCon (wrapData tc) (map TyVar tvs)
 
-  maybe_tup = TyTup [ TyCon (prelude "Maybe") [modTyCon wrapData t] | t <- types ]
+  maybe_tup = nestedTyTup [ TyCon (prelude "Maybe") [modTyCon wrapData t] | t <- types ]
 
   -- (Thunk (Data N (Maybe Nat)))
   thunk :: Type a
@@ -114,11 +114,11 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
          [ do l <- fresh
               r <- fresh
               let lbls = [var (conLabel c) | (c,(_,ixs)) <- indexes, i `elem` ixs]
-              let pat b = TupPat $
+              let pat b = nestedTupPat $
                     replicate (i) WildPat ++
                     [ConPat (prelude "Just") [VarPat b]] ++
                     replicate (length types - i - 1) WildPat
-              return (LinearTup [List lbls,Lam [pat l,pat r] (Apply h [var l,var r])])
+              return (Tup [List lbls,Lam [pat l,pat r] (Apply h [var l,var r])])
          | (_,i) <- types `zip` [0..]
          ]
        return $
@@ -158,7 +158,7 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
          funDecl (mkCon c) [ x | Just x <- prenex ]
            (Apply (wrapData tc)
              [Apply (api ("con" ! "conStrict"))
-               [var (conLabel c), Tup tuple ]])
+               [var (conLabel c), nestedTup tuple ]])
 
 
   -- f Succ (Just n, ()) = do n' <- get n; return (Succ_Repr n')
@@ -177,7 +177,7 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
              | (x',Just x) <- xn' `zip` prenex
              ]
        return
-         ([ConPat (conLabel c) [],TupPat tuple],
+         ([ConPat (conLabel c) [],nestedTupPat tuple],
           mkDo gets
             (Apply (prelude "return")
               [Apply (conRepr c) (map var args)])
@@ -199,7 +199,7 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
          InstDecl
            [TyCon (api "Value") [TyVar tv] | tv <- tvs]
            (TyCon (api "Value") [me])
-           [AssociatedType
+           [TypeDef
              (TyCon (api "Type") [me])
              (TyCon (conRepr tc) [TyCon (api "Type") [TyVar tv] | tv <- tvs])
            ,FunDecl (api "dflt") [([WildPat],var (thunkRepr tc))]

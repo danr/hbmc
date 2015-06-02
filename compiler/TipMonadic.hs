@@ -28,7 +28,7 @@ thenReturn :: Interface a => [H.Stmt a] -> a -> H.Expr a
 ss `thenReturn` x = mkDo ss (returnExpr (var x))
 
 (>>>) :: Interface a => H.Expr a -> H.Expr a -> H.Expr a
-a >>> b = H.Apply (api "(>>>)") [a,b]
+a >>> b = H.Apply (api ">>>") [a,b]
 
 trType :: Tip.Type a -> Type a
 trType t0 =
@@ -54,14 +54,14 @@ trFun (memos,checks) Tip.Function{..} =
                  x <- fresh
                  e <- trExpr simp_body Nothing
                  return $
-                   H.Lam [H.TupPat (map H.VarPat args)] $
+                   H.Lam [H.nestedTupPat (map H.VarPat args)] $
                        mkDo [H.Bind x e] (returnExpr (H.Apply (api "unJust") [var x]))
             else
               do b <- trExpr simp_body (Just r)
                  return $
                    H.Apply (api (if func_name `elem` memos then "memo" else "nomemo"))
                      [H.String func_name
-                     ,H.Lam [H.TupPat (map H.VarPat args),H.VarPat r] (maybe_check b)
+                     ,H.Lam [H.nestedTupPat (map H.VarPat args),H.VarPat r] (maybe_check b)
                      ]
      return
        [
@@ -72,7 +72,7 @@ trFun (memos,checks) Tip.Function{..} =
               | tv <- func_tvs
               , s <- [api "Equal",prelude "Ord",api "Constructive"]
               ]
-              (TyTup (map (tt . Tip.lcl_type) func_args)
+              (nestedTyTup (map (tt . Tip.lcl_type) func_args)
                `TyArr` (TyCon (api "H") [tt func_res])),
          -}
          funDecl func_name [] body
@@ -156,7 +156,7 @@ trExpr e0 r =
         -> do e' <- trExpr e r
               return $
                 mkDo
-                  [ H.Bind x (H.Apply (api "call") [var g,H.Tup (map trSimple args)]) ]
+                  [ H.Bind x (H.Apply (api "call") [var g,H.nestedTup (map trSimple args)]) ]
                   e'
       | f == cancelName, [Var g,y] <- ss
         -> do e' <- trExpr e r
@@ -166,7 +166,7 @@ trExpr e0 r =
                   , H.Bind x (returnExpr (trSimple y))
                   ]
                   e'
-      | otherwise -> mkDo [H.Bind x (H.Apply f [Tup (map trSimple ss)])] <$> trExpr e r
+      | otherwise -> mkDo [H.Bind x (H.Apply f [nestedTup (map trSimple ss)])] <$> trExpr e r
 
     S.Match tc s s' calls alts
       | Nothing <- r -> error $ "Cannot do case inside a lifted call: " ++ ppRender e0
@@ -202,7 +202,7 @@ trCall (Call f args e) =
      return $
        H.Bind f
          (H.Apply (api "newCall")
-           [H.Lam [H.TupPat (map H.VarPat args)] e'])
+           [H.Lam [H.nestedTupPat (map H.VarPat args)] e'])
 
 trAlt :: Interface a => a -> a -> [a] -> S.Alt a -> Fresh (H.Stmt a)
 trAlt c r cons (pat S.:=> rhs) =
