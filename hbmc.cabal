@@ -32,7 +32,7 @@ executable hbmcc
   build-depends:       base >=4 && <5,
                        tip-lib ==0.1,
                        tip-haskell-frontend ==0.1,
-                       geniplate-mirror >=0.6.0.6,
+                       geniplate-mirror >= 0.7,
 
                        transformers >=0.3,
                        mtl >=2.1,

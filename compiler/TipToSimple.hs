@@ -3,7 +3,7 @@ module TipToSimple where
 
 import TipSimple as S
 import Tip.Types as T
-import qualified Tip as T
+import qualified Tip.Core as T
 import Tip.Fresh
 import Tip.Pretty
 import Control.Monad.Writer

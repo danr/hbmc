@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module TipExample where
 
-import Tip
+import Tip.Core
 import Tip.Fresh
 import Tip.Pretty
 

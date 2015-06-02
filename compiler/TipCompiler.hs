@@ -13,13 +13,14 @@ import qualified Data.Foldable as F
 import System.Environment
 import Text.PrettyPrint
 import Text.Show.Pretty hiding (Name,Con)
-import Tip hiding (bool)
+import Tip.Core hiding (bool)
+import qualified Tip.Core as Tip
 import Tip.Passes
 import Tip.Fresh
 import Tip.HaskellFrontend
 import Tip.Pretty
 import Tip.Simplify
-import Tip.Utils.Renamer
+import Tip.Utils.Rename
 import Tip.Utils
 
 import qualified Data.Set as S
@@ -35,6 +36,7 @@ import TipTarget hiding (Expr(Lam))
 -- import TipExample
 import TipToSimple
 import TipData
+import TipBooly
 -- Main
 
 import Tip.Parser
@@ -58,7 +60,7 @@ main = do
 
     let mcs = (memos,checks)
 
-    let thy0 = straightLabel remove_labels (addNatToTheory (addBoolToTheory (boolOpsToIf thy)))
+    let thy0 = straightLabel remove_labels (addNatToTheory (addBoolToTheory (theoryBoolOpToIf thy)))
 
     let thy1 = (simplifyExpr aggressively <=< uncurryTheory) `freshPass` thy0
 
@@ -239,41 +241,11 @@ memosAndChecks = runWriter . transformBiM trf
 
 -- add bool
 
-class Booly a where
-  bool  :: a
-  true  :: a
-  false :: a
-
-instance Booly String where
-  bool  = "Bool"
-  true  = "True"
-  false = "False"
-
-addBool :: forall f a . (TransformBi (Tip.Type a) (f a),TransformBi (Pattern a) (f a),TransformBi (Head a) (f a),Booly a) => f a -> f a
-addBool = transformBi h . transformBi f . transformBi g
-  where
-    f :: Head a -> Head a
-    f (Builtin (Lit (Bool b))) = Gbl (gbl b)
-    f hd                       = hd
-
-    g :: Pattern a -> Pattern a
-    g (Tip.LitPat (Bool b))    = Tip.ConPat (gbl b) []
-    g pat                      = pat
-
-    h :: Tip.Type a -> Tip.Type a
-    h (Tip.BuiltinType Boolean) = Tip.TyCon bool []
-    h ty                        = ty
-
-    gbl b =
-      Global
-        (if b then true else false)
-        (PolyType [] [] (Tip.TyCon bool []))
-        []
-
 addBoolToTheory :: Theory Var -> Theory Var
 addBoolToTheory Theory{..} = addBool Theory{thy_datatypes=bool_decl:thy_datatypes,..}
   where
     bool_decl = Datatype bool [] [Constructor false (Var "isFalse") [],Constructor true (Var "isTrue") []]
+
 
 addNatToTheory :: Theory Var -> Theory Var
 addNatToTheory Theory{..} = addBool Theory{thy_datatypes=nat_decl:thy_datatypes,..}

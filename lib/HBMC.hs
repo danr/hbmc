@@ -1,6 +1,6 @@
-module HBMC(module HBMC,module Tip.DSL) where
+module HBMC(module HBMC,module Tip) where
 
-import Tip.DSL
+import Tip hiding (label)
 
 {-# NOINLINE label #-}
 label :: label -> a -> a

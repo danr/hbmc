@@ -7,7 +7,7 @@ import Data.List
 
 import TipTarget
 import TipMonadic (trType)
-import Tip (Datatype(..),Constructor(..))
+import Tip.Core (Datatype(..),Constructor(..))
 import Control.Applicative
 
 type DataInfo a = [(a,(a,[Int]))]

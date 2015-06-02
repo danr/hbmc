@@ -2,7 +2,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module TipLift where
 
-import Tip
+import Tip.Core
 import Tip.Pretty
 import Tip.Pretty.SMT hiding (apply)
 import Tip.Fresh
