@@ -102,7 +102,7 @@ trProp sk quiet (Tip.Formula Tip.Assert [] (Tip.Builtin Tip.Not Tip.:@: [tm])) =
 trProp sk quiet (Tip.Formula Tip.Prove [] (collectQuant -> (lcls,tm)))
   = do let input = [ BindTyped x (modTyCon wrapData (trType t)) (var (api "newInput"))
                    | Tip.Local x t <- lcls ]
-       terms <- mapM trTerm (collectTerms tm)
+       terms <- mapM (trTerm . toTerm) (cnf tm)
        f <- fresh
        return $ (,) f $ funDecl f [] $
          mkDo (input ++ concat terms)
@@ -115,15 +115,24 @@ trProp _ _ fm = error $ "Invalid property: " ++ ppRender fm ++ "\n(cannot be pol
 
 type Term a = (Bool,Tip.Expr a,Tip.Expr a)
 
-collectTerms :: (Ord a,PrettyVar a,Booly a) => Tip.Expr a -> [Term a]
-collectTerms (Tip.Builtin Tip.Implies Tip.:@: [pre,post])
-  = let (l,r) = collectEqual pre
-    in  (False,l,r):collectTerms post
-collectTerms t = let (l,r) = collectEqual t in [(True,l,r)]
+-- View for builtins
+bun :: Tip.Expr a -> Maybe (Tip.Builtin, [Tip.Expr a])
+bun (Tip.Builtin bun Tip.:@: es) = Just (bun,es)
+bun _ = Nothing
 
-collectEqual :: (Ord a,PrettyVar a,Booly a) => Tip.Expr a -> (Tip.Expr a,Tip.Expr a)
-collectEqual (Tip.Builtin Tip.Equal Tip.:@: [l,r]) = (l,r)
-collectEqual p = (p,booly True)
+cnf :: Tip.Expr a -> [Tip.Expr a]
+cnf (bun -> Just (Tip.Implies,[pre,post]))                    = cnf (Tip.neg pre Tip.\/ post)
+cnf (bun -> Just (Tip.Not, [bun -> Just (Tip.And,es)]))         = cnf (Tip.ors (map Tip.neg es))
+cnf (bun -> Just (Tip.Not, [bun -> Just (Tip.Distinct,[a,b])])) = cnf (a Tip.=== b)
+cnf (bun -> Just (Tip.Not, [bun -> Just (Tip.Equal,[a,b])]))    = cnf (a Tip.=/= b)
+cnf (bun -> Just (Tip.Or,es)) = concatMap cnf es
+cnf e = [e]
+
+toTerm :: Booly a => Tip.Expr a -> Term a
+toTerm (bun -> Just (Tip.Equal,   [l,r])) = (True,l,r)
+toTerm (bun -> Just (Tip.Distinct,[l,r])) = (False,l,r)
+toTerm (bun -> Just (Tip.Not,[t]))        = case toTerm t of (b,l,r) -> (not b,l,r)
+toTerm p = (True,p,booly True)
 
 trTerm :: Interface a => Term a -> Fresh [H.Stmt a]
 trTerm (pol,lhs,rhs) =
