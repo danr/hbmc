@@ -109,7 +109,11 @@ removeLabels :: Call a => Expr a -> Fresh (Expr a)
 removeLabels e =
   case labels e of
     l:_ -> removeLabels
-              =<< simplifyExpr aggressively{touch_lets=False}
+              =<< simplifyExpr aggressively{touch_lets=False,remove_variable_scrutinee_in_branches=False}
+                  -- the only simplification we really want to do here is beta reduction,
+                  -- while not destroying the weird invariants we have.
+                  -- The simplifier could instead be parameterised
+                  -- on things to simplify, i.e. Let,Match,Lambda+At,Builtins, and so on...
               =<< removeLabel l e
     []  -> return e
 

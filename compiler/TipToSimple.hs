@@ -72,8 +72,11 @@ toSimple' e0 =
            then do return (Con f xn)
            else do a <- lift fresh
                    let lt = case unproj f of
-                              Just (tc,i) -> let [Var x] = xn
-                                             in  Proj tc i (S.Var x)
+                              Just (tc,i) ->
+                                case xn of
+                                  [Var x] -> Proj tc i (S.Var x)
+                                  other   -> error $ "toSimple' (" ++ ppRender e0 ++ ")" ++
+                                                     concatMap (\ o -> "\n" ++ ppRender o ++ " (" ++ show o ++ ")") other
                               Nothing     -> S.Apply f xn
                    tell [(a,lt)]
                    return (Var a)
