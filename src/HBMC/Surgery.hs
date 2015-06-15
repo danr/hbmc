@@ -1,6 +1,8 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE Rank2Types #-}
 module HBMC.Surgery where
 
 import Tip.Pretty
@@ -8,75 +10,103 @@ import Text.PrettyPrint
 
 import Data.List (partition)
 
-data Surgery a b c = Surgery { view :: a, perform :: b -> c }
-  deriving Functor
+data Surgery a b c where
+  Surgery :: a i -> (b i -> c) -> Surgery a b c
 
-spartition :: [Surgery a b c] -> ([a],[b -> c])
-spartition [] = ([],[])
-spartition (Surgery a f:ss) = let (as,fs) = spartition ss in (a:as,f:fs)
+view :: Surgery a b c -> Indexed a
+view (Surgery a _) = Indexed a
 
-andList :: [Surgery a b c] -> Surgery [a] [b] [c]
-andList (spartition -> (as,fs)) = Surgery as (zipWith ($) fs)
+viewAOT :: AOSurgery a b c -> AOView a
+viewAOT (Surgery a _) = viewAO a
 
-orList :: [Surgery a b c] -> Surgery [a] (Int,b) c
-orList (spartition -> (as,fs)) = Surgery as (\(i,b) -> (fs !! i) b)
+instance Functor (Surgery a b) where
+  fmap g (Surgery a f) = Surgery a (g . f)
 
 mapRes :: (c -> c') -> Surgery a b c -> Surgery a b c'
 mapRes = fmap
 
-mapFrom :: (b' -> b) -> Surgery a b c -> Surgery a b' c
-mapFrom f (Surgery a g) = Surgery a (g . f)
+middle :: (forall i . (a i -> a' i, b' i -> b i)) -> Surgery a b c -> Surgery a' b' c
+middle fg (Surgery a h) = case fg of (f,g) -> Surgery (f a) (h . g)
 
-mapInit :: (a -> a') -> Surgery a b c -> Surgery a' b c
-mapInit f (Surgery a g) = Surgery (f a) g
+data AOView a = ViewAnd [AOView a] | ViewOr [AOView a] | ViewUnit a
 
--- | And-Or Tree
-data AOT a = And [AOT a] | Or [AOT a] | Unit a
-  deriving (Eq,Ord,Show,Functor)
+viewAnd, viewOr :: AOView a -> AOView a -> AOView a
+viewAnd (ViewAnd xs) (ViewAnd ys) = ViewAnd (xs ++ ys)
+viewAnd x            (ViewAnd ys) = ViewAnd ([x]++ ys)
+viewAnd (ViewAnd xs) y            = ViewAnd (xs ++[y])
+viewAnd x            y            = ViewAnd ([x]++[y])
 
-collectAnd,collectOr :: AOT a -> [AOT a]
+viewOr (ViewOr xs) (ViewOr ys) = viewOr' (xs ++ ys)
+viewOr x           (ViewOr ys) = viewOr' ([x]++ ys)
+viewOr (ViewOr xs) y           = viewOr' (xs ++[y])
+viewOr x           y           = viewOr' ([x]++[y])
 
--- collectAnd (And es) = es
-collectAnd (And es) = concatMap collectAnd es
-collectAnd (Or [e]) = collectOr e
-collectAnd e        = [e]
+viewOr' xs
+  | null [ () | ViewAnd [] <- xs ] = ViewOr xs
+  | otherwise                      = ViewOr (ViewAnd []:[ x | x <- xs, case x of ViewAnd [] -> False; _ -> True ])
 
--- collectOr (Or es)   = es
-collectOr (Or es)   = collapseAnd1 (concatMap collectOr es)
-collectOr (And [e]) = collectOr e
-collectOr e         = [e]
+viewAO :: AOT a i -> AOView a
+viewAO (And a b) = viewAnd (viewAO a) (viewAO b)
+viewAO (Or  a b) = viewOr  (viewAO a) (viewAO b)
+viewAO (Unit a)  = ViewUnit a
+viewAO Noop      = ViewAnd []
 
-collapseAnd1 es
-  | null and1s = rest
-  | otherwise  = And []:rest
-  where
-  (and1s, rest) = partition (\ e -> case e of And [] -> True; _ -> False) es
+instance Pretty a => Pretty (AOT a i) where
+  pp = pp . viewAO
 
-tri :: Pretty a => Doc -> Doc -> [a] -> Doc
+instance Pretty a => Pretty (AOView a) where
+  pp (ViewOr  as) = tri "false" "or" (map pp as)
+  pp (ViewAnd as) = tri "true" "and" (map pp as)
+  pp (ViewUnit a) = brackets (pp a)
+
+tri :: Doc -> Doc -> [Doc] -> Doc
 tri a m []  = a
-tri a m [x] = pp x
-tri a m es  = parens (m $\ sep (map pp es))
+tri a m [x] = x
+tri a m es  = parens (m $\ sep es)
 
-instance Pretty a => Pretty (AOT a) where
-  pp e@Or{}       = tri "false" "or" (collectOr e)
-  pp e@And{}      = tri "true" "and" (collectAnd e)
-  pp (Unit a)     = brackets (pp a)
+mapAO :: (a -> a') -> AOT a i -> AOT a' i
+mapAO f (And a b) = And (mapAO f a) (mapAO f b)
+mapAO f (Or a b)  = Or (mapAO f a) (mapAO f b)
+mapAO f (Unit a)  = Unit (f a)
+mapAO _ Noop      = Noop
 
--- | And-Or Tree Answer
-data AOTA a = AndA [AOTA a] | OrA Int (AOTA a) | UnitA a
-  deriving (Eq,Ord,Show,Functor)
+mapInit :: (a -> a') -> AOSurgery a b c -> AOSurgery a' b c
+mapInit f = middle (mapAO f,id)
+
+data AOT a i where
+  And  :: AOT a i -> AOT a j -> AOT a (i,j)
+  Or   :: AOT a i -> AOT a j -> AOT a (Either i j)
+  Unit :: a -> AOT a i
+  Noop :: AOT a ()
+
+data AOTA b i where
+  AndA   :: AOTA b i -> AOTA b j -> AOTA b (i,j)
+  LeftA  :: AOTA b i -> AOTA b (Either i j)
+  RightA :: AOTA b j -> AOTA b (Either i j)
+  UnitA  :: b -> AOTA b i
+  NoopA  :: AOTA b ()
 
 type AOSurgery a b c = Surgery (AOT a) (AOTA b) c
 
-ret :: c -> Surgery () () c
-ret c = Surgery () (\() -> c)
+data Indexed a = forall i . Indexed (a i)
 
 retAO :: c -> AOSurgery a b c
-retAO = mapInit (\() -> And []) . mapFrom (\(AndA []) -> ()) . ret
+retAO c = Surgery Noop (\ NoopA -> c)
+
+both :: AOSurgery a b c -> AOSurgery a b c' -> AOSurgery a b (c,c')
+both (Surgery a f) (Surgery a' f') = Surgery (And a a') (\ (AndA b b') -> (f b, f' b'))
+
+oneOf :: AOSurgery a b c -> AOSurgery a b c' -> AOSurgery a b (Either c c')
+oneOf (Surgery a f) (Surgery a' f') = Surgery (Or a a') $ \ lr -> case lr of LeftA b   -> Left (f b)
 
 andAO :: [AOSurgery a b c] -> AOSurgery a b [c]
-andAO = mapInit And . mapFrom (\ (AndA as) -> as) . andList
+andAO = foldr (\ u v -> fmap (uncurry (:)) (both u v)) (retAO [])
 
 orAO :: [AOSurgery a b c] -> AOSurgery a b c
-orAO = mapInit Or . mapFrom (\ (OrA i a) -> (i,a)) . orList
+orAO [] = error "orAO: empty list"
+orAO xs = foldr1 (\ u v -> fmap (either id id) (oneOf u v)) xs
+
+orAOf :: AOSurgery a b c -> [AOSurgery a b c] -> AOSurgery a b c
+orAOf c [] = c
+orAOf _ xs = orAO xs
 
