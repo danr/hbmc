@@ -7,11 +7,18 @@ import Tip.HaskellFrontend
 
 import Tip.Core
 
-import HBMC.Surgery
+import Tip.Fresh
+
+import Tip.Utils.Rename
+
+import Tip.Scope
+
 import HBMC.Merge
 import HBMC.Identifiers
 
 import System.Environment
+
+import Data.List
 
 main :: IO ()
 main = do
@@ -22,10 +29,14 @@ main = do
 
     -- putStrLn "matchPoints:"
 
+    let ren = renameWith (disambig varStr)
+
     putStrLn $ unlines
-      [ ppRender (func_body fn) ++ ":\n" ++
-        ppRender (viewAOT (mapInit (\(g,es) -> (Gbl g :@: es))
-                                   (findPoints (func_body fn)))) ++ "\n"
+      [ ppRender (ren e) ++ ":\n" ++
+        intercalate ",\n"
+          (map (ppRender . ren)
+            (freshPass (hoistAllTrace (scope thy)) e))
       | fn <- thy_funcs thy
+      , let e = func_body fn
       ]
 

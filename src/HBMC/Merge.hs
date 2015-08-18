@@ -1,3 +1,17 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+module HBMC.Merge where
+
+-- import HBMC.Surgery
+import Tip.Core
+import Tip.Fresh
+import Tip.Utils
+import Tip.Scope
+
+import Data.Generics.Geniplate
+
+import Control.Applicative
+import Data.Foldable (asum)
+import Data.Traversable (sequenceA)
 {-
 
 Use magic lets:
@@ -49,87 +63,8 @@ Use magic lets:
    let a2 = if b then x else ys
    in  merge a1 a2
 -}
-{-# LANGUAGE GADTs #-}
-module HBMC.Merge where
 
-import HBMC.Surgery
-import Tip.Core
-
--- | Assumes commuteMatch has happened, only wades through initial lets
-findPoints :: Expr a -> AOSurgery (Global a,[Expr a]) (Expr a) (Expr a,Expr a)
-findPoints e0 =
-  case e0 of
-    Let x e1 e2 -> mapRes (\ (e2',e2_bot) -> (Let x e1 e2,Let x e1 e2_bot)) (findPoints e2)
-    _           -> matchPoints e0
-
--- todo: make this some proper bottom
-bot :: Expr a
-bot = Builtin At :@: []
-
--- | Performs surgery on the match points.
---   Two expressions are returned, the first is the actual new expression,
---   whereas the second is merely the skeleton
---
 {-
-
-
-     case x of
-        K y -> f (f y)
-        J z -> g (f z)
-
-   =>
-
-
-
-     (case x of
-       K y -> y
-       J z -> z
-     ,case x of
-       K y -> f y
-       J z -> g z
-     )
-
-     (case x of
-       K y -> farg
-       J z -> farg
-     ,case x of
-       K y -> f farg
-       J z -> g farg
-     )
-
-
-     let arg = case x of
-                  K y -> y
-                  J z -> z
-     let farg = f arg
-     in  case x of
-            K y -> f farg
-            J z -> g farg
-
-----------------
-
-    case s of
-      A -> f (g (h x))
-      B -> g (h (f x))
-      C -> h (f (g x))
-
-    let f' = f (case s of
-               A -> g'
-               B -> x
-               C -> g')
-        g' = g (case s of
-               A -> h'
-               B -> h'
-               C -> x)
-        h' = h (case s of
-               A -> x
-               B -> f'
-               C -> f')
-    in  case s of
-          A -> f'
-          B -> g'
-          C -> h'
-
 ---------------
     case s of
       A -> f (g (h x))
@@ -222,41 +157,237 @@ if b is false:
     in  if b then f arg else g (f arg)
 =>
 
+--------
+  nested case
+--------
+
+  case s of
+    A -> f (g x)
+    B -> case t of
+            C -> g (f y)
+            D -> f z
+
+==>
+
+  let f_val = f f_arg
+  case s of
+    A -> let f_arg = g x in f_val
+    B -> case t of
+            C -> let f_arg = y in g f_val
+            D -> let f_arg = z in f_val
+
+==>
+
+  let f_val = f f_arg
+  let g_val = g g_arg
+  case s of
+    A -> let f_arg = let g_arg = x in g_val in f_val
+    B -> case t of
+            C -> let f_arg = y in let g_arg = f_val in g_val
+            D -> let f_arg = z in f_val
+
+==> [let/let]
+
+  let f_val = f f_arg
+  let g_val = g g_arg
+  case s of
+    A -> let f_arg = g_val in let g_arg = x in f_val
+    B -> case t of
+            C -> let f_arg = y in let g_arg = f_val in g_val
+            D -> let f_arg = z in f_val
+
+==> [magic let pull ... what happens when other than magic lets are in the way?
+                        they can be let lifted first (and memoised), of course!
+                        then all lets that are left are magic]
+
+  let f_val = f f_arg
+  let g_val = g g_arg
+  let f_arg = case s of
+                A -> g_val
+                B -> case t of
+                    C -> y
+                    D -> z
+  let g_arg = case s of
+                A -> x
+                B -> case t of
+                    C -> f_val
+                    D -> undefined
+  case s of
+    A -> f_val
+    B -> case t of
+            C -> g_val
+            D -> f_val
+
+-------
+
+  case s of
+    A -> f x
+    B -> case f y of
+           C -> a
+           D -> b
+
+==>
+
+  let f_val = f f_arg
+  case s of
+    A -> let f_arg = x in f_val
+    B -> case let f_arg = y in f_val of
+            C -> a
+            D -> b
+
+==> [magic let pull]
+
+  let f_val = f f_arg
+  let f_arg = case s of
+                A -> x
+                B -> y
+  case s of
+    A -> f_val
+    B -> case f_val of
+            C -> a
+            D -> b
+
+--------
+  pulling too far
+--------
+
+     case s of
+        A -> a
+        B -> case t of
+            C -> f x
+            D -> f y
+
+
+==>
+     let f_val = f f_arg
+     let f_arg = case s of
+            A -> _|_
+            B -> case t of
+                C -> x
+                D -> y
+     case s of
+        A -> a
+        B -> case t of
+            C -> f_val
+            D -> f_val
+
+==>
+     f_val <- new
+     f_arg <- new
+     f f_arg >>> f_val
+     when (s = A) noop
+     when (s = B) $
+       do when (t = C) (x >>> f_arg)
+          when (t = D) (y >>> f_arg)
+     when (s = A) (a >>> res)
+     when (s = B) $
+       do when (t = C) (f_val >>> res)
+          when (t = D) (f_val >>> res)
+
+==>
+     f_val <- new
+     f_arg <- new
+     f f_arg >>> f_val
+     when (s = A) $
+       do noop
+          a >>> res
+
+     when (s = B) $
+       do when (t = C) (x >>> f_arg)
+          when (t = D) (y >>> f_arg)
+          when (t = C) (f_val >>> res)
+          when (t = D) (f_val >>> res)
+
+i.e. np
 
 -}
-matchPoints :: Expr a -> AOSurgery (Global a,[Expr a]) (Expr a) (Expr a,Expr a)
-matchPoints e0 =
+
+-- should make it so that constructors are not counted
+calls :: forall a . Ord a => Expr a -> [Global a]
+calls e =
+  usort . concat $
+    [ duplicates . concat $
+        [ usortOn globalSig
+            [ g
+            | Gbl g :@: _ <- universeBi rhs :: [Expr a]
+            , not (null (polytype_args (gbl_type g)))
+            ]
+        | Case _ rhs <- brs
+        ]
+    | Match _ brs <- universeBi e :: [Expr a]
+    ]
+
+isFunction :: Ord a => Scope a -> Global a -> Bool
+isFunction scp g = case lookupGlobal (gbl_name g) scp of
+                     Just FunctionInfo{} -> True
+                     _                   -> False
+
+hoistAll :: Name a => Scope a -> Expr a -> Fresh (Expr a)
+hoistAll scp e = last <$> hoistAllTrace scp e
+
+hoistAllTrace :: Name a => Scope a -> Expr a -> Fresh [Expr a]
+hoistAllTrace scp e =
+  case filter (isFunction scp) (calls e) of
+    f:_ -> fmap (e:) (hoistAllTrace scp =<< hoist f e)
+    _   -> return [e]
+
+hoist :: Name a => Global a -> Expr a -> Fresh (Expr a)
+hoist f (Let x ex e) = Let x ex <$> hoist f e
+hoist f e0 =
+  do let (arg_tys,res_ty) = gblType f
+     f_val  <- (`Local` res_ty) <$> refreshNamed "val" (gbl_name f)
+     f_args <- sequence [ (`Local` arg_ty) <$> refreshNamed "arg" (gbl_name f)
+                        | arg_ty <- arg_tys ]
+     let Just e = hoist' f f_val f_args e0
+     return (Let f_val (Gbl f :@: map Lcl f_args) e)
+
+hoist' :: (Functor f,Applicative f,Alternative f,Eq a) =>
+          Global a -> Local a -> [Local a] -> Expr a -> f (Expr a)
+hoist' f f_val f_args e0 =
   case e0 of
     hd :@: es ->
-      orAOf (retAO (e0,bot)) $
-        [ mapRes (\ (e',e_bot) -> (hd :@: (l ++ [e'] ++ r),e_bot))
-                 (matchPoints e)
+      asum
+        [ fmap (\ e' -> hd :@: (l ++ [e'] ++ r)) (go e)
         | (l,e,r) <- cursor es
-        ] ++
-        (case hd of
-          Gbl g -> [Surgery (Unit (g,es)) (\(UnitA e) -> (e,e))]
-          _     -> [])
+        ]
+      <|>
+        case hd of
+          Gbl g | g `globalEq` f -> pure (lets (f_args `zip` es) (Lcl f_val))
+          _ -> empty
 
-    Lcl{} -> retAO (e0,bot)
+    Lcl{} -> empty
 
-    Let x e1 e2 -> mapRes (\ (e1',e1_bot) -> (Let x e1' e2,e1_bot)) (matchPoints e1)
-                   -- incomplete for now. can let lift+memoise to simplify
+    Let x e1 e2 ->
+          fmap (\ e' -> Let x e' e2) (go e1)
+      <|> fmap (\ e' -> Let x e1 e') (go e2)
 
     Match e brs ->
-      orAO
-        [ mapRes (\ (e',e_bot) -> (Match e' brs,e_bot)) (matchPoints e)
-        , mapRes (\ rhss -> let (brs',brs_bot) = unzip [ (Case lhs rhs,Case lhs rhs_bot)
-                                                       | (Case lhs _,(rhs,rhs_bot)) <- brs `zip` rhss
-                                                       ]
-                            in  (Match e brs',Match e brs_bot))
-                 (andAO [ orAO [matchPoints rhs,retAO (rhs,bot)]
-                        | Case _ rhs <- brs
-                        ])
-        ]
+          fmap (\ e' -> Match e' brs) (go e)
+      <|> fmap (Match e)
+            (sequenceA
+              [ fmap (Case pat) (go rhs <|> pure rhs)
+              | Case pat rhs <- brs
+              ])
 
-    Lam{}   -> error "matchPoints: Lambda"
-    Quant{} -> error "matchPoints: Quant"
+    Lam{}   -> error "hoist' Lam"
+    Quant{} -> error "hoist' Quant"
+  where
+  go = hoist' f f_val f_args
+
+lets :: [(Local a,Expr a)] -> Expr a -> Expr a
+lets []           e = e
+lets ((x,ex):xes) e = Let x ex (lets xes e)
 
 cursor :: [a] -> [([a],a,[a])]
 cursor xs = [ let (l,x:r) = splitAt i xs in (l,x,r) | i <- [0..length xs-1] ]
+
+globalSig :: Global a -> (a,[Type a])
+globalSig g = (gbl_name g,gbl_args g)
+
+globalEq :: Eq a => Global a -> Global a -> Bool
+globalEq f g = globalSig f == globalSig g
+
+duplicates :: Ord a => [a] -> [a]
+duplicates xs = usort [ x | x <- xs, count x > 1 ]
+  where count x = length (filter (== x) xs)
 

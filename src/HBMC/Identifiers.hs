@@ -61,7 +61,8 @@ renameTheory thy = renameWith disambigId thy
              xs -> var_or_con xs
 
 instance Name Var where
-  fresh     = refresh (Var "")
-  refresh v = Refresh v `fmap` fresh
-  getUnique = varMax
+  fresh        = refresh (Var "")
+  freshNamed x = refresh (Var x)
+  refresh v    = Refresh v `fmap` fresh
+  getUnique    = varMax
 
