@@ -419,7 +419,7 @@ commuteLet =
 -- => let argf = case x of
 --                 A -> y
 --                 B -> z
---                 -- C case missing
+--                 -- C case removed
 --    case x of
 --      A -> valf
 --      B -> valf
@@ -501,13 +501,15 @@ notMatch Match{} = False
 notMatch _       = True
 
 findCase :: Eq a => Pattern a -> [Case a] -> Maybe ([Case a],Case a,[Case a])
-findCase p (br@(Case Default rhs):brs) = findCase p brs <|> Just ([],br,brs)
+findCase p (br@(Case Default rhs):brs) =
+      fmap (\ (l,b,r) -> (br:l,b,r)) (findCase p brs)
+  <|> Just ([],br,brs)
 findCase p brs = listToMaybe [ (l,br,r) | (l,br@(Case p' _),r) <- cursor brs, p == p' ]
 
 -- step 5. simplify match where all rhs are same
 --
--- Note: projections must return impossible rather than crashing
---       in order for this to work!
+-- Note: projections must silently pass rather than yielding impossible or
+--       crashing in order for this to work!
 
 simplifySameMatch :: Eq a => Expr a -> Expr a
 simplifySameMatch =

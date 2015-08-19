@@ -16,6 +16,12 @@ import Tip.Scope
 import HBMC.Merge
 import HBMC.Identifiers
 
+import HBMC.Data
+import HBMC.Projections
+import HBMC.Bool
+
+import Tip.Passes
+
 import System.Environment
 
 import Data.List
@@ -23,11 +29,31 @@ import Data.List
 main :: IO ()
 main = do
     f:es <- getArgs
-    thy <- either error renameTheory <$> readHaskellOrTipFile f defaultParams
+    thy0 <- either error renameTheory <$> readHaskellOrTipFile f defaultParams
+
+    let [thy1] =
+          map addBoolToTheory $
+            freshPass
+              (runPasses
+                [ SimplifyGently
+                , RemoveNewtype
+                , UncurryTheory
+                , SimplifyGently
+                , BoolOpToIf
+                , CommuteMatch
+                , SimplifyGently
+                , RemoveAliases, CollapseEqual
+                , SimplifyGently
+                , CSEMatch
+                -- , EliminateDeadCode
+                ]) thy0
+
+    let (dis,_) = unzip (map dataInfo (thy_datatypes thy1))
+        di      = concat dis
+
+    let thy = freshPass (projectPatterns di) thy1
 
     -- putStrLn $ ppRender thy
-
-    -- putStrLn "matchPoints:"
 
     let ren = renameWith (disambig varStr)
 

@@ -12,6 +12,15 @@ import Data.Generics.Geniplate
 import Data.Set (Set)
 import qualified Data.Set as S
 
+import HBMC.Bool
+
+instance Booly Var where
+  bool    = System "Bool"
+  true    = System "True"
+  false   = System "False"
+  isTrue  = System "isTrue"
+  isFalse = System "isFalse"
+
 toHsId :: Var -> HsId Var
 toHsId (Prelude x)  = Qualified "Prelude" (Just "P") x
 toHsId (Api x)      = Qualified "LibHBMC" (Just "H") x
@@ -19,14 +28,42 @@ toHsId (Proj x)     = Qualified "LibHBMC" (Just "H") ("proj" ++ show (x+1))
 toHsId (Var "main") = Exact "main"
 toHsId x            = Other x
 
+api :: String -> Var
+api = Api
+
+prelude :: String -> Var
+prelude = Prelude
+
+conLabel :: Var -> Var
+conLabel  f = Var $ "L_" ++ varStr f
+
+conRepr :: Var -> Var
+conRepr   f = Var $ "R_" ++ varStr f
+
+thunkRepr :: Var -> Var
+thunkRepr f = Var $ "Thunk_" ++ varStr f
+
+wrapData :: Var -> Var
+wrapData  f = Var $ "D_" ++ varStr f
+
+caseData :: Var -> Var
+caseData  f = Var $ "case" ++ varStr f
+
+mkCon :: Var -> Var
+mkCon     f = Var $ "con" ++ varStr f
+
 data Var
   = Var String
   | Con String
   | Api String
+  | System String
   | Prelude String
   | Proj Int
   | Refresh Var Int
  deriving (Show,Eq,Ord)
+
+proj :: Int -> Var
+proj = Proj
 
 varMax :: Var -> Int
 varMax Var{}         = 0
@@ -43,6 +80,7 @@ instance PrettyVar Var where
       Proj i      -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
       Api x       -> x
       Prelude x   -> x
+      System x    -> x
 
 renameTheory :: forall a . (Ord a,PrettyVar a) => Theory a -> Theory Var
 renameTheory thy = renameWith disambigId thy
