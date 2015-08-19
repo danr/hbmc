@@ -412,6 +412,9 @@ commuteLet =
     \ e0 -> case e0 of
       Let x (Let y ye xe) e  | isMagic y -> commuteLet (Let y ye (Let x xe e))
       Match (Let x xe e) brs | isMagic x -> commuteLet (Let x xe (Match e brs))
+      hd :@: es
+        | (l,Let x xe e,r):_ <- [ llr | llr@(l,Let x _ _,r) <- cursor es, isMagic x ]
+        -> commuteLet (Let x xe (hd :@: (l ++ [e] ++ r)))
       _ -> e0
 
 -- step 3. pull magic lets upwards
@@ -511,15 +514,18 @@ findCase p (br@(Case Default rhs):brs) =
 findCase p brs = listToMaybe [ (l,br,r) | (l,br@(Case p' _),r) <- cursor brs, p == p' ]
 
 -- step 5. simplify match where all rhs are same
---
--- Note: projections must silently pass rather than yielding impossible or
---       crashing in order for this to work!
 
 simplifySameMatch :: Eq a => Expr a -> Expr a
 simplifySameMatch =
   transformExprIn $ \ e0 ->
     case e0 of
-      Match e (Case _ rhs:brs) | all ((== rhs) . case_rhs) brs -> rhs
+      Match e (Case _ rhs:brs)
+        | all ((== rhs) . case_rhs) brs
+        -> case rhs of
+             Lcl y -> Lcl y
+             _     -> Match e [Case Default rhs]
+                   -- NB: Could be proj, so we must retain what we cased
+                   -- on to get here. The simple case above cannot be proj
       _ -> e0
 
 -- step 6. simplify equal, simple, lets, globally
