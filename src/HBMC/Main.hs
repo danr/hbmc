@@ -20,6 +20,8 @@ import HBMC.Data
 import HBMC.Projections
 import HBMC.Bool
 
+import HBMC.ToSimple
+
 import Tip.Passes
 
 import System.Environment
@@ -59,10 +61,11 @@ main = do
 
     putStrLn $ unlines
       [ ppRender (ren e) ++ ":\n" ++
-        intercalate ",\n"
-          (map (ppRender . ren)
-            (freshPass (mergeTrace (scope thy)) e))
+        intercalate ",\n" (map (ppRender . ren) es) ++ "\n" ++
+        ppRender (ren s)
       | fn <- thy_funcs thy
       , let e = func_body fn
+      , let es = freshPass (mergeTrace (scope thy)) e
+      , let s = freshPass toExpr (last es)
       ]
 

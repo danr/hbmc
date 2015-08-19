@@ -17,8 +17,8 @@ import HBMC.Bool
 
 instance Booly Var where
   bool    = System "Bool"
-  true    = System "True"
-  false   = System "False"
+  true    = SystemCon "True"
+  false   = SystemCon "False"
   isTrue  = System "isTrue"
   isFalse = System "isFalse"
 
@@ -59,13 +59,23 @@ data Var
   | Api String
   | Magic String
   | System String
+  | SystemCon String
   | Prelude String
   | Proj Int
   | Refresh Var Int
  deriving (Show,Eq,Ord)
 
+isCon :: Var -> Bool
+isCon Con{}       = True
+isCon SystemCon{} = True
+isCon _     = False
+
 proj :: Int -> Var
 proj = Proj
+
+unproj :: Var -> Maybe Int
+unproj (Proj i) = Just i
+unproj _        = Nothing
 
 varMax :: Var -> Int
 varMax Var{}         = 0
@@ -83,6 +93,7 @@ instance PrettyVar Var where
       Api x       -> x
       Prelude x   -> x
       System x    -> x
+      SystemCon x -> x
       Magic x     -> "*" ++ x
 
 renameTheory :: forall a . (Ord a,PrettyVar a) => Theory a -> Theory Var
@@ -123,8 +134,8 @@ instance IsMagic a => IsMagic (Local a) where
 
 maybeTC    = System "Maybe"
 maybeTV    = System "a"
-justVar    = System "Just"
-nothingVar = System "Nothing"
+justVar    = SystemCon "Just"
+nothingVar = SystemCon "Nothing"
 
 justGbl :: Type Var -> Global Var
 justGbl t = Global justVar (PolyType [maybeTV] [TyVar maybeTV] (TyCon maybeTC [TyVar maybeTV])) [t]
