@@ -56,6 +56,7 @@ data Var
   = Var String
   | Con String
   | Api String
+  | Magic String
   | System String
   | Prelude String
   | Proj Int
@@ -81,6 +82,7 @@ instance PrettyVar Var where
       Api x       -> x
       Prelude x   -> x
       System x    -> x
+      Magic x     -> "*" ++ x
 
 renameTheory :: forall a . (Ord a,PrettyVar a) => Theory a -> Theory Var
 renameTheory thy = renameWith disambigId thy
@@ -103,4 +105,18 @@ instance Name Var where
   freshNamed x = refresh (Var x)
   refresh v    = Refresh v `fmap` fresh
   getUnique    = varMax
+
+makeMagic :: String -> Var -> Fresh Var
+makeMagic s v = Refresh (Magic (varStr v ++ s)) `fmap` fresh
+
+class IsMagic a where
+  isMagic :: a -> Bool
+
+instance IsMagic Var where
+  isMagic (Refresh x _) = isMagic x
+  isMagic Magic{}       = True
+  isMagic _             = False
+
+instance IsMagic a => IsMagic (Local a) where
+  isMagic (Local x _) = isMagic x
 

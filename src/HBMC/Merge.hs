@@ -15,6 +15,9 @@ import Data.Maybe
 import Control.Applicative
 import Data.Foldable (asum)
 import Data.Traversable (sequenceA)
+
+import HBMC.Identifiers
+
 {-
 
 Use magic lets:
@@ -305,16 +308,17 @@ i.e. np
 
 -}
 
-mergeTrace :: Name a => Scope a -> Expr a -> Fresh [Expr a]
+mergeTrace :: Scope Var -> Expr Var -> Fresh [Expr Var]
 mergeTrace scp e =
   do trc <- hoistAllTrace scp e
      return (trc ++ letPasses (last trc))
 
-merge :: Name a => Scope a -> Expr a -> Fresh (Expr a)
+merge :: Scope Var -> Expr Var -> Fresh (Expr Var)
 merge scp e = last <$> mergeTrace scp e
 
-letPasses :: Ord a => Expr a -> [Expr a]
-letPasses e0 = scanl (flip ($)) e0 [commuteLet,pullLet,pushLets,simplifySameMatch]
+letPasses :: Expr Var -> [Expr Var]
+letPasses e0 = scanl (flip ($)) e0
+  [commuteLet,pullLet,pushLets,simplifySameMatch,simplifyEqualLets]
 
 -- step 1. introduce magic lets
 --
@@ -347,21 +351,21 @@ isFunction scp g = case lookupGlobal (gbl_name g) scp of
                      Just FunctionInfo{} -> True
                      _                   -> False
 
-hoistAll :: Name a => Scope a -> Expr a -> Fresh (Expr a)
+hoistAll :: Scope Var -> Expr Var -> Fresh (Expr Var)
 hoistAll scp e = last <$> hoistAllTrace scp e
 
-hoistAllTrace :: Name a => Scope a -> Expr a -> Fresh [Expr a]
+hoistAllTrace :: Scope Var -> Expr Var -> Fresh [Expr Var]
 hoistAllTrace scp e =
   case filter (isFunction scp) (calls e) of
     f:_ -> fmap (e:) (hoistAllTrace scp =<< hoist f e)
     _   -> return [e]
 
-hoist :: Name a => Global a -> Expr a -> Fresh (Expr a)
+hoist :: Global Var -> Expr Var -> Fresh (Expr Var)
 hoist f (Let x ex e) = Let x ex <$> hoist f e
 hoist f e0 =
   do let (arg_tys,res_ty) = gblType f
-     f_val  <- (`Local` res_ty) <$> refreshNamed "val" (gbl_name f)
-     f_args <- sequence [ (`Local` arg_ty) <$> refreshNamed "arg" (gbl_name f)
+     f_val  <- (`Local` res_ty) <$> makeMagic "val" (gbl_name f)
+     f_args <- sequence [ (`Local` arg_ty) <$> makeMagic "arg" (gbl_name f)
                         | arg_ty <- arg_tys ]
      let Just e = hoist' f f_val f_args e0
      return (Let f_val (Gbl f :@: map Lcl f_args) e)
@@ -402,12 +406,12 @@ hoist' f f_val f_args e0 =
 -- step 2. let/let and match/let
 
 -- Only works on magic lets(!)
-commuteLet :: TransformBi (Expr a) (f a) => f a -> f a
+commuteLet :: (IsMagic a,TransformBi (Expr a) (f a)) => f a -> f a
 commuteLet =
   transformExprIn $
     \ e0 -> case e0 of
-      Let x (Let y ye xe) e  -> commuteLet (Let x xe (Let y ye e))
-      Match (Let x xe e) brs -> commuteLet (Let x xe (Match e brs))
+      Let x (Let y ye xe) e  | isMagic y -> commuteLet (Let y ye (Let x xe e))
+      Match (Let x xe e) brs | isMagic x -> commuteLet (Let x xe (Match e brs))
       _ -> e0
 
 -- step 3. pull magic lets upwards
@@ -425,10 +429,10 @@ commuteLet =
 --      B -> valf
 --      C -> c
 
-pullLet :: Ord a => Expr a -> Expr a
+pullLet :: Expr Var -> Expr Var
 pullLet (Let x rhs b) = Let x rhs (pullLet b)
 pullLet e =
-  case letBound e of
+  case filter isMagic (letBound e) of
     []  -> e
     x:_ -> let Just skel = letSkeleton x e
            in  Let x skel (pullLet (removeLet x e))
@@ -517,6 +521,25 @@ simplifySameMatch =
     case e0 of
       Match e (Case _ rhs:brs) | all ((== rhs) . case_rhs) brs -> rhs
       _ -> e0
+
+-- step 6. simplify equal, simple, lets, globally
+
+simplifyEqualLets :: (IsMagic a,Ord a) => Expr a -> Expr a
+simplifyEqualLets e =
+  case [ (x,s) | Let x s _ <- universeBi e
+               , isMagic x
+               , simple s
+               , 1 == sum [ 1 | Lcl y <- universeBi e, x == y ]
+               , 0 == sum [ 1 | Match (Lcl y) _ <- universeBi e, x == y ]
+               ]
+    ++ [ (x,Lcl y) | Let x (Lcl y) _ <- universeBi e ]
+    of
+    (x,s):_ -> simplifyEqualLets (unsafeSubst s x (removeLet x e))
+    _       -> e
+  where
+  simple Lcl{}       = True
+  simple (hd :@: es) = all simple es
+  simple _           = False
 
 -- utils
 
