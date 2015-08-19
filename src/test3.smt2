@@ -7,7 +7,7 @@
 
 (define-funs-rec
   ((test ((b Bool) (x A)) A))
-  ((ite b (let (((y A) (h x))) (f (g y) y))
+  ((ite b (let ((y (h x))) (f (g y) y))
           (g x))))
 
 (check-sat)

@@ -1,13 +1,16 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
 module HBMC.Merge where
 
 -- import HBMC.Surgery
 import Tip.Core
 import Tip.Fresh
 import Tip.Utils
-import Tip.Scope
+import Tip.Scope hiding (locals)
 
 import Data.Generics.Geniplate
+
+import Data.Maybe
 
 import Control.Applicative
 import Data.Foldable (asum)
@@ -188,7 +191,7 @@ if b is false:
 
 ==> [let/let]
 
-  let f_val = f f_arg
+  let f_val = f f_argf
   let g_val = g g_arg
   case s of
     A -> let f_arg = g_val in let g_arg = x in f_val
@@ -302,6 +305,28 @@ i.e. np
 
 -}
 
+mergeTrace :: Name a => Scope a -> Expr a -> Fresh [Expr a]
+mergeTrace scp e =
+  do trc <- hoistAllTrace scp e
+     return (trc ++ letPasses (last trc))
+
+merge :: Name a => Scope a -> Expr a -> Fresh (Expr a)
+merge scp e = last <$> mergeTrace scp e
+
+letPasses :: Ord a => Expr a -> [Expr a]
+letPasses e0 = scanl (flip ($)) e0 [commuteLet,pullLet,pushLets,simplifySameMatch]
+
+-- step 1. introduce magic lets
+--
+--    case x of
+--      A -> f y
+--      B -> f z
+--
+-- => let valf = f argf
+--    case x of
+--      A -> let argf = y in valf
+--      B -> let argf = z in valf
+
 -- should make it so that constructors are not counted
 calls :: forall a . Ord a => Expr a -> [Global a]
 calls e =
@@ -352,7 +377,7 @@ hoist' f f_val f_args e0 =
         ]
       <|>
         case hd of
-          Gbl g | g `globalEq` f -> pure (lets (f_args `zip` es) (Lcl f_val))
+          Gbl g | g `globalEq` f -> pure (makeLets (f_args `zip` es) (Lcl f_val))
           _ -> empty
 
     Lcl{} -> empty
@@ -374,20 +399,128 @@ hoist' f f_val f_args e0 =
   where
   go = hoist' f f_val f_args
 
-lets :: [(Local a,Expr a)] -> Expr a -> Expr a
-lets []           e = e
-lets ((x,ex):xes) e = Let x ex (lets xes e)
+-- step 2. let/let and match/let
 
-cursor :: [a] -> [([a],a,[a])]
-cursor xs = [ let (l,x:r) = splitAt i xs in (l,x,r) | i <- [0..length xs-1] ]
+-- Only works on magic lets(!)
+commuteLet :: TransformBi (Expr a) (f a) => f a -> f a
+commuteLet =
+  transformExprIn $
+    \ e0 -> case e0 of
+      Let x (Let y ye xe) e  -> commuteLet (Let x xe (Let y ye e))
+      Match (Let x xe e) brs -> commuteLet (Let x xe (Match e brs))
+      _ -> e0
+
+-- step 3. pull magic lets upwards
+--
+--    case x of
+--      A -> let argf = y in valf
+--      B -> let argf = z in valf
+--      C -> c
+-- => let argf = case x of
+--                 A -> y
+--                 B -> z
+--                 -- C case missing
+--    case x of
+--      A -> valf
+--      B -> valf
+--      C -> c
+
+pullLet :: Ord a => Expr a -> Expr a
+pullLet (Let x rhs b) = Let x rhs (pullLet b)
+pullLet e =
+  case letBound e of
+    []  -> e
+    x:_ -> let Just skel = letSkeleton x e
+           in  Let x skel (pullLet (removeLet x e))
+
+letBound :: Expr a -> [Local a]
+letBound e = [ x | Let x _ _ <- universeBi e ]
+
+letSkeleton :: Eq a => Local a -> Expr a -> Maybe (Expr a)
+letSkeleton x = go
+  where
+  go (Match s brs) =
+    case catMaybes [fmap (Case pat) (go rhs) | Case pat rhs <- brs] of
+      []   -> Nothing
+      brs' -> Just (Match s brs')
+  go (Let y rhs b) | x == y    = Just rhs
+                   | otherwise = go b
+  go (_ :@: es)    = asum (map go es)
+  go Lcl{}         = Nothing
+
+removeLet :: Eq a => Local a -> Expr a -> Expr a
+removeLet x =
+  transformBi $ \ e0 -> case e0 of
+    Let y _ e | x == y -> e
+    _                  -> e0
+
+-- step 4. push singleton lets
+
+pushLets :: Ord a => Expr a -> Expr a
+--    let x = case s of
+--           A -> y
+--    let y = ...
+--    case s of
+--      A -> a
+--      B -> b
+-- => let y = ...
+--    case s of
+--      A -> let x = y in a
+--      B -> b
+pushLets (Let x (Match s [Case p xrhs]) rest)
+  | (bound,Match s' brs) <- collectLets rest
+  , s' == s
+  , Just (l,Case p' rhs,r) <- findCase p brs
+  = pushLets (makeLets bound (Match s (l ++ [Case p' (Let x xrhs rhs)] ++ r)))
+
+--    let x = e
+--    let y = ... (no x)
+--    case s of
+--      A -> a (no x)
+--      B -> b[x]
+--      C -> c (no x)
+-- => let y = ...
+--    case s of
+--      A -> a
+--      B -> let x = e in b [x]
+--      C -> c (no x)
+pushLets (Let x xrhs rest)
+  | notMatch xrhs
+  , (bound,Match s brs) <- collectLets rest
+  , null (filter (\ (_y,rhs) -> x `elem` locals rhs) bound)
+  , [Case p rhs] <- [ br | br <- brs, x `elem` locals (case_rhs br) ]
+  , Just (l,Case p' rhs,r) <- findCase p brs
+  = pushLets (makeLets bound (Match s (l ++ [Case p' (Let x xrhs rhs)] ++ r)))
+
+pushLets (Let x xe rest) = Let x xe (pushLets rest)
+pushLets (Match s brs)   = Match s [ Case p (pushLets rhs) | Case p rhs <- brs ]
+pushLets e = e
+
+notMatch :: Expr a -> Bool
+notMatch Match{} = False
+notMatch _       = True
+
+findCase :: Eq a => Pattern a -> [Case a] -> Maybe ([Case a],Case a,[Case a])
+findCase p (br@(Case Default rhs):brs) = findCase p brs <|> Just ([],br,brs)
+findCase p brs = listToMaybe [ (l,br,r) | (l,br@(Case p' _),r) <- cursor brs, p == p' ]
+
+-- step 5. simplify match where all rhs are same
+--
+-- Note: projections must return impossible rather than crashing
+--       in order for this to work!
+
+simplifySameMatch :: Eq a => Expr a -> Expr a
+simplifySameMatch =
+  transformExprIn $ \ e0 ->
+    case e0 of
+      Match e (Case _ rhs:brs) | all ((== rhs) . case_rhs) brs -> rhs
+      _ -> e0
+
+-- utils
 
 globalSig :: Global a -> (a,[Type a])
 globalSig g = (gbl_name g,gbl_args g)
 
 globalEq :: Eq a => Global a -> Global a -> Bool
 globalEq f g = globalSig f == globalSig g
-
-duplicates :: Ord a => [a] -> [a]
-duplicates xs = usort [ x | x <- xs, count x > 1 ]
-  where count x = length (filter (== x) xs)
 

@@ -1,5 +1,5 @@
 (declare-sort A 0)
-(declare-fun f (A A) A)
+(declare-fun f (A) A)
 (declare-fun g (A) A)
 (declare-datatypes () ((Tri (X) (Y) (Z))))
 

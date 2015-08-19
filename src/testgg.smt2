@@ -4,10 +4,10 @@
 
 (define-fun-rec
   test
-    ((b Bool) (x A))
+    ((b Bool) (x A) (y A))
     A
     (ite b (g (g x))
-           (g (g x))))
+           (g (g y))))
 
 (check-sat)
 

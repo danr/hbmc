@@ -35,7 +35,7 @@ main = do
       [ ppRender (ren e) ++ ":\n" ++
         intercalate ",\n"
           (map (ppRender . ren)
-            (freshPass (hoistAllTrace (scope thy)) e))
+            (freshPass (mergeTrace (scope thy)) e))
       | fn <- thy_funcs thy
       , let e = func_body fn
       ]
