@@ -32,7 +32,7 @@ main = do
     thy0 <- either error renameTheory <$> readHaskellOrTipFile f defaultParams
 
     let [thy1] =
-          map addBoolToTheory $
+          map (addMaybeToTheory . addBoolToTheory) $
             freshPass
               (runPasses
                 [ SimplifyGently

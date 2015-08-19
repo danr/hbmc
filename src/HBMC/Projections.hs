@@ -22,6 +22,9 @@ projectPatterns di Theory{..}
          | Function{..} <- thy_funcs ]
        return Theory{thy_funcs=fns,..}
 
+projExpr :: Int -> Expr Var -> Expr Var
+projExpr i e = Gbl (Global (proj i) (PolyType [] [] (exprType e)) []) :@: [e]
+
 projectExpr :: DataInfo Var -> Expr Var -> Fresh (Expr Var)
 projectExpr di = go
  where
@@ -37,11 +40,7 @@ projectExpr di = go
                      | Just (tc,ixs) <- lookup (gbl_name k) di
                      -> do rhs' <-
                              substMany
-                               [ (v,Gbl (Global
-                                           (proj i)
-                                           (PolyType [] [] (lcl_type v))
-                                           [])
-                                    :@: [Lcl lx])
+                               [ (v,projExpr i (Lcl lx))
                                | (v,i) <- vars `zip` ixs
                                ]
                                rhs

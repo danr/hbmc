@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RecordWildCards #-}
 module HBMC.Identifiers where
 
 import Tip.Core
@@ -119,4 +120,30 @@ instance IsMagic Var where
 
 instance IsMagic a => IsMagic (Local a) where
   isMagic (Local x _) = isMagic x
+
+maybeTC    = System "Maybe"
+maybeTV    = System "a"
+justVar    = System "Just"
+nothingVar = System "Nothing"
+
+justGbl :: Type Var -> Global Var
+justGbl t = Global justVar (PolyType [maybeTV] [TyVar maybeTV] (TyCon maybeTC [TyVar maybeTV])) [t]
+
+nothingGbl :: Type Var -> Global Var
+nothingGbl t = Global nothingVar (PolyType [maybeTV] [] (TyCon maybeTC [TyVar maybeTV])) [t]
+
+justExpr :: Expr Var -> Expr Var
+justExpr e = Gbl (justGbl (exprType e)) :@: [e]
+
+nothingExpr :: Type Var -> Expr Var
+nothingExpr t = Gbl (nothingGbl t) :@: []
+
+addMaybeToTheory :: Theory Var -> Theory Var
+addMaybeToTheory thy@Theory{..} = thy { thy_datatypes = maybe_decl : thy_datatypes }
+  where
+  maybe_decl =
+    Datatype maybeTC [maybeTV]
+      [ Constructor nothingVar (System "isNothing") []
+      , Constructor justVar (System "isJust") [(System "fromJust",TyVar maybeTV)]
+      ]
 
