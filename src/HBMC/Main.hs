@@ -37,7 +37,7 @@ main = do
           map (addMaybeToTheory . addBoolToTheory) $
             freshPass
               (runPasses
-                [ SimplifyGently
+                [ SimplifyAggressively
                 , RemoveNewtype
                 , UncurryTheory
                 , SimplifyGently

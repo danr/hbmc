@@ -9,5 +9,9 @@ f x z = case x of
         B u -> f u z
         C u -> f u x
 
-prop x y = f x y === f y x
+prop_f x y = f x y === f y x
 
+g (x:y:zs) = g zs
+g _        = []
+
+prop_g xs ys = g xs === g ys
