@@ -87,7 +87,8 @@ instance PrettyVar Var where
       Var ""      -> "x"
       Var x       -> x
       Con x       -> varStr (Var x)
-      Refresh v i -> varStr v
+      Refresh v@Refresh{} i -> varStr v
+      Refresh v           i -> varStr v ++ "_" ++ show i
       Proj i      -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
       Api x       -> x
       Prelude x   -> x
@@ -113,6 +114,7 @@ renameTheory thy = renameWith disambigId thy
 instance Name Var where
   fresh        = refresh (Var "")
   freshNamed x = refresh (Var x)
+  refreshNamed x _ = freshNamed x
   refresh v    = Refresh v `fmap` fresh
   getUnique    = varMax
 

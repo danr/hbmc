@@ -6,8 +6,8 @@
 ; best is to lift out g twice
 
 (define-funs-rec
-  ((test ((b Bool) (x A)) A))
-  ((ite b (f (g (g (h x))))
-          (h (g (g (f x)))))))
+  ((test ((b Bool) (u A)) A))
+  ((ite b (f (g (g (h u))))
+          (h (g (g (f u)))))))
 
 (check-sat)

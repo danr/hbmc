@@ -2,8 +2,11 @@ module Main where
 
 import Tip.Pretty
 import Tip.Pretty.SMT ()
+import Tip.Pretty.Haskell
 
 import Tip.HaskellFrontend
+import Tip.Haskell.Rename
+import Tip.Haskell.Repr as H
 
 import Tip.Core
 
@@ -19,6 +22,8 @@ import HBMC.Identifiers
 import HBMC.Data
 import HBMC.Projections
 import HBMC.Bool
+
+import HBMC.Monadic
 
 import HBMC.ToSimple
 
@@ -62,12 +67,15 @@ main = do
     let ren = renameWith (disambig varStr)
 
     putStrLn $ unlines
-      [ "\n================\n" ++ ppRender (ren e) ++ ":\n=>\n" ++
-        intercalate ",\n=>\n" (map (ppRender . ren) es) ++ "\n=>\n" ++
-        ppRender (ren s)
+      [ "\n================\n" ++ ppRender (ren e)
+        ++ ":\n=>\n"
+        ++ intercalate ",\n=>\n" (map (ppRender . ren) es)
+        ++ "\n=>\n" ++ ppRender (ren s)
+        ++ "\n=>\n" ++ ppRender (fst $ renameDecls (H.Decls [H.TH (fmap toHsId m)]))
       | fn <- thy_funcs thy
       , let e = func_body fn
       , let es = freshPass (mergeTrace (scope thy) <=< toExpr) e
       , let s = freshPass toExpr (last es)
+      , let m = freshPass (\ e' -> do r <- freshNamed "r"; trExpr e' r) s
       ]
 
