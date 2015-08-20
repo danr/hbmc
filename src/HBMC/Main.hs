@@ -62,8 +62,8 @@ main = do
     let ren = renameWith (disambig varStr)
 
     putStrLn $ unlines
-      [ ppRender (ren e) ++ ":\n" ++
-        intercalate ",\n" (map (ppRender . ren) es) ++ "\n" ++
+      [ "\n================\n" ++ ppRender (ren e) ++ ":\n=>\n" ++
+        intercalate ",\n=>\n" (map (ppRender . ren) es) ++ "\n=>\n" ++
         ppRender (ren s)
       | fn <- thy_funcs thy
       , let e = func_body fn

@@ -23,6 +23,8 @@ import HBMC.ToSimple
 
 import Data.List
 
+import Data.Graph
+
 import Control.Monad
 
 import Tip.Pretty
@@ -152,42 +154,50 @@ mergeBranches _  _  = Nothing
 
 
 
+-- Push lets!!
 
-
--- TODO: Make this work by looking at the call graph
 pushLets :: Expr Var -> Expr Var
+pushLets e@Let{} =
+  let (lets,rest) = collectLets e
+      cands       = leaves lets
+  in  case catMaybes [ fmap ((,) c) (tryPush c rest) | c <- cands ] of
+        (c,rest'):_ ->
+          let remain (x,_) = x `notElem` map fst c
+          in  pushLets (makeLets (filter remain lets) rest')
+        _ -> makeLets lets (pushLets rest)
+pushLets (Match s brs) = Match s [ Case p (pushLets rhs) | Case p rhs <- brs ]
 pushLets e = e
---    ... no x ...
---    let x = case s of
---           A -> xrhs
---           B -> Nothing / noop
---    let y = ... (no x) ...
---    case s (no x) of
---      A -> a
---      B -> b
--- => let y = ...
---    case s of
---      A -> let x = xrhs in a
---      B -> b
-pushLets (Let x (Match s (filter (not . isNoopCase) -> [Case p xrhs])) rest)
-  | (bound,Match s' brs) <- collectLets rest
-  , not (inRhss x bound)
-  , x `notElem` locals s
-  , s' == s
+
+tryPush :: Lets Var -> Expr Var -> Maybe (Expr Var)
+tryPush lets (Match s brs)
+  | and [ x `notElem` locals s | (x,_) <- lets ]
+  , Just dirs <- sequence [ fmap ((,) x) (direction e) | (x,e) <- lets ]
+  , (_,(s0,Case p _)):ds <- dirs
+  , s0 == s
+  , and [ s' == s && p' == p | (_,(s',Case p' _)) <- ds ]
   , Just (l,Case p' rhs,r) <- findCase p brs
-  = pushLets (makeLets bound (Match s (l ++ [Case p' (Let x xrhs rhs)] ++ r)))
+  , let rhs' = Case p (makeLets [ (x,e) | (x,(_,Case _ e)) <- dirs ] rhs)
+  = Just (Match s (l ++ [rhs'] ++ r))
+tryPush _ _ = Nothing
 
-pushLets (Let x xe rest) = Let x xe (pushLets rest)
-pushLets (Match s brs)   = Match s [ Case p (pushLets rhs) | Case p rhs <- brs ]
-pushLets e = e
+direction :: Expr Var -> Maybe (Expr Var,Case Var)
+direction (Match s brs)
+  | [c] <- [ br | br@(Case _ rhs) <- brs, not (isNoop rhs) ]
+  = Just (s,c)
+direction _ = Nothing
 
-inRhss :: Local Var -> [(a,Expr Var)] -> Bool
-inRhss x = not . null . filter (\ (_,rhs) -> x `elem` locals rhs)
+leaves :: forall a . Ord a => Lets a -> [Lets a]
+leaves lets =
+  [ [ (x,e) | (e,x,_) <- scc ]
+  | (scc,prevs) <- withPrevious sccs
+  , and [ x `notElem` prev | (_,x,_) <- scc, (_,_,prev) <- concat prevs ]
+  ]
+  where
+  gr :: [(Expr a,Local a,[Local a])]
+  gr = [ (e,x,locals e) | (x,e) <- lets ]
 
-
-notMatch :: Expr a -> Bool
-notMatch Match{} = False
-notMatch _       = True
+  sccs :: [[(Expr a,Local a,[Local a])]]
+  sccs = map (flattenSCC) (stronglyConnCompR gr)
 
 findCase :: Eq a => Pattern a -> [Case a] -> Maybe ([Case a],Case a,[Case a])
 findCase p (br@(Case Default rhs):brs) =
@@ -228,9 +238,11 @@ callMerged = transformExprInM top
     , allSameHeads rs
     = do let need_maybe = any isNoop (universeBi m)
 
-             (maybe_ty,un_maybe_ty)
-                | need_maybe = (maybeTy,unMaybeTy)
-                | otherwise  = (id,id)
+             (maybe_ty,proj_expr)
+                | need_maybe = ( maybeTy
+                               , \ x -> projExpr 0 (Lcl x)
+                                                 (unMaybeTy (lcl_type x)))
+                | otherwise  = (id     ,Lcl)
 
          args <- sequence [ do arg <- refreshNamed "arg" (lcl_name lhs)
                                return (Local arg (maybe_ty (exprType a))
@@ -238,9 +250,7 @@ callMerged = transformExprInM top
                           | (i,a) <- [0..] `zip` as
                           ]
 
-         let call = Gbl f :@: [ projExpr 0 (Lcl x) (un_maybe_ty (lcl_type x))
-                              | (x,_) <- args ]
-
+         let call = Gbl f :@: [ proj_expr x | (x,_) <- args ]
 
          let case_match x e =
                Match (Lcl x)
