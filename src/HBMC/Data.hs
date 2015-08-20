@@ -144,7 +144,7 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
   con_prenex c =
     do xn <- sequence [ fresh | _ <- types ]
        let Just (_,ixs) = lookup c indexes
-       return (xn,[ fmap (xn !!) (elemIndex p ixs)
+       return (xn,[ fmap undefined {- (xn !!) -} (elemIndex p ixs)
                   | (_,p) <- zip types [0..] ])
 
   -- zer   = Nat (con Zero (Nothing, ()))

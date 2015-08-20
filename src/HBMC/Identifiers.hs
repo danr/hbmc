@@ -57,7 +57,6 @@ data Var
   = Var String
   | Con String
   | Api String
-  | Magic String
   | System String
   | SystemCon String
   | Prelude String
@@ -94,7 +93,6 @@ instance PrettyVar Var where
       Prelude x   -> x
       System x    -> x
       SystemCon x -> x
-      Magic x     -> "*" ++ x
 
 renameTheory :: forall a . (Ord a,PrettyVar a) => Theory a -> Theory Var
 renameTheory thy = renameWith disambigId thy
@@ -117,20 +115,6 @@ instance Name Var where
   freshNamed x = refresh (Var x)
   refresh v    = Refresh v `fmap` fresh
   getUnique    = varMax
-
-makeMagic :: String -> Var -> Fresh Var
-makeMagic s v = Refresh (Magic (varStr v ++ s)) `fmap` fresh
-
-class IsMagic a where
-  isMagic :: a -> Bool
-
-instance IsMagic Var where
-  isMagic (Refresh x _) = isMagic x
-  isMagic Magic{}       = True
-  isMagic _             = False
-
-instance IsMagic a => IsMagic (Local a) where
-  isMagic (Local x _) = isMagic x
 
 maybeTC    = System "Maybe"
 maybeTV    = System "a"
@@ -161,6 +145,14 @@ noopVar = SystemCon "noop"
 
 noopExpr :: Type Var -> Expr Var
 noopExpr t = Gbl (blankGlobal noopVar t) :@: []
+
+isNoop :: Expr Var -> Bool
+isNoop (Match _ rhss) = all (isNoop . case_rhs) rhss
+isNoop (Gbl n :@: []) = gbl_name n `elem` [nothingVar,noopVar]
+isNoop _              = False
+
+isNoopCase :: Case Var -> Bool
+isNoopCase (Case _ rhs) = isNoop rhs
 
 blankGlobal :: Var -> Type Var -> Global Var
 blankGlobal g t = Global g (PolyType [] [] t) []
