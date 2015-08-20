@@ -28,6 +28,8 @@ import System.Environment
 
 import Data.List
 
+import Control.Monad
+
 main :: IO ()
 main = do
     f:es <- getArgs
@@ -65,7 +67,7 @@ main = do
         ppRender (ren s)
       | fn <- thy_funcs thy
       , let e = func_body fn
-      , let es = freshPass (mergeTrace (scope thy)) e
+      , let es = freshPass (mergeTrace (scope thy) <=< toExpr) e
       , let s = freshPass toExpr (last es)
       ]
 

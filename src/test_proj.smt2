@@ -8,11 +8,11 @@
 (declare-fun h (U) U)
 
 (define-fun-rec
-  test_match ((s AB) (t CD) (a U) (b U)) CD
+  test_match ((s AB) (t CD) (x U) (y U)) CD
   (match s
-    (case A (g a))
+    (case A (g x))
     (case B
-      (match (g b)
+      (match (g y)
         (case C C)
         (case D D)))))
 

@@ -137,17 +137,33 @@ maybeTV    = System "a"
 justVar    = SystemCon "Just"
 nothingVar = SystemCon "Nothing"
 
+maybeTy :: Type Var -> Type Var
+maybeTy x = TyCon maybeTC [x]
+
+unMaybeTy :: Type Var -> Type Var
+unMaybeTy (TyCon mtc [x]) | mtc == maybeTC = x
+unMaybeTy _ = error "unMaybeTy: Not a Maybe Type!"
+
 justGbl :: Type Var -> Global Var
-justGbl t = Global justVar (PolyType [maybeTV] [TyVar maybeTV] (TyCon maybeTC [TyVar maybeTV])) [t]
+justGbl t = Global justVar (PolyType [maybeTV] [TyVar maybeTV] (maybeTy (TyVar maybeTV))) [t]
 
 nothingGbl :: Type Var -> Global Var
-nothingGbl t = Global nothingVar (PolyType [maybeTV] [] (TyCon maybeTC [TyVar maybeTV])) [t]
+nothingGbl t = Global nothingVar (PolyType [maybeTV] [] (maybeTy (TyVar maybeTV))) [t]
 
 justExpr :: Expr Var -> Expr Var
 justExpr e = Gbl (justGbl (exprType e)) :@: [e]
 
 nothingExpr :: Type Var -> Expr Var
 nothingExpr t = Gbl (nothingGbl t) :@: []
+
+noopVar :: Var
+noopVar = SystemCon "noop"
+
+noopExpr :: Type Var -> Expr Var
+noopExpr t = Gbl (blankGlobal noopVar t) :@: []
+
+blankGlobal :: Var -> Type Var -> Global Var
+blankGlobal g t = Global g (PolyType [] [] t) []
 
 addMaybeToTheory :: Theory Var -> Theory Var
 addMaybeToTheory thy@Theory{..} = thy { thy_datatypes = maybe_decl : thy_datatypes }

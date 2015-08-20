@@ -23,6 +23,13 @@ import HBMC.Projections
 
 import Data.List
 
+import Control.Monad
+
+import Tip.Pretty
+import Tip.Pretty.SMT ()
+
+import Debug.Trace
+
 {-
 
 Use magic lets:
@@ -180,54 +187,54 @@ if b is false:
 
 ==>
 
-  let f_val = f f_arg
+  let f_res = f f_arg
   case s of
-    A -> let f_arg = g x in f_val
+    A -> let f_arg = g x in f_res
     B -> case t of
-            C -> let f_arg = y in g f_val
-            D -> let f_arg = z in f_val
+            C -> let f_arg = y in g f_res
+            D -> let f_arg = z in f_res
 
 ==>
 
-  let f_val = f f_arg
-  let g_val = g g_arg
+  let f_res = f f_arg
+  let g_res = g g_arg
   case s of
-    A -> let f_arg = let g_arg = x in g_val in f_val
+    A -> let f_arg = let g_arg = x in g_res in f_res
     B -> case t of
-            C -> let f_arg = y in let g_arg = f_val in g_val
-            D -> let f_arg = z in f_val
+            C -> let f_arg = y in let g_arg = f_res in g_res
+            D -> let f_arg = z in f_res
 
 ==> [let/let]
 
-  let f_val = f f_argf
-  let g_val = g g_arg
+  let f_res = f f_argf
+  let g_res = g g_arg
   case s of
-    A -> let f_arg = g_val in let g_arg = x in f_val
+    A -> let f_arg = g_res in let g_arg = x in f_res
     B -> case t of
-            C -> let f_arg = y in let g_arg = f_val in g_val
-            D -> let f_arg = z in f_val
+            C -> let f_arg = y in let g_arg = f_res in g_res
+            D -> let f_arg = z in f_res
 
 ==> [magic let pull ... what happens when other than magic lets are in the way?
                         they can be let lifted first (and memoised), of course!
                         then all lets that are left are magic]
 
-  let f_val = f f_arg
-  let g_val = g g_arg
+  let f_res = f f_arg
+  let g_res = g g_arg
   let f_arg = case s of
-                A -> g_val
+                A -> g_res
                 B -> case t of
                     C -> y
                     D -> z
   let g_arg = case s of
                 A -> x
                 B -> case t of
-                    C -> f_val
+                    C -> f_res
                     D -> undefined
   case s of
-    A -> f_val
+    A -> f_res
     B -> case t of
-            C -> g_val
-            D -> f_val
+            C -> g_res
+            D -> f_res
 
 -------
 
@@ -239,22 +246,22 @@ if b is false:
 
 ==>
 
-  let f_val = f f_arg
+  let f_res = f f_arg
   case s of
-    A -> let f_arg = x in f_val
-    B -> case let f_arg = y in f_val of
+    A -> let f_arg = x in f_res
+    B -> case let f_arg = y in f_res of
             C -> a
             D -> b
 
 ==> [magic let pull]
 
-  let f_val = f f_arg
+  let f_res = f f_arg
   let f_arg = case s of
                 A -> x
                 B -> y
   case s of
-    A -> f_val
-    B -> case f_val of
+    A -> f_res
+    B -> case f_res of
             C -> a
             D -> b
 
@@ -270,7 +277,7 @@ if b is false:
 
 
 ==>
-     let f_val = f f_arg
+     let f_res = f f_arg
      let f_arg = case s of
             A -> _|_
             B -> case t of
@@ -279,26 +286,26 @@ if b is false:
      case s of
         A -> a
         B -> case t of
-            C -> f_val
-            D -> f_val
+            C -> f_res
+            D -> f_res
 
 ==>
-     f_val <- new
+     f_res <- new
      f_arg <- new
-     f f_arg >>> f_val
+     f f_arg >>> f_res
      when (s = A) noop
      when (s = B) $
        do when (t = C) (x >>> f_arg)
           when (t = D) (y >>> f_arg)
      when (s = A) (a >>> res)
      when (s = B) $
-       do when (t = C) (f_val >>> res)
-          when (t = D) (f_val >>> res)
+       do when (t = C) (f_res >>> res)
+          when (t = D) (f_res >>> res)
 
 ==>
-     f_val <- new
+     f_res <- new
      f_arg <- new
-     f f_arg >>> f_val
+     f f_arg >>> f_res
      when (s = A) $
        do noop
           a >>> res
@@ -306,24 +313,27 @@ if b is false:
      when (s = B) $
        do when (t = C) (x >>> f_arg)
           when (t = D) (y >>> f_arg)
-          when (t = C) (f_val >>> res)
-          when (t = D) (f_val >>> res)
+          when (t = C) (f_res >>> res)
+          when (t = D) (f_res >>> res)
 
 i.e. np
 
 -}
 
 mergeTrace :: Scope Var -> Expr Var -> Fresh [Expr Var]
-mergeTrace scp e =
-  do trc <- hoistAllTrace scp e
-     return (nub (trc ++ letPasses (last trc)))
+mergeTrace scp e0 =
+  do e <- magicLets e0
+     trc <- hoistAllTrace scp e
+     return (nub (e0 : trc ++ letPasses (last trc)))
 
 merge :: Scope Var -> Expr Var -> Fresh (Expr Var)
 merge scp e = last <$> mergeTrace scp e
 
 letPasses :: Expr Var -> [Expr Var]
 letPasses e0 = scanl (flip ($)) e0
-  [commuteLet,pullLet,pushLets,simplifySameMatch,simplifyEqualLets]
+  [fixpoint (commuteLet . pullLet NothingReplacement)
+  ,fixpoint (pushLets [])
+  ,mergeMatches,simplifySameMatch,simplifyEqualLets]
 
 -- step 1. introduce magic lets
 --
@@ -331,12 +341,11 @@ letPasses e0 = scanl (flip ($)) e0
 --      A -> f y
 --      B -> f z
 --
--- => let valf = f argf
+-- => let resf = f argf
 --    case x of
---      A -> let argf = y in valf
---      B -> let argf = z in valf
+--      A -> let argf = y in resf
+--      B -> let argf = z in resf
 
--- should make it so that constructors are not counted
 calls :: forall a . Ord a => Expr a -> [Global a]
 calls e =
   usort . concat $
@@ -362,32 +371,36 @@ hoistAll scp e = last <$> hoistAllTrace scp e
 hoistAllTrace :: Scope Var -> Expr Var -> Fresh [Expr Var]
 hoistAllTrace scp e =
   case filter (isFunction scp) (calls e) of
-    f:_ -> fmap (e:) (hoistAllTrace scp =<< hoist f e)
+    f:_ -> do (lhs,rhs,e') <- hoist f e
+              rest <- hoistAllTrace scp e'
+              return (map (Let lhs rhs) (e':rest))
+              -- fmap (e:) (hoistAllTrace scp =<< hoist f e)
     _   -> return [e]
 
-hoist :: Global Var -> Expr Var -> Fresh (Expr Var)
-hoist f (Let x ex e) = Let x ex <$> hoist f e
+hoist :: Global Var -> Expr Var -> Fresh (Local Var,Expr Var,Expr Var)
+hoist f e | trace ("hoist:" ++ ppRender (f,e)) False = undefined
+-- hoist f (Let x ex e) = Let x ex <$> hoist f e
 hoist f e0 =
   do let (arg_tys,res_ty) = gblType f
-     f_val  <- (`Local` res_ty) <$> makeMagic "val" (gbl_name f)
-     f_args <- sequence [ (`Local` arg_ty) <$> makeMagic "arg" (gbl_name f)
+     f_res  <- (`Local` res_ty) <$> makeMagic "res" (gbl_name f)
+     f_args <- sequence [ (`Local` maybeTy arg_ty) <$> makeMagic "arg" (gbl_name f)
                         | arg_ty <- arg_tys ]
-     let Just e = hoist' f f_val f_args e0
+     let Just e = hoist' f f_res f_args e0
      return
-       (Let f_val
-            (foldr
+       ( f_res
+       , foldr
               (\ x e' ->
                 Match (Lcl x)
-                  [ Case (ConPat (nothingGbl (lcl_type x)) []) (nothingExpr (lcl_type x))
+                  [ Case (ConPat (nothingGbl (lcl_type x)) []) (noopExpr (lcl_type x))
                   , Case (ConPat (justGbl (lcl_type x)) []) e'
                   ])
-              (Gbl f :@: [ projExpr 0 (Lcl arg) | arg <- f_args ])
-              f_args)
-            e)
+              (Gbl f :@: [ projExpr 0 (Lcl arg) (unMaybeTy (lcl_type arg)) | arg <- f_args ])
+              f_args
+       , e)
 
 hoist' :: (Functor f,Applicative f,Alternative f) =>
           Global Var -> Local Var -> [Local Var] -> Expr Var -> f (Expr Var)
-hoist' f f_val f_args e0 =
+hoist' f f_res f_args e0 =
   case e0 of
     hd :@: es ->
       asum
@@ -396,7 +409,7 @@ hoist' f f_val f_args e0 =
         ]
       <|>
         case hd of
-          Gbl g | g `globalEq` f -> pure (makeLets (f_args `zip` map justExpr es) (Lcl f_val))
+          Gbl g | g `globalEq` f -> pure (makeLets (f_args `zip` map justExpr es) (Lcl f_res))
           _ -> empty
 
     Lcl{} -> empty
@@ -416,7 +429,7 @@ hoist' f f_val f_args e0 =
     Lam{}   -> error "hoist' Lam"
     Quant{} -> error "hoist' Quant"
   where
-  go = hoist' f f_val f_args
+  go = hoist' f f_res f_args
 
 -- step 2. let/let and match/let
 
@@ -432,42 +445,115 @@ commuteLet =
         -> commuteLet (Let x xe (hd :@: (l ++ [e] ++ r)))
       _ -> e0
 
+-- step 0. make lets magic and pull them upwards
+--
+--    case u of
+--       C a -> let b = h a in f (g b) b
+--       D a -> g a
+-- => let *b = case u of
+--               C a -> h a
+--               D a -> noop
+--    case u of
+--      C a -> f (g b) b
+--      D a -> g a
+
+introMagicLets :: Expr Var -> Fresh (Expr Var)
+introMagicLets =
+  transformExprInM $
+    \ e0 -> case e0 of
+      Let x xe b -> do i <- fresh
+                       x' <- makeMagic (show (i :: Int)) (lcl_name x)
+                       let lx' = Local x' (lcl_type x)
+                       Let lx' xe <$> (Lcl lx' // x) b
+      _ -> return e0
+
+magicLets :: Expr Var -> Fresh (Expr Var)
+magicLets
+  = fmap ((\ u -> trace ("magicLets:" ++ ppRender u) u) .
+          mergeMatches . pullLet NoopReplacement) . introMagicLets
+
+mergeMatches :: Expr Var -> Expr Var
+mergeMatches e0 | trace ("mM:" ++ ppRender e0) False = undefined
+mergeMatches e0 =
+  case e0 of
+    Let{} | let (bound,e) = collectLets e0 ->
+      case catMaybes
+             [ fmap ((,) ((l1++mid++r2),(x,y))) (tryMerge u v)
+             | (l1,(x,u),r) <- cursor bound
+             , (mid,(y,v),r2) <- cursor r
+             ] of
+      ((bound',(x,y)),m):_ ->
+         let e' = unsafeSubst (Lcl x) y (makeLets bound' e)
+         in  mergeMatches (Let x m e')
+      _ -> makeLets bound (mergeMatches e)
+    Match s brs -> Match s [ Case p (mergeMatches rhs) | Case p rhs <- brs ]
+    _ -> e0
+
+tryMerge :: Expr Var -> Expr Var -> Maybe (Expr Var)
+tryMerge e1 e2 | trace ("tM:" ++ ppRender (e1,e2)) False = undefined
+tryMerge e1 e2 | e1 == e2 = Just e1
+tryMerge (Match s1 brs1) (Match s2 brs2)
+  | s1 == s2 = fmap (Match s1) (mergeBranches (sort brs1) (sort brs2))
+tryMerge _ _ = Nothing
+
+mergeBranches :: [Case Var] -> [Case Var] -> Maybe [Case Var]
+mergeBranches (Case _ e1:_) (Case _ e2:_) | trace ("mB:" ++ ppRender (e1,e2)) False = undefined
+mergeBranches (br1@(Case p1 rhs1):brs1) (br2@(Case p2 rhs2):brs2)
+  | p1 == p2
+  = (:)
+      <$> (if isEmpty rhs1      then Just br2
+           else if isEmpty rhs2 then Just br1
+           else fmap (Case p1) (tryMerge rhs1 rhs2))
+      <*> mergeBranches brs1 brs2
+mergeBranches [] [] = Just []
+mergeBranches _  _  = Nothing
+
+
 -- step 3. pull magic lets upwards
 --
 --    case x of
---      A -> let argf = Just y in valf
---      B -> let argf = Just z in valf
+--      A -> let argf = Just y in resf
+--      B -> let argf = Just z in resf
 --      C -> c
 -- => let argf = case x of
 --                 A -> Just y
 --                 B -> Just z
 --                 C -> Nothing
 --    case x of
---      A -> valf
---      B -> valf
+--      A -> resf
+--      B -> resf
 --      C -> c
 
-pullLet :: Expr Var -> Expr Var
-pullLet (Let x rhs b) = Let x rhs (pullLet b)
-pullLet e =
+data Replacement = NothingReplacement | NoopReplacement
+
+replacementExpr :: Replacement -> Type Var -> Expr Var
+replacementExpr NothingReplacement = nothingExpr
+replacementExpr NoopReplacement    = noopExpr
+
+pullLet :: Replacement -> Expr Var -> Expr Var
+pullLet repl (Let x rhs b)
+  | isMagic x = Let x (pullLet repl rhs) (pullLet repl b)
+  | otherwise = Let x rhs (pullLet repl b)
+pullLet repl e =
   case filter isMagic (letBound e) of
     []  -> e
-    x:_ -> let Just skel = letSkeleton x e
-           in  Let x skel (pullLet (removeLet x e))
+    x:_ -> let Just skel = letSkeleton repl x e
+           in  Let x skel (pullLet repl (removeLet x e))
 
 letBound :: Expr a -> [Local a]
 letBound e = [ x | Let x _ _ <- universeBi e ]
 
-letSkeleton :: Local Var -> Expr Var -> Maybe (Expr Var)
-letSkeleton x = go
+letSkeleton :: Replacement -> Local Var -> Expr Var -> Maybe (Expr Var)
+letSkeleton repl x = go
   where
   go e0@(Match s brs) =
-    Just $ Match s
-      [ case go rhs of
-          Just rhs' -> Case pat rhs'
-          Nothing   -> Case pat (nothingExpr (exprType rhs))
-      | Case pat rhs <- brs
-      ]
+    let e = Match s
+               [ case go rhs of
+                   Just rhs' -> Case pat rhs'
+                   Nothing   -> Case pat (replacementExpr repl (exprType rhs))
+               | Case pat rhs <- brs
+               ]
+    in  Just (if isEmpty e then replacementExpr repl (exprType e0) else e)
   go (Let y rhs b) | x == y    = Just rhs
                    | otherwise = go b
   go (_ :@: es)    = asum (map go es)
@@ -481,28 +567,41 @@ removeLet x =
 
 -- step 4. push singleton lets
 
-pushLets :: Expr Var -> Expr Var
+inRhss :: Local Var -> [(a,Expr Var)] -> Bool
+inRhss x = not . null . filter (\ (_,rhs) -> x `elem` locals rhs)
+
+fixpoint :: (Pretty a,Eq a) => (a -> a) -> a -> a
+fixpoint f x | trace ("fixpoint: " ++ ppRender (x,y)) False = undefined
+             | y == x    = x
+             | otherwise = fixpoint f y
+  where y = f x
+
+pushLets :: [Local Var] -> Expr Var -> Expr Var
+--    ... no x ...
 --    let x = case s of
---           A -> y
---           B -> Nothing
---    let y = ...
---    case s of
+--           A -> xrhs
+--           B -> Nothing / noop
+--    let y = ... (no x) ...
+--    case s (no x) of
 --      A -> a
 --      B -> b
 -- => let y = ...
 --    case s of
---      A -> let x = y in a
+--      A -> let x = xrhs in a
 --      B -> b
-pushLets (Let x (Match s (filter (not . isNothingCase) -> [Case p xrhs])) rest)
+pushLets seen (Let x (Match s (filter (not . isEmptyCase) -> [Case p xrhs])) rest)
   | isMagic x
   , (bound,Match s' brs) <- collectLets rest
+  , not (inRhss x bound)
+  , x `notElem` seen
+  , x `notElem` locals s
   , s' == s
   , Just (l,Case p' rhs,r) <- findCase p brs
-  = pushLets (makeLets bound (Match s (l ++ [Case p' (Let x xrhs rhs)] ++ r)))
+  = pushLets seen (makeLets bound (Match s (l ++ [Case p' (Let x xrhs rhs)] ++ r)))
 
 --    let x = e
 --    let y = ... (no x)
---    case s of
+--    case s (no x) of
 --      A -> a (no x)
 --      B -> b[x]
 --      C -> c (no x)
@@ -511,22 +610,28 @@ pushLets (Let x (Match s (filter (not . isNothingCase) -> [Case p xrhs])) rest)
 --      A -> a
 --      B -> let x = e in b [x]
 --      C -> c (no x)
-pushLets (Let x xrhs rest)
+pushLets seen (Let x xrhs rest)
   | isMagic x
-  , {- notMatch xrhs
-  , -} (bound,Match s brs) <- collectLets rest
-  , null (filter (\ (_y,rhs) -> x `elem` locals rhs) bound)
+  , (bound,Match s brs) <- collectLets rest
+  , not (inRhss x bound)
+  , x `notElem` seen
+  , x `notElem` locals s
   , [Case p rhs] <- [ br | br <- brs, x `elem` locals (case_rhs br) ]
   , Just (l,Case p' rhs,r) <- findCase p brs
-  = pushLets (makeLets bound (Match s (l ++ [Case p' (Let x xrhs rhs)] ++ r)))
+  = pushLets seen (makeLets bound (Match s (l ++ [Case p' (Let x xrhs rhs)] ++ r)))
 
-pushLets (Let x xe rest) = Let x xe (pushLets rest)
-pushLets (Match s brs)   = Match s [ Case p (pushLets rhs) | Case p rhs <- brs ]
-pushLets e = e
+pushLets seen (Let x xe rest) = Let x xe (pushLets (seen ++ locals xe) rest)
+pushLets _    (Match s brs)   = Match s [ Case p (pushLets [] rhs) | Case p rhs <- brs ]
+pushLets _    e = e
 
-isNothingCase :: Case Var -> Bool
-isNothingCase (Case _ (Gbl n :@: [])) = gbl_name n == nothingVar
-isNothingCase _ = False
+isEmptyCase :: Case Var -> Bool
+isEmptyCase (Case _ rhs) = isEmpty rhs
+
+isEmpty :: Expr Var -> Bool
+isEmpty (Match _ rhss) = all (isEmpty . case_rhs) rhss
+isEmpty (Gbl n :@: []) = gbl_name n `elem` [nothingVar,noopVar]
+isEmpty _              = False
+
 
 notMatch :: Expr a -> Bool
 notMatch Match{} = False
@@ -539,14 +644,17 @@ findCase p (br@(Case Default rhs):brs) =
 findCase p brs = listToMaybe [ (l,br,r) | (l,br@(Case p' _),r) <- cursor brs, p == p' ]
 
 -- step 5. simplify match where all rhs are same
+--         ... cannot do this because of projections ...
 
 simplifySameMatch :: Eq a => Expr a -> Expr a
 simplifySameMatch =
   transformExprIn $ \ e0 ->
     case e0 of
+      {- must check that rhs contains no projections of the matched thing
       Match e (Case _ rhs:brs)
         | all ((== rhs) . case_rhs) brs
         -> rhs
+      -}
       _ -> e0
 
 -- step 6. simplify equal, simple, lets, globally

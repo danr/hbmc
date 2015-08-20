@@ -1,24 +1,29 @@
 (declare-sort A 0)
+
 (declare-fun f (A A) A)
 (declare-fun g (A) A)
 (declare-fun h (A) A)
 
+(declare-datatypes () ((AA (C (cproj A)) (D (dproj A)))))
+
 ; don't want to duplicate the work of h here
 
+(define-fun-rec
+  test ((u AA)) A
+  (match u
+     (case (C a) (let ((b (h a))) (f (g b) b)))
+     (case (D a) (g a))))
 
-(define-funs-rec
-  ((test ((b Bool) (x A)) A))
-  ((ite b (let ((y (h x))) (f (g y) y))
-          (g x))))
+(define-fun-rec
+  test2 ((u AA)) A
+  (match u
+     (case (C a1) (let ((b1 (h a1))) (f (g b1) b1)))
+     (case (D a2) (let ((b2 (h a2))) (f (g b2) b2)))))
 
-; this does not currently work.
-;
-; one way to do this is to make y magical and pull it like this:
-;
-; let *y = if b then Just (h x) else Nothing
-; in  if b then f (g y) y else g x
-;
-; can we always make the initial lets magical and pull them as far
-; as possible before starting?
+(define-fun-rec
+  test3 ((u AA)) A
+  (match u
+     (case (C a1) (let ((b1 (h a1))) (f b1 b1)))
+     (case (D a2) (let ((b2 (h a2))) (f b2 b2)))))
 
 (check-sat)
