@@ -81,19 +81,24 @@ varMax Var{}         = 0
 varMax (Refresh v i) = varMax v `max` i
 varMax _             = 0
 
+varStr' :: Var -> String
+varStr' x =
+  case x of
+    Var ""      -> "x"
+    Var x       -> x
+    Con x       -> varStr' (Var x)
+    Refresh v i -> varStr' v
+    Proj i      -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
+    Api x       -> x
+    Prelude x   -> x
+    System x    -> x
+    SystemCon x -> x
+
 instance PrettyVar Var where
   varStr x =
     case x of
-      Var ""      -> "x"
-      Var x       -> x
-      Con x       -> varStr (Var x)
-      Refresh v@Refresh{} i -> varStr v
-      Refresh v           i -> varStr v ++ "_" ++ show i
-      Proj i      -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
-      Api x       -> x
-      Prelude x   -> x
-      System x    -> x
-      SystemCon x -> x
+      Refresh v i -> varStr' v ++ "_" ++ show i
+      _           -> varStr' x
 
 renameTheory :: forall a . (Ord a,PrettyVar a) => Theory a -> Theory Var
 renameTheory thy = renameWith disambigId thy
@@ -114,7 +119,7 @@ renameTheory thy = renameWith disambigId thy
 instance Name Var where
   fresh        = refresh (Var "")
   freshNamed x = refresh (Var x)
-  refreshNamed x _ = freshNamed x
+  refreshNamed x s = freshNamed (varStr' s ++ x)
   refresh v    = Refresh v `fmap` fresh
   getUnique    = varMax
 

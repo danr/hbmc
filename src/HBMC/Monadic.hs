@@ -55,7 +55,7 @@ trExpr e00 r =
 
       Match s brs -> trMatch s brs r
 
-      _ | isNoop e0 -> return Noop
+      Gbl (Global g _ _) :@: _ | g == noopVar -> return Noop
 
       s -> return (trSimple s >>> var r)
 

@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns, FlexibleContexts #-}
 module HBMC.ToSimple where
 
@@ -10,7 +11,33 @@ import HBMC.Identifiers
 
 import Tip.Core
 
+import Tip.Utils
+
 import Control.Monad.Writer
+
+import Data.Graph
+
+-- E[let x = a in b] ~> let x = a in E[b]
+-- but does not pull above Match scopes
+widenLetScope :: Expr Var -> Expr Var
+widenLetScope e0 =
+  let (e0',lets) = runWriter (go e0)
+  in  makeLets lets e0'
+  where
+  go (Match s brs) =
+    do s' <- go s;
+       return (Match s' brs)
+
+  go (Let x e1 e2) =
+    do e1' <- go e1
+       tell [(x,e1')]
+       go e2
+
+  go (hd :@: es) = (hd :@:) <$> mapM go es
+
+  go (Lcl l) = return (Lcl l)
+
+  go e = error $ "widenLetScope: " ++ ppRender e
 
 -- e ::= let x = f s1 .. sn in e
 --    |  let x = c in e
@@ -27,61 +54,63 @@ import Control.Monad.Writer
 
 toExpr :: Expr Var -> Fresh (Expr Var)
 toExpr e0 =
-  case e0 of
-    Let x m@Match{} e2 ->
-      do (lets,m') <- toMatch m
-         makeLets (lets ++ [(x,m')]) <$> toExpr e2
+  do r <- (`Local` exprType e0) <$> fresh
+     let (lets,s) = collectLets (widenLetScope e0)
+     (lets',su) <- execWriterT $ sequence_ [ trLet x e | (x,e) <- lets ++ [(r,s)] ]
+     su' <- sequence [ (,) x <$> substMany su e | (x,e) <- su ]
+     let lets'' = map fst (concat (orderLets lets'))
+     inlineOneMatch <$> substMany su' (makeLets lets'' (Lcl r))
 
-    Let x e1 e2 ->
-      do (lets,s1) <- toSimple e1
-         makeLets lets . unsafeSubst s1 x <$> toExpr e2
-
-    m@Match{} ->
-      do (lets,m') <- toMatch m
-         return (makeLets lets m')
-
-    _ ->
-      do (lets,s) <- toSimple e0
-         return (makeLets lets s)
+inlineOneMatch :: Expr Var -> Expr Var
+inlineOneMatch e0 =
+  case collectLets e0 of
+    (lets,Lcl x)
+      | (l,m,r):_ <- [ (l,m,r) | (l,(y,m@Match{}),r) <- cursor lets, x == y ]
+      , and [ x /= y | (_,e) <- l ++ r, y <- locals e ]
+      -> makeLets (l++r) m
+    _ -> e0
+  where
 
 type Lets a = [(Local a,Expr a)]
 
-toMatch :: Expr Var -> Fresh (Lets Var,Expr Var)
-toMatch e0 =
+type Subst a = [(Local a,Expr a)]
+
+trLet :: Local Var -> Expr Var -> WriterT (Lets Var,Subst Var) Fresh ()
+trLet x e0 =
   case e0 of
-    Match e brs ->
-      do (lets,s) <- toSimple e
-         brs' <- sequence [ Case pat <$> toExpr rhs | Case pat rhs <- brs ]
-         return (lets,Match s brs')
-
-    _ -> error $ "Bad match expression: " ++ ppRender e0
-
-toSimple :: Expr Var -> Fresh (Lets Var,Expr Var)
-toSimple e =
-  do (s,w) <- runWriterT (toSimple' e)
-     return (w,s)
-
-toSimple' :: Expr Var -> WriterT (Lets Var) Fresh (Expr Var)
-toSimple' e0 =
-  case e0 of
-    Lcl{} -> return e0
+    Lcl{} -> tell_su e0
 
     hd@(Gbl (Global f _ _)) :@: args ->
-      do xn <- mapM toSimple' args
+      do xn <- sequence [ do xi <- (`Local` exprType ei) <$> lift (refresh (lcl_name x))
+                             trLet xi ei
+                             return (Lcl xi)
+                        | ei <- args ]
          case () of
-           () | isCon f            -> return (hd :@: xn)
-              | Just{} <- unproj f -> return (hd :@: xn) -- todo: check if xn is Con
-              | otherwise          ->
-                do a <- lift fresh
-                   let la = Local a (exprType e0)
-                   tell [(la,hd :@: xn)]
-                   return (Lcl la)
+           () | isCon f            -> tell_su (hd :@: xn)
+              | Just{} <- unproj f -> tell_su (hd :@: xn)
+              | otherwise          -> tell_let (hd :@: xn)
 
-    Let x e1 e2 ->
-      do s1 <- toSimple' e1
-         let su = unsafeSubst s1 x
-         let su_lets lets = [ (x,su lt) | (x,lt) <- lets ]
-         fmap su (censor su_lets (toSimple' e2))
+    Match e brs ->
+      do s <- (`Local` exprType e) <$> lift fresh
+         trLet s e
+         m <- Match (Lcl s) <$> sequence [ Case pat <$> lift (toExpr rhs)
+                                         | Case pat rhs <- brs ]
+         tell_let m
 
-    _ -> error $ "toSimple': " ++ ppRender e0
+    _ -> error $ "trLet: " ++ ppRender e0
+  where
+  tell_let e = tell ([(x,e)],[])
+  tell_su  e = tell ([],[(x,e)])
+
+orderLets :: forall a . Ord a => Lets a -> [[((Local a,Expr a),[Local a])]]
+orderLets lets =
+  [ [ ((x,e),lcls)
+    | (e,x,lcls) <- comp
+    ]
+  | comp <- map (flattenSCC) (stronglyConnCompR gr)
+  ]
+  where
+  gr :: [(Expr a,Local a,[Local a])]
+  gr = [ (e,x,locals e) | (x,e) <- lets ]
+
 

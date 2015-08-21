@@ -23,8 +23,6 @@ import HBMC.ToSimple
 
 import Data.List
 
-import Data.Graph
-
 import Control.Monad
 
 import Tip.Pretty
@@ -59,8 +57,10 @@ pullLets :: Expr Var -> Expr Var
 pullLets e =
   case letBound e of
     []  -> e
-    x:_ -> let Just skel = letSkeleton x e
-           in  Let x skel (pullLets (removeLet x e))
+    x:_ ->
+      case letSkeleton x e of
+        Just skel -> widenLetScope (Let x (pullLets skel) (pullLets (removeLet x e)))
+        _         -> error $ "pullLets: " ++ ppRender (x,e)
 
 letBound :: Expr a -> [Local a]
 letBound e = [ x | Let x _ _ <- universeBi e ]
@@ -188,16 +188,12 @@ direction _ = Nothing
 
 leaves :: forall a . Ord a => Lets a -> [Lets a]
 leaves lets =
-  [ [ (x,e) | (e,x,_) <- scc ]
+  [ map fst scc
   | (scc,prevs) <- withPrevious sccs
-  , and [ x `notElem` prev | (_,x,_) <- scc, (_,_,prev) <- concat prevs ]
+  , and [ x `notElem` prev | ((x,e),_) <- scc, (_,prev) <- concat prevs ]
   ]
   where
-  gr :: [(Expr a,Local a,[Local a])]
-  gr = [ (e,x,locals e) | (x,e) <- lets ]
-
-  sccs :: [[(Expr a,Local a,[Local a])]]
-  sccs = map (flattenSCC) (stronglyConnCompR gr)
+  sccs = orderLets lets
 
 findCase :: Eq a => Pattern a -> [Case a] -> Maybe ([Case a],Case a,[Case a])
 findCase p (br@(Case Default rhs):brs) =
@@ -233,7 +229,7 @@ callMerged :: Expr Var -> Fresh (Expr Var)
 callMerged = transformExprInM top
   where
   top (Let lhs m rest)
-    | let rs@((Gbl f :@: as):_) = rhss m
+    | rs@((Gbl f :@: as):_) <- rhss m
     , length rs >= 2
     , allSameHeads rs
     = do let need_maybe = any isNoop (universeBi m)
