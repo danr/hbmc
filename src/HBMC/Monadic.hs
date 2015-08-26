@@ -1,11 +1,11 @@
 {-# LANGUAGE RecordWildCards #-}
 module HBMC.Monadic where
 
-import Tip.Core as Tip
-import Tip.Haskell.Repr as H
+import Tip.Core
 import Tip.Fresh
 
-import HBMC.Identifiers
+import HBMC.Identifiers hiding (Con,Proj,Var)
+import HBMC.Identifiers (Var())
 
 import HBMC.Bool
 import Tip.Passes
@@ -21,18 +21,44 @@ import Control.Monad
 import Tip.Pretty
 import Tip.Pretty.SMT ()
 
-trType :: Tip.Type a -> H.Type a
-trType t0 =
-  case t0 of
-    Tip.TyCon t ts -> H.TyCon t (map trType ts)
-    Tip.TyVar x    -> H.TyVar x
-    _              -> error "trType: Cannot translate type\n(using HOFs, classes or Ints?)"
+-- Translation to constraint-generation DSL:
+
+data Func a = Func a [a] a Bool (Mon a)
+
+data Prop a = Prop [a] (Mon a)
+
+data Pred a = a :=? a
+  deriving (Eq,Ord,Show)
+
+data Guard = When | Unless
+  deriving (Eq,Ord,Show)
+
+data Rhs a
+  = New Bool a
+  | Call a [Simp a]
+  deriving (Eq,Ord,Show)
+
+data Act a
+  = Guard Guard [Pred a] (Mon a)
+  | CaseData a (Simp a) a a (Mon a)
+  | Simp a :>>>: a
+  | a :<-: Rhs a
+  | EqualHere (Simp a) (Simp a)
+  deriving (Eq,Ord,Show)
+
+data Simp a
+  = Con a [Simp a]
+  | Proj Int (Simp a)
+  | Var a
+  deriving (Eq,Ord,Show)
+
+type Mon a = [Act a]
 
 -- Simple termination check: there is some argument that always decreases
 -- Not working for mutually recursive groups!
 terminates :: Var          -- function name
            -> [Var]        -- arguments
-           -> Tip.Expr Var -- body as a simple expression
+           -> Expr Var -- body as a simple expression
            -> Bool
 terminates _ [] _ = True
 terminates f as e =
@@ -45,70 +71,47 @@ terminates f as e =
   chase needle (Gbl (Global g _ _) :@: [e]) | Just{} <- unproj g = chase needle e
   chase _ _ = False
 
-trFunc :: Tip.Function Var -> Fresh [H.Decl Var]
-trFunc Tip.Function{..} =
+trFunction :: Function Var -> Fresh (Func Var)
+trFunction Function{..} =
   do r <- fresh
      simp_body <- toExpr func_body
-     let args = map Tip.lcl_name func_args
-     let maybe_check e
-           | terminates func_name args simp_body = e
-           | otherwise = H.Apply (api "check") [e]
-     body <-
-       {-
-       if superSimple simp_body
-         then
-           do e <- trExpr simp_body Nothing
-              return $ H.Lam [H.nestedTupPat (map H.VarPat args)] e
-         else
-           do -}
-           do b <- trExpr simp_body (Just r)
-              return $
-                H.Apply (api "nomemo")
-                  [H.String func_name
-                  ,H.Lam [H.nestedTupPat (map H.VarPat args),H.VarPat r] (maybe_check b)
-                  ]
-     return
-       [ let tt = modTyCon wrapData . trType
+     let args = map lcl_name func_args
+     let chk = terminates func_name args simp_body
+     body <- trExpr simp_body (Just r)
+     return (Func func_name args r chk body)
+       {- let tt = modTyCon wrapData . trType
          in H.TySig func_name
               [ H.TyCon s [H.TyVar tv]
               | tv <- func_tvs
               , s <- [api "Equal",prelude "Ord",api "Constructive"]
               ]
-              (nestedTyTup (map (tt . Tip.lcl_type) func_args)
+              (nestedTyTup (map (tt . lcl_type) func_args)
                `TyArr` (H.TyCon (api "H") [tt func_res]))
-       , funDecl func_name [] body
-       ]
+       -}
 
-superSimple :: Tip.Expr a -> Bool
+{-
+superSimple :: Expr a -> Bool
 superSimple e =
   case e of
     Lcl _   -> True
     _ :@: _ -> True
-    Tip.Let _ (_ :@: _) r -> superSimple r
+    Let _ (_ :@: _) r -> superSimple r
     _ -> False
+    -}
 
-data Verbosity = Quiet | Verbose deriving (Eq,Ord,Show,Read)
-
-trProp :: Verbosity -> Tip.Formula Var -> Fresh (H.Expr Var)
-trProp v fm =
+trFormula :: Formula Var -> Fresh (Prop Var)
+trFormula fm =
   case fm of
-    Tip.Formula r          (_:_) e -> error "trProp, TODO: translate type variables"
-    Tip.Formula Tip.Prove  []    e -> trProp v (Tip.Formula Tip.Assert [] (neg e))
-    Tip.Formula Tip.Assert []    e ->
+    Formula r      (_:_) e -> error "trFormula, TODO: translate type variables"
+    Formula Prove  []    e -> trFormula (Formula Assert [] (neg e))
+    Formula Assert []    e ->
       do let (vs,e') = fmap neg (forallView (neg e))
          let cs      = conjuncts (ifToBoolOp e')
-         let news    = [ H.Bind (lcl_name v) (H.Apply (api "newInput") []) | v <- vs ]
+         let news    = [ x :<-: New True (tyConOf t) | Local x t <- vs ]
          asserts <- mapM trToTrue cs
-         return $
-           H.Apply (api "run") . return $
-           mkDo (news ++ map Stmt asserts)
-                (H.Apply (api "solveAndSee")
-                   [var $ prelude $ case v of Quiet -> "True";  Verbose -> "False"
-                   ,var $ prelude $ case v of Quiet -> "False"; Verbose -> "True"
-                   ,tagShow (map Tip.lcl_name vs)
-                   ])
+         return (Prop (map lcl_name vs) (news ++ concat asserts))
 
-trToTrue :: Tip.Expr Var -> Fresh (H.Expr Var)
+trToTrue :: Expr Var -> Fresh (Mon Var)
 trToTrue e0 =
   case e0 of
     Builtin Equal    :@: ~[e1,e2] -> tr True  e1 e2
@@ -123,7 +126,7 @@ trToTrue e0 =
                         (error "trToTrue global type")
        trExpr (makeLets (lets1 ++ lets2) (Gbl equal_fn :@: [s1,s2])) Nothing
 
-conjuncts :: Tip.Expr a -> [Tip.Expr a]
+conjuncts :: Expr a -> [Expr a]
 conjuncts e0 =
   case e0 of
     Builtin And :@: es                            -> concatMap conjuncts es
@@ -132,37 +135,38 @@ conjuncts e0 =
     _                                             -> [e0]
 
 -- [[ e ]]=> r
-trExpr :: Tip.Expr Var -> Maybe Var -> Fresh (H.Expr Var)
+trExpr :: Expr Var -> Maybe Var -> Fresh (Mon Var)
 trExpr e00 mr =
   let (lets,rest) = collectLets e00
       (matches,fn_calls)  = partition (isMatch . snd) lets
-  in  mkDo [ H.Bind (lcl_name x) newExpr | (x,_) <- matches ]
-        <$> go (makeLets (fn_calls ++ matches) rest)
+  in  ([x :<-: New False (tyConOf t) | (Local x t,_) <- matches ] ++)
+         <$> go (makeLets (fn_calls ++ matches) rest)
   where
   go e0 =
     case e0 of
-      Tip.Let x (Match s brs) e ->
-        thenExpr <$> trMatch s brs (Just (lcl_name x))
-                 <*> go e
+      Let x (Match s brs) e ->
+        (:) <$> trMatch s brs (Just (lcl_name x)) <*> go e
 
-      Tip.Let x (Gbl (Global f _ _) :@: ss) e ->
-        mkDo [H.Bind (lcl_name x) (H.Apply f [nestedTup (map trSimple ss)])] <$> go e
+      Let x (Gbl (Global f _ _) :@: ss) e ->
+        (lcl_name x :<-: Call f (map trSimple ss) :) <$> go e
 
-      Match s brs -> trMatch s brs mr
+      Match s brs -> (:[]) <$> trMatch s brs mr
 
-      Gbl (Global g _ _) :@: _ | g == noopVar -> return Noop
+      Gbl (Global g _ _) :@: _ | g == noopVar -> return []
 
-      s -> case mr of Just r  -> return (trSimple s >>> var r)
-                      Nothing -> return (trSimple s)
+      Gbl (Global (Api "equalHere") _ _) :@: [s1,s2] ->
+        return [EqualHere (trSimple s1) (trSimple s2)]
 
-trMatch :: Tip.Expr Var -> [Case Var] -> Maybe Var -> Fresh (H.Expr Var)
-trMatch e brs mr | Tip.TyCon tc _ <- exprType e =
+      s | Just r <- mr -> return [trSimple s :>>>: r]
+
+trMatch :: Expr Var -> [Case Var] -> Maybe Var -> Fresh (Act Var)
+trMatch e brs mr | TyCon tc _ <- exprType e =
   do c <- fresh
      s <- fresh
 
      let ls = Local s (exprType e)
 
-     let ctors = [ k | Tip.Case (Tip.ConPat (Global k _ _) _) _ <- brs ]
+     let ctors = [ k | Case (ConPat (Global k _ _) _) _ <- brs ]
 
      brs' <- mapM (trCase c mr ctors . replaceProj e ls) brs
 
@@ -171,70 +175,42 @@ trMatch e brs mr | Tip.TyCon tc _ <- exprType e =
      --   when (c =? K_i) $ do [[ br_i (sel s // sel e) ]]=> r
      --   ...
 
-     return $
-       H.Apply (caseData tc) [trSimple e,
-         H.Lam [H.ConPat (api "Con") [H.VarPat c,H.VarPat s]]
-           (mkDo (concat brs') Noop)
-         ]
+     return $ CaseData tc (trSimple e) c s (concat brs')
 
 trMatch _ _ _ = error "trMatch: Not a TyCon!"
 
 -- sel s // sel e
-replaceProj :: Tip.Expr Var -> Local Var -> Tip.Case Var -> Tip.Case Var
-replaceProj e s (Tip.Case p rhs) =
-  Tip.Case p $ (`transformExprIn` rhs) $
+replaceProj :: Expr Var -> Local Var -> Case Var -> Case Var
+replaceProj e s (Case p rhs) =
+  Case p $ (`transformExprIn` rhs) $
     \ e0 -> case e0 of
       hd@(Gbl (Global g _ _)) :@: [e'] | e == e', Just{} <- unproj g -> hd :@: [Lcl s]
 
       _ -> e0
 
-trSimple :: Tip.Expr Var -> H.Expr Var
+trSimple :: Expr Var -> Simp Var
 trSimple s =
   case s of
-    Lcl (Local x _) -> var x
-    Gbl (Global k _ _) :@: [s] | Just{} <- unproj k -> H.Apply k [trSimple s]
-    Gbl (Global g _ _) :@: ss | isApi g -> H.Apply g (map trSimple ss)
-    Gbl (Global k _ _) :@: ss -> H.Apply (mkCon k) (map trSimple ss)
+    Lcl (Local x _) -> Var x
+    Gbl (Global k _ _) :@: [s] | Just i <- unproj k -> Proj i (trSimple s)
+    Gbl (Global k _ _) :@: ss -> Con k (map trSimple ss)
     _ -> error $ "trSimple, not simple: " ++ ppRender s
 
-trCase :: Var -> Maybe Var -> [Var] -> Case Var -> Fresh [H.Stmt Var]
-trCase c mr cons (Tip.Case pat rhs) =
+trCase :: Var -> Maybe Var -> [Var] -> Case Var -> Fresh (Mon Var)
+trCase c mr cons (Case pat rhs) =
   do body <- trExpr rhs mr
-     let (fn,arg) =
-           case pat of
-             Default                     -> ("unless",List [c =? k | k <- cons])
-             Tip.ConPat (Global k _ _) _ -> ("when"  ,c =? k)
-     case body of
-       Noop -> return []
-       _    -> return [Stmt (H.Apply (api fn) [arg,body])]
-  where
-  x =? lbl = H.Apply (api "valEq") [var x,var (conLabel lbl)]
+     return $
+       case body of
+         [] -> []
+         _  ->
+           return $
+             case pat of
+               Default                 -> Guard Unless [c :=? k | k <- cons] body
+               ConPat (Global k _ _) _ -> Guard When   [c :=? k] body
 
--- Expression builders
-
-justExpr :: H.Expr Var -> H.Expr Var
-justExpr e = H.Apply (prelude "Just") [e]
-
-newExpr :: H.Expr Var
-newExpr = H.Apply (api "new") []
-
-thenReturn :: [H.Stmt Var] -> Var -> H.Expr Var
-ss `thenReturn` x = mkDo ss (returnExpr (var x))
-
-(>>>) :: H.Expr Var -> H.Expr Var -> H.Expr Var
-a >>> b = H.Apply (api ">>>") [a,b]
-
-returnExpr :: H.Expr Var -> H.Expr Var
-returnExpr e = H.Apply (prelude "return") [e]
-
-thenExpr :: H.Expr Var -> H.Expr Var -> H.Expr Var
-thenExpr e1 e2 = mkDo [Stmt e1,Stmt e2] Noop
-
-tagShow :: [Var] -> H.Expr Var
-tagShow []     = var   (api "TagNil")
-tagShow (x:xs) = Apply (api "TagCons") [H.String x,var x,tagShow xs]
-
-isMatch :: Tip.Expr a -> Bool
+isMatch :: Expr a -> Bool
 isMatch Match{} = True
 isMatch _       = False
 
+tyConOf :: Type a -> a
+tyConOf (TyCon x _) = x

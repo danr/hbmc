@@ -19,12 +19,13 @@ import Tip.Scope
 
 import HBMC.Merge
 import HBMC.Identifiers
+import HBMC.Haskell
 
 import HBMC.Data
 import HBMC.Projections
 import HBMC.Bool
 
-import HBMC.Monadic
+import HBMC.Monadic hiding (Var)
 
 import HBMC.ToSimple
 
@@ -70,18 +71,18 @@ translate thy0 = do
         [ do let e = func_body fn
              es <- lift $ mergeTrace (scope thy) e
              tell ("":map (ppRender . ren) es)
-             lift $ trFunc fn{ func_body = last es }
+             trFunc <$> lift (trFunction fn{ func_body = last es })
         | fn <- thy_funcs thy
         ]
 
     main_decls <- lift $ sequence
-        [ H.funDecl (Var "main") [] <$> trProp Verbose prop
+        [ H.funDecl (Var "main") [] . trProp Verbose <$> trFormula prop
         | prop <- thy_asserts thy
         ]
 
-    dt_decls <- lift $ mapM (trDatatype True) (thy_datatypes thy)
+    dt_decls <- lift $ mapM (trDatatype False) (thy_datatypes thy)
 
-    let decls = concat dt_decls ++ concat fn_decls ++ main_decls
+    let decls = concat dt_decls ++ fn_decls ++ main_decls
 
     let Decls ds = addImports $ fst $ renameDecls $ fmap toHsId (Decls decls)
 

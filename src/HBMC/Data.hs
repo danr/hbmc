@@ -9,12 +9,19 @@ import Data.List
 import Tip.Haskell.Repr as H
 
 import HBMC.Identifiers
-import HBMC.Monadic
+import HBMC.Haskell
 
 import Tip.Core (Datatype(..),Constructor(..))
 import Control.Applicative
 
 type DataInfo a = [(a,(a,[Int]))]
+
+trType :: T.Type a -> H.Type a
+trType t0 =
+  case t0 of
+    T.TyCon t ts -> H.TyCon t (map trType ts)
+    T.TyVar x    -> H.TyVar x
+    _            -> error "trType: Cannot translate type\n(using HOFs, classes or Ints?)"
 
 dataInfo :: forall a . Eq a => Datatype a -> (DataInfo a,[Type a])
 dataInfo (Datatype tc _tvs cons) = (indexes,types)
