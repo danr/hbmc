@@ -44,6 +44,8 @@ mergeTrace scp e = sequence $ scanl (>>=) (return e)
     , callMerged
 -- step 6. an optimisation: simplify match that return the same value
     , return . simplifySameMatch
+-- step 7. return simple again
+    , toExpr
     ]
 
 --    case s of
@@ -193,7 +195,7 @@ leaves lets =
   , and [ x `notElem` prev | ((x,e),_) <- scc, (_,prev) <- concat prevs ]
   ]
   where
-  sccs = orderLets lets
+  sccs = reverse (orderLets lets)
 
 findCase :: Eq a => Pattern a -> [Case a] -> Maybe ([Case a],Case a,[Case a])
 findCase p (br@(Case Default rhs):brs) =

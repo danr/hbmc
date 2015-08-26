@@ -32,26 +32,30 @@ toHsId x            = Other x
 api :: String -> Var
 api = Api
 
+isApi :: Var -> Bool
+isApi Api{} = True
+isApi _     = False
+
 prelude :: String -> Var
 prelude = Prelude
 
 conLabel :: Var -> Var
-conLabel  f = Var $ "L_" ++ varStr f
+conLabel  = Prefixed "L"
 
 conRepr :: Var -> Var
-conRepr   f = Var $ "R_" ++ varStr f
+conRepr   = Prefixed ""
 
 thunkRepr :: Var -> Var
-thunkRepr f = Var $ "Thunk_" ++ varStr f
+thunkRepr = Prefixed "Thunk"
 
 wrapData :: Var -> Var
-wrapData  f = Var $ "D_" ++ varStr f
+wrapData  = Prefixed "D"
 
 caseData :: Var -> Var
-caseData  f = Var $ "case" ++ varStr f
+caseData  = Prefixed "case"
 
 mkCon :: Var -> Var
-mkCon     f = Var $ "con" ++ varStr f
+mkCon     = Prefixed "con"
 
 data Var
   = Var String
@@ -62,6 +66,7 @@ data Var
   | Prelude String
   | Proj Int
   | Refresh Var Int
+  | Prefixed String Var
  deriving (Show,Eq,Ord)
 
 isCon :: Var -> Bool
@@ -93,6 +98,8 @@ varStr' x =
     Prelude x   -> x
     System x    -> x
     SystemCon x -> x
+    Prefixed "" x -> varStr' x
+    Prefixed d x -> d ++ "_" ++ varStr' x
 
 instance PrettyVar Var where
   varStr x =

@@ -17,6 +17,8 @@ import Control.Monad.Writer
 
 import Data.Graph
 
+import Data.Monoid
+
 -- E[let x = a in b] ~> let x = a in E[b]
 -- but does not pull above Match scopes
 widenLetScope :: Expr Var -> Expr Var
@@ -52,14 +54,17 @@ widenLetScope e0 =
 --
 -- + proj (K .. x ..) = x
 
+
 toExpr :: Expr Var -> Fresh (Expr Var)
-toExpr e0 =
+toExpr e = inlineOneMatch <$> toExprSimpleEnd e
+
+toExprSimpleEnd :: Expr Var -> Fresh (Expr Var)
+toExprSimpleEnd e0 =
   do r <- (`Local` exprType e0) <$> fresh
      let (lets,s) = collectLets (widenLetScope e0)
-     (lets',su) <- execWriterT $ sequence_ [ trLet x e | (x,e) <- lets ++ [(r,s)] ]
-     su' <- sequence [ (,) x <$> substMany su e | (x,e) <- su ]
+     (lets',Dual su) <- execWriterT $ sequence_ [ trLet x e | (x,e) <- lets ++ [(r,s)] ]
      let lets'' = map fst (concat (orderLets lets'))
-     inlineOneMatch <$> substMany su' (makeLets lets'' (Lcl r))
+     substMany su (makeLets lets'' (Lcl r))
 
 inlineOneMatch :: Expr Var -> Expr Var
 inlineOneMatch e0 =
@@ -73,7 +78,7 @@ inlineOneMatch e0 =
 
 type Lets a = [(Local a,Expr a)]
 
-type Subst a = [(Local a,Expr a)]
+type Subst a = Dual [(Local a,Expr a)]
 
 trLet :: Local Var -> Expr Var -> WriterT (Lets Var,Subst Var) Fresh ()
 trLet x e0 =
@@ -99,8 +104,8 @@ trLet x e0 =
 
     _ -> error $ "trLet: " ++ ppRender e0
   where
-  tell_let e = tell ([(x,e)],[])
-  tell_su  e = tell ([],[(x,e)])
+  tell_let e = tell ([(x,e)],mempty)
+  tell_su  e = tell (mempty,Dual [(x,e)])
 
 orderLets :: forall a . Ord a => Lets a -> [[((Local a,Expr a),[Local a])]]
 orderLets lets =

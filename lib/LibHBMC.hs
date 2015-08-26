@@ -758,73 +758,33 @@ proj (Just x) h = h x
 proj _        _ = return ()
 -}
 
-proj1 :: (Maybe a, z) -> (a -> H ()) -> H ()
-proj1 (Just x, _) h = h x
-proj1 _           _ = return ()
+proj1 :: (Maybe a, z) -> a
+proj1 (Just x, _) = x
 
-proj2 :: (x, (Maybe a, z)) -> (a -> H ()) -> H ()
-proj2 (_, (Just x, _)) h = h x
-proj2 _                _ = return ()
+proj2 :: (x, (Maybe a, z)) -> a
+proj2 (_, (Just x, _)) = x
 
-proj3 :: (x, (y, (Maybe a, z))) -> (a -> H ()) -> H ()
-proj3 (_, (_, (Just x, _))) h = h x
-proj3 _                     _ = return ()
+proj3 :: (x, (y, (Maybe a, z))) -> a
+proj3 (_, (_, (Just x, _))) = x
 
-proj4 :: (x1, (x, (y, (Maybe a, z)))) -> (a -> H ()) -> H ()
-proj4 (_, (_, (_, (Just x, _)))) h = h x
-proj4 _                     _ = return ()
+proj4 :: (x1, (x, (y, (Maybe a, z)))) -> a
+proj4 (_, (_, (_, (Just x, _)))) = x
 
-proj5 :: (x2, (x1, (x, (y, (Maybe a, z))))) -> (a -> H ()) -> H ()
-proj5 (_, (_, (_, (_, (Just x, _))))) h = h x
-proj5 _                     _ = return ()
+proj5 :: (x2, (x1, (x, (y, (Maybe a, z))))) -> a
+proj5 (_, (_, (_, (_, (Just x, _))))) = x
 
-proj6 :: (x3, (x2, (x1, (x, (y, (Maybe a, z)))))) -> (a -> H ()) -> H ()
-proj6 (_, (_, (_, (_, (_, (Just x, _)))))) h = h x
-proj6 _                     _ = return ()
+proj6 :: (x3, (x2, (x1, (x, (y, (Maybe a, z)))))) -> a
+proj6 (_, (_, (_, (_, (_, (Just x, _)))))) = x
 
-proj7 :: (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z))))))) -> (a -> H ()) -> H ()
-proj7 (_, (_, (_, (_, (_, (_, (Just x, _))))))) h = h x
-proj7 _                     _ = return ()
+proj7 :: (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z))))))) -> a
+proj7 (_, (_, (_, (_, (_, (_, (Just x, _))))))) = x
 
-proj8 :: (x5, (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z)))))))) -> (a -> H ()) -> H ()
-proj8 (_, (_, (_, (_, (_, (_, (_, (Just x, _)))))))) h = h x
-proj8 _                     _ = return ()
-
-mproj1 :: (Maybe a, z) -> (a -> H (Maybe b)) -> H (Maybe b)
-mproj1 (Just x, _) h = h x
-mproj1 _           _ = return Nothing
-
-mproj2 :: (x, (Maybe a, z)) -> (a -> H (Maybe b)) -> H (Maybe b)
-mproj2 (_, (Just x, _)) h = h x
-mproj2 _                _ = return Nothing
-
-mproj3 :: (x, (y, (Maybe a, z))) -> (a -> H (Maybe b)) -> H (Maybe b)
-mproj3 (_, (_, (Just x, _))) h = h x
-mproj3 _                     _ = return Nothing
-
-mproj4 :: (x1, (x, (y, (Maybe a, z)))) -> (a -> H (Maybe b)) -> H (Maybe b)
-mproj4 (_, (_, (_, (Just x, _)))) h = h x
-mproj4 _                     _ = return Nothing
-
-mproj5 :: (x2, (x1, (x, (y, (Maybe a, z))))) -> (a -> H (Maybe b)) -> H (Maybe b)
-mproj5 (_, (_, (_, (_, (Just x, _))))) h = h x
-mproj5 _                     _ = return Nothing
-
-mproj6 :: (x3, (x2, (x1, (x, (y, (Maybe a, z)))))) -> (a -> H (Maybe b)) -> H (Maybe b)
-mproj6 (_, (_, (_, (_, (_, (Just x, _)))))) h = h x
-mproj6 _                     _ = return Nothing
+proj8 :: (x5, (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z)))))))) -> a
+proj8 (_, (_, (_, (_, (_, (_, (_, (Just x, _)))))))) = x
 
 unJust :: Maybe a -> a
 unJust (Just x) = x
 unJust Nothing  = error "unJust"
-
-mproj7 :: (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z))))))) -> (a -> H (Maybe b)) -> H (Maybe b)
-mproj7 (_, (_, (_, (_, (_, (_, (Just x, _))))))) h = h x
-mproj7 _                     _ = return Nothing
-
-mproj8 :: (x5, (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z)))))))) -> (a -> H (Maybe b)) -> H (Maybe b)
-mproj8 (_, (_, (_, (_, (_, (_, (_, (Just x, _)))))))) h = h x
-mproj8 _                     _ = return Nothing
 
 class (Show c, Ord c) => ConstructiveData c where
   constrs :: [c]
