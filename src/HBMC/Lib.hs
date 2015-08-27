@@ -11,6 +11,8 @@ import qualified MiniSat as M
 import MiniSat ( Solver, Lit )
 import System.IO.Unsafe
 
+import Debug.Trace
+
 --------------------------------------------------------------------------------
 
 data Env =
@@ -518,6 +520,10 @@ solveBit s xs =
 
 data Thunk a = This a | Delay Bool Unique (IORef (Either (H ()) a))
 
+instance Show a => Show (Thunk a) where
+  show (This x) = "This " ++ show x
+  show (Delay b u r) = "Delay"
+
 instance Eq a => Eq (Thunk a) where
   This x      == This y      = x == y
   Delay _ p _ == Delay _ q _ = p == q
@@ -657,7 +663,7 @@ newtype Val a = Val [(Bit,a)] -- sorted on a
  deriving ( Eq, Ord )
 
 instance Show a => Show (Val a) where
-  show (Val xs) = concat (intersperse "|" [ show x | (_,x) <- xs ])
+  show (Val xs) = "[" ++ concat (intersperse "," [ show x | (_,x) <- xs ]) ++ "]"
 
 val :: a -> Val a
 val x = Val [(tt,x)]
@@ -746,68 +752,83 @@ instance Value (Val a) where
 data LiveDesc c
   = DataDesc String [c] [([c],LiveDesc c)]
   | ThunkDesc (LiveDesc c)
+  deriving (Eq,Ord)
+
+descTC :: LiveDesc c -> String
+descTC (DataDesc tc _ _) = tc
+descTC (ThunkDesc d)     = descTC d
+
+instance Show c => Show (LiveDesc c) where
+  show (DataDesc s cs xs) = s ++ " " ++ show cs ++ " " ++ show [(cs',descTC d)|(cs',d)<-xs]
+  show (ThunkDesc d)      = "Thunk (" ++ show d ++ ")"
 
 data LiveData c
   = LiveData String (Val c) [([c],Maybe (LiveData c))]
   | LiveThunk (Thunk (LiveData c))
-  deriving (Eq,Ord)
+  deriving (Eq,Ord,Show)
 
-newData :: Ord c => Bool -> LiveDesc c -> H (LiveData c)
+newData :: (Show c,Ord c) => Bool -> LiveDesc c -> H (LiveData c)
 newData i (ThunkDesc d) =
   do LiveThunk <$> delay i (newData i d)
 
-newData i (DataDesc tc cons args) =
+newData i desc@(DataDesc tc cons args) =
   do c <- newVal cons
      as <- sequence [ do d <- newData i desc
                          return (cs,Just d)
                     | (cs,desc) <- args
                     ]
-     return (LiveData tc c as)
+     let d = LiveData tc c as
+     -- io (print desc)
+     -- io (print d)
+     return d
 
 equalLiveOn :: Ord c => (forall a . Equal a => a -> a -> H ()) -> LiveData c -> LiveData c -> H ()
-equalLiveOn k (LiveThunk t1)      (LiveThunk t2)      = k t1 t2
-equalLiveOn k (LiveData _ c1 as1) (LiveData _ c2 as2) =
+equalLiveOn k (LiveThunk t1)        (LiveThunk t2)        = k t1 t2
+equalLiveOn k (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) | tc1 == tc2 =
   do equalHere c1 c2
      ctx <- context
      sequence_
-       [ do x <- new
+       [ do whens [ c1 =? c | c <- cs ] (k (fj x1) (fj x2)) {- x <- new
             sequence_ [ addClauseHere [nt (c1 =? c), x] | c <- cs ]
-            inContext x (do addClauseHere [ctx]; k x1 x2)
-       | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
+            inContext x (do addClauseHere [ctx]; k x1 x2) -}
+       | ((cs,x1),(_cs,x2)) <- as1 `zip` as2
        ]
+  where
+  fj (Just x) = x
 
 instance Ord c => Equal (LiveData c) where
   (>>>)        = equalLiveOn (>>>)
   equalHere    = equalLiveOn equalHere
-  notEqualHere (LiveThunk th1)     (LiveThunk th2)     = notEqualHere th1 th2
-  notEqualHere (LiveData _ c1 as1) (LiveData _ c2 as2) =
-    choice
-    [ do notEqualHere c1 c2
-    , do equalHere c1 c2
-         choice
-           [ do addClauseHere [ c1 =? c | c <- cs ]
-                notEqualHere x1 x2
-           | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
-           ]
-    ]
+  notEqualHere (LiveThunk th1)       (LiveThunk th2)       = notEqualHere th1 th2
+  notEqualHere (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) | tc1 == tc2 =
+    do io (putStrLn "notEqualHere")
+       choice
+         [ do notEqualHere c1 c2
+         , do equalHere c1 c2
+              choice
+                [ do addClauseHere [ c1 =? c | c <- cs ]
+                     notEqualHere x1 x2
+                | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
+                ]
+         ]
 
--- projData :: Eq c => Int -> LiveData c -> LiveData c
--- projData i (LiveData _ _ xs) = let (_,Just v):_ = drop i xs in v
-
-conData :: Eq c => LiveDesc c -> c -> [LiveData c] -> LiveData c
-conData (ThunkDesc d)     c as = LiveThunk (this (conData d c as))
+conData :: (Show c,Eq c) => LiveDesc c -> c -> [LiveData c] -> LiveData c
+conData (ThunkDesc d)     c as =
+  -- snd $ traceShowId $ (,) "conData" $
+    LiveThunk (this (conData d c as))
 conData (DataDesc s _ rs) c as =
-  LiveData s (val c)
-    (snd
-       (mapAccumL
-         (\ as_rem (cs,_) ->
-           if c `elem` cs then
-             let hd:tl = as_rem
-             in  (tl,(cs,Just hd))
-           else
-             (as_rem,(cs,Nothing))
-         )
-         as rs))
+  -- snd $ traceShowId $ (,) "conData" $
+    LiveData s (val c)
+      (snd
+         (mapAccumL
+           (\ as_rem (cs,_) ->
+             if c `elem` cs then
+               let hd:tl = as_rem
+               in  (tl,(cs,Just hd))
+             else
+               (as_rem,(cs,Nothing))
+           )
+           as rs))
 
 caseData :: LiveData c -> (Val c -> [LiveData c] -> H ()) -> H ()
 caseData (LiveThunk th)      k = ifForce th (\ ld -> caseData ld k)

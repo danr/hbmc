@@ -74,7 +74,7 @@ letSkeleton x = go
     Just $ mkMatch s
        [ case go rhs of
            Just rhs' -> Case pat rhs'
-           Nothing   -> Case pat (noopExpr (exprType rhs))
+           Nothing   -> Case pat (noopExpr (exprType e0))
        | Case pat rhs <- brs
        ]
   go (Let y rhs b) | x == y    = Just rhs
@@ -244,7 +244,7 @@ callMerged = transformExprInM top
 
          args <- sequence [ do arg <- refreshNamed "arg" (lcl_name lhs)
                                return (Local arg (maybe_ty (exprType a))
-                                      ,callSkeleton need_maybe i m)
+                                      ,callSkeleton (exprType a) need_maybe i m)
                           | (i,a) <- [0..] `zip` as
                           ]
 
@@ -253,7 +253,7 @@ callMerged = transformExprInM top
          let case_match x e =
                Match (Lcl x)
                  [ Case (ConPat (nothingGbl (lcl_type x)) [])
-                        (noopExpr (lcl_type x))
+                        (noopExpr (exprType e))
                  , Case (ConPat (justGbl (lcl_type x)) []) e
                  ]
 
@@ -265,11 +265,11 @@ callMerged = transformExprInM top
 
   top e0 = return e0
 
-callSkeleton :: Bool -> Int -> Expr Var -> Expr Var
-callSkeleton need_maybe i = go
+callSkeleton :: Type Var -> Bool -> Int -> Expr Var -> Expr Var
+callSkeleton ty need_maybe i = go
   where
   go (Match s brs) = mkMatch s [ Case pat (go rhs) | Case pat rhs <- brs ]
-  go e          | isNoop e                = nothing_expr (exprType e)
+  go e          | isNoop e                = nothing_expr ty
   go (_ :@: es) | i >= 0 && i < length es = just_expr (es !! i)
   go e = error $ "callSkeleton: " ++ ppRender (i,e)
 

@@ -4,9 +4,11 @@ module HBMC.Identifiers where
 
 import Tip.Core
 import Tip.Pretty
+import Tip.Pretty.SMT ()
 import Tip.Fresh
 import Tip.Haskell.Translate -- Why is HsId exported from here?!
 import Tip.Utils.Rename
+import Tip.Utils
 
 import Data.Generics.Geniplate
 
@@ -16,11 +18,11 @@ import qualified Data.Set as S
 import HBMC.Bool
 
 instance Booly Var where
-  bool    = System "Bool"
-  true    = SystemCon "True"
-  false   = SystemCon "False"
-  isTrue  = System "isTrue"
-  isFalse = System "isFalse"
+  bool    = System "Bool" Nothing
+  true    = SystemCon "True" Nothing
+  false   = SystemCon "False" Nothing
+  isTrue  = System "isTrue" Nothing
+  isFalse = System "isFalse" Nothing
 
 toHsId :: Var -> HsId Var
 toHsId (Prelude x)  = Qualified "Prelude" (Just "P") x
@@ -61,8 +63,8 @@ data Var
   = Var String
   | Con String
   | Api String
-  | System String
-  | SystemCon String
+  | System    String (Maybe (Type Var))
+  | SystemCon String (Maybe (Type Var))
   | Prelude String
   | Proj Int
   | Refresh Var Int
@@ -90,15 +92,15 @@ varMax _             = 0
 varStr' :: Var -> String
 varStr' x =
   case x of
-    Var ""      -> "x"
-    Var x       -> x
-    Con x       -> varStr' (Var x)
-    Refresh v i -> varStr' v
-    Proj i      -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
-    Api x       -> x
-    Prelude x   -> x
-    System x    -> x
-    SystemCon x -> x
+    Var ""        -> "x"
+    Var x         -> x
+    Con x         -> varStr' (Var x)
+    Refresh v i   -> varStr' v
+    Proj i        -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
+    Api x         -> x
+    Prelude x     -> x
+    System    x m -> x ++ maybe "" ppRender m
+    SystemCon x m -> x ++ maybe "" ppRender m
     Prefixed "" x -> varStr' x
     Prefixed d x -> d ++ "_" ++ varStr' x
 
@@ -131,23 +133,24 @@ instance Name Var where
   refresh v    = Refresh v `fmap` fresh
   getUnique    = varMax
 
-maybeTC    = System "Maybe"
-maybeTV    = System "a"
-justVar    = SystemCon "Just"
-nothingVar = SystemCon "Nothing"
+-- A family of monomorphic Maybes
+
+maybeTC    = System "Maybe" . Just
+justVar    = SystemCon "Just" . Just
+nothingVar = SystemCon "Nothing" . Just
 
 maybeTy :: Type Var -> Type Var
-maybeTy x = TyCon maybeTC [x]
+maybeTy x = TyCon (maybeTC x) []
 
 unMaybeTy :: Type Var -> Type Var
-unMaybeTy (TyCon mtc [x]) | mtc == maybeTC = x
+unMaybeTy (TyCon (System "Maybe" (Just x)) []) = x
 unMaybeTy _ = error "unMaybeTy: Not a Maybe Type!"
 
 justGbl :: Type Var -> Global Var
-justGbl t = Global justVar (PolyType [maybeTV] [TyVar maybeTV] (maybeTy (TyVar maybeTV))) [t]
+justGbl t = Global (justVar t) (PolyType [] [t] (maybeTy t)) []
 
 nothingGbl :: Type Var -> Global Var
-nothingGbl t = Global nothingVar (PolyType [maybeTV] [] (maybeTy (TyVar maybeTV))) [t]
+nothingGbl t = Global (nothingVar t) (PolyType [] [] (maybeTy t)) []
 
 justExpr :: Expr Var -> Expr Var
 justExpr e = Gbl (justGbl (exprType e)) :@: [e]
@@ -155,15 +158,16 @@ justExpr e = Gbl (justGbl (exprType e)) :@: [e]
 nothingExpr :: Type Var -> Expr Var
 nothingExpr t = Gbl (nothingGbl t) :@: []
 
-noopVar :: Var
-noopVar = SystemCon "noop"
+noopVar :: Type Var -> Var
+noopVar = SystemCon "noop" . Just
 
 noopExpr :: Type Var -> Expr Var
-noopExpr t = Gbl (blankGlobal noopVar t) :@: []
+noopExpr t = Gbl (blankGlobal (noopVar t) t) :@: []
 
 isNoop :: Expr Var -> Bool
 isNoop (Match _ rhss) = all (isNoop . case_rhs) rhss
-isNoop (Gbl n :@: []) = gbl_name n `elem` [nothingVar,noopVar]
+isNoop (Gbl (Global (SystemCon "Nothing" _) _ _) :@: []) = True
+isNoop (Gbl (Global (SystemCon "noop" _)    _ _) :@: []) = True
 isNoop _              = False
 
 isNoopCase :: Case Var -> Bool
@@ -172,12 +176,14 @@ isNoopCase (Case _ rhs) = isNoop rhs
 blankGlobal :: Var -> Type Var -> Global Var
 blankGlobal g t = Global g (PolyType [] [] t) []
 
-addMaybeToTheory :: Theory Var -> Theory Var
-addMaybeToTheory thy@Theory{..} = thy { thy_datatypes = maybe_decl : thy_datatypes }
+addMaybesToTheory :: [Var] -> Theory Var -> Theory Var
+addMaybesToTheory vs thy@Theory{..} = thy { thy_datatypes = maybe_decls ++ thy_datatypes }
   where
-  maybe_decl =
-    Datatype maybeTC [maybeTV]
-      [ Constructor nothingVar (System "isNothing") []
-      , Constructor justVar (System "isJust") [(System "fromJust",TyVar maybeTV)]
-      ]
+  maybe_decls =
+    [ Datatype (maybeTC t) []
+        [ Constructor (nothingVar t) (System "isNothing" (Just t)) []
+        , Constructor (justVar t) (System "isJust" (Just t)) [(System "fromJust" (Just t),t)]
+        ]
+    | t <- usort [ t | System "Maybe" (Just t) <- vs ]
+    ]
 

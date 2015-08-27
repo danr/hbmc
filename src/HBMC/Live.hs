@@ -40,7 +40,7 @@ liveProp v st (Prop vs m) =
              (quiet) (not quiet)
              (Tagged [ (varStr v,var_map dyn ! v) | v <- vs ])
 
-liveFuncs :: (PrettyVar a,Ord a) => (a -> LiveDesc a) -> [Func a] -> Static a
+liveFuncs :: (Show a,PrettyVar a,Ord a) => (a -> LiveDesc a) -> [Func a] -> Static a
 liveFuncs lkup_desc funcs = st
   where
   tbl         = [ (name,liveFunc st f) | f@(Func name _ _ _ _ _) <- funcs ]
@@ -48,7 +48,7 @@ liveFuncs lkup_desc funcs = st
   lkup_func x = case lookup x tbl of Just func -> func
                                      Nothing   -> error $ "Function not found:" ++ varStr x
 
-liveFunc :: (PrettyVar a,Ord a) => Static a -> Func a -> [LiveData a] -> H (LiveData a)
+liveFunc :: (Show a,PrettyVar a,Ord a) => Static a -> Func a -> [LiveData a] -> H (LiveData a)
 liveFunc st (Func _ as_vars r_var r_ty chk m) as =
   do -- no memo right now
      r <- newData False (lkup_desc st r_ty)
@@ -56,7 +56,7 @@ liveFunc st (Func _ as_vars r_var r_ty chk m) as =
        (liveMon (newEnv st ((r_var,r):as_vars `zip` as)) m >> return ())
      return r
 
-liveMon :: (PrettyVar a,Ord a) => LiveEnv a -> Mon a -> H (Dynamic a)
+liveMon :: (Show a,PrettyVar a,Ord a) => LiveEnv a -> Mon a -> H (Dynamic a)
 liveMon env []         = return (dynamic env)
 liveMon env (act:acts) =
   do let LiveEnv{..} = env
@@ -102,7 +102,7 @@ liveMon env (act:acts) =
 livePred :: Ord a => LiveEnv a -> Pred a -> Bit
 livePred env (v :=? x) = (pred_map (dynamic env) ! v) =? x
 
-liveSimp :: Ord a => LiveEnv a -> Simp a -> LiveData a
+liveSimp :: (Show a,Ord a) => LiveEnv a -> Simp a -> LiveData a
 liveSimp env (Con tc k ss) = conData (lkup_desc (static env) tc) k (map (liveSimp env) ss)
 liveSimp env (Proj i x)    = let v:_ = drop i (proj_map (dynamic env) ! x) in v
 liveSimp env (Var x)       = var_map (dynamic env) ! x

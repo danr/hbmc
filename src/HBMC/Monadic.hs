@@ -1,6 +1,9 @@
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 module HBMC.Monadic where
+
+import Data.Foldable (Foldable)
+import Data.Traversable (Traversable)
 
 import Tip.Core
 import Tip.Fresh
@@ -29,13 +32,13 @@ import Debug.Trace
 data Verbosity = Quiet | Verbose deriving (Eq,Ord,Show,Read)
 
 data Func a = Func a [a] a a Bool (Mon a)
-  deriving (Eq,Ord,Show,Functor)
+  deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Prop a = Prop [a] (Mon a)
-  deriving (Eq,Ord,Show,Functor)
+  deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Pred a = a :=? a
-  deriving (Eq,Ord,Show,Functor)
+  deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Guard = When | Unless
   deriving (Eq,Ord,Show)
@@ -43,7 +46,7 @@ data Guard = When | Unless
 data Rhs a
   = New Bool a
   | Call a [Simp a]
-  deriving (Eq,Ord,Show,Functor)
+  deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data BinPrim = EqualHere | NotEqualHere
   deriving (Eq,Ord,Show)
@@ -54,13 +57,13 @@ data Act a
   | Simp a :>>>: a
   | a :<-: Rhs a
   | BinPrim BinPrim (Simp a) (Simp a)
-  deriving (Eq,Ord,Show,Functor)
+  deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Simp a
   = Con a a [Simp a]
   | Proj Int a
   | Var a
-  deriving (Eq,Ord,Show,Functor)
+  deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 type Mon a = [Act a]
 
@@ -161,7 +164,7 @@ trExpr e00 mr =
 
       Match s brs -> (:[]) <$> trMatch s brs mr
 
-      Gbl (Global g _ _) :@: _ | g == noopVar -> return []
+      Gbl (Global (SystemCon "noop" _) _ _) :@: _ -> return []
 
       Gbl (Global (Api "equalHere") _ _) :@: [s1,s2] ->
         return [BinPrim EqualHere (trSimple s1) (trSimple s2)]

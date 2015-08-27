@@ -36,6 +36,7 @@ import Tip.Passes
 import System.Environment
 
 import Data.List
+import qualified Data.Foldable as F
 
 import Control.Monad
 import Control.Monad.Writer
@@ -51,7 +52,7 @@ import Text.Show.Pretty (ppShow)
 translate :: Theory Var -> WriterT [String] Fresh (IO ())
 translate thy0 =
   do [thy1] <-
-        map (addMaybeToTheory . addBoolToTheory) <$> lift
+        map addBoolToTheory <$> lift
             (runPasses
               [ SimplifyAggressively
               , RemoveNewtype
@@ -70,13 +71,12 @@ translate thy0 =
 
      thy2 <- lift (monomorphise False thy1)
 
-     let (dis,_) = unzip (map dataInfo (thy_datatypes thy2))
-         di      = concat dis
-
-     thy <- lift (projectPatterns di thy2)
+     thy <- lift $ do let (dis,_) = unzip (map dataInfo (thy_datatypes thy2))
+                      projectPatterns (concat dis) thy2
 
      fn_decls <- sequence
          [ do let e = func_body fn
+              -- es <- lift $ sequence [ toExpr e ]
               es <- lift $ mergeTrace (scope thy) e
               tell ("":map (ppRender . ren) es)
               {- trFunc <$> -}
@@ -89,13 +89,20 @@ translate thy0 =
          | prop <- thy_asserts thy
          ]
 
-     tell [ppShow (thy_datatypes thy)]
+     let thy' = addMaybesToTheory
+                  (concatMap F.toList fn_decls ++ concatMap F.toList main_decls)
+                  thy
+
+     tell [ppShow (thy_datatypes thy')]
+     tell (map ppShow fn_decls)
      tell [ppShow main_decls]
 
-     let lkup_data = dataDescs (map (fmap PPVar) (thy_datatypes thy))
-         static    = liveFuncs lkup_data (map (fmap PPVar) fn_decls)
+     let pp_var = PPVar
 
-     return (liveProp Verbose static (fmap PPVar main_prop))
+     let lkup_data = dataDescs (map (fmap pp_var) (thy_datatypes thy'))
+         static    = liveFuncs lkup_data (map (fmap pp_var) fn_decls)
+
+     return (liveProp Verbose static (fmap pp_var main_prop))
 
 {-
     let rec_dts = recursiveDatatypes (thy_datatypes thy)

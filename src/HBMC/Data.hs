@@ -25,7 +25,7 @@ dataDescs dts = lkup_desc
   where
   rec_dts = recursiveDatatypes dts
   lkup_desc x = case lookup x tbl of Just desc -> desc
-                                     Nothing   -> error $ "Data type not found:" ++ varStr x
+                                     Nothing   -> error $ "Data type not found:" ++ varStr x ++ " (" ++ show x ++ ")"
   tbl =
     [ (tc,
        maybe_thunk $ DataDesc (varStr tc) [ c | Constructor c _ _ <- cons ]
