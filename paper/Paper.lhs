@@ -1,26 +1,7 @@
-%-----------------------------------------------------------------------------
-%
-%               Template for sigplanconf LaTeX Class
-%
-% Name:         sigplanconf-template.tex
-%
-% Purpose:      A template for sigplanconf.cls, which is a LaTeX 2e class
-%               file for SIGPLAN conference proceedings.
-%
-% Guide:        Refer to "Author's Guide to the ACM SIGPLAN Class,"
-%               sigplanconf-guide.pdf
-%
-% Author:       Paul C. Anagnostopoulos
-%               Windfall Software
-%               978 371-2316
-%               paul@windfall.com
-%
-% Created:      15 February 2005
-%
-%-----------------------------------------------------------------------------
 
 
-\documentclass{sigplanconf}
+%\documentclass{sigplanconf}
+\documentclass{llncs}
 %include polycode.fmt
 
 % The following \documentclass options may be useful:
@@ -34,6 +15,7 @@
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{textcomp}
+\usepackage[final]{microtype}
 
 \newcommand{\comment}[1]{\emph{COMMENT: #1}}
 \newcommand{\ifthenelse}{|if|-|then|-|else|}
@@ -41,34 +23,41 @@
 
 \begin{document}
 
-\special{papersize=8.5in,11in}
-\setlength{\pdfpageheight}{\paperheight}
-\setlength{\pdfpagewidth}{\paperwidth}
-
-\conferenceinfo{ICFP '15}{September, 2015, Vancouver, Canada}
-\copyrightyear{2015}
-\copyrightdata{978-1-nnnn-nnnn-n/yy/mm}
-\doi{nnnnnnn.nnnnnnn}
-
-% Uncomment one of the following two, if you are not going for the
-% traditional copyright transfer agreement.
-
+%%sigplan
+%\special{papersize=8.5in,11in}
+%\setlength{\pdfpageheight}{\paperheight}
+%\setlength{\pdfpagewidth}{\paperwidth}
+%
+%\conferenceinfo{ICFP '15}{September, 2015, Vancouver, Canada}
+%\copyrightyear{2015}
+%\copyrightdata{978-1-nnnn-nnnn-n/yy/mm}
+%\doi{nnnnnnn.nnnnnnn}
+%
+%% Uncomment one of the following two, if you are not going for the
+%% traditional copyright transfer agreement.
+%
 %\exclusivelicense                % ACM gets exclusive license to publish,
-                                  % you retain copyright
-
+%                                 % you retain copyright
+%
 %\permissiontopublish             % ACM gets nonexclusive license to publish
-                                  % (paid open-access papers,
-                                  % short abstracts)
-
-\titlebanner{DRAFT}        % These are ignored unless
-\preprintfooter{}   % 'preprint' option specified.
+%                                 % (paid open-access papers,
+%                                 % short abstracts)
+%
+%\titlebanner{DRAFT}        % These are ignored unless
+%\preprintfooter{}   % 'preprint' option specified.
 
 \title{SAT-based Bounded Model Checking\\for Functional Programs}
+\titlerunning{DRAFT SAT-based Bounded Model Checking\\for Functional Programs}
 \subtitle{}
 
-\authorinfo{Koen Claessen \and Dan Ros{\'e}n}
-           {Chalmers University of Technology}
-           {\{koen,danr\}@@chalmers.se}
+%%sigplan
+%\authorinfo{Koen Claessen \and Dan Ros{\'e}n}
+%           {Chalmers University of Technology}
+%           {\{koen,danr\}chalmers.se}
+\author{Koen Claessen \and Dan Ros{\'e}n}
+\institute{Department of Computer Science and Engineering, Chalmers University of Technology
+	\email{\{koen,danr\}@@chalmers.se}
+	}
 
 \maketitle
 
@@ -76,6 +65,7 @@
 We present a new symbolic evaluation method for functional programs that generates input to a SAT-solver. The result is a Bounded Model Checking (BMC) method for functional programs that can find concrete inputs that cause the program to produce certain outputs, or show the inexistence of such inputs under certain bounds. SAT-solvers have long been used for BMC on hardware and low-level software. This paper presents the first method for SAT-based BMC for high-level programs containing algebraic datatypes and unlimited recursion. Our method works {\em incrementally}, i.e. it increases bounds on inputs until it finds a solution. We also present a novel optimization, namely {\em function call merging}, that can greatly reduce the complexity of symbolic evaluation for recursive functions over datatypes with multiple recursive constructors.
 \end{abstract}
 
+%%sigplan
 %% DO THIS FOR THE FINAL VERSION!!!
 %\category{CR-number}{subcategory}{third-level}
 
@@ -91,7 +81,7 @@ bounded model checking, SAT, symbolic evaluation
 
 \section{Introduction}
 
-At the end of the 1990s, SAT-based Bounded Model Checking (BMC \cite{bmc}) was introduced as an alternative to BDD-based hardware model checking. BMC revolutionized the field; SAT-solvers by means of BMC provided a scalable and efficient search method for finding bugs. A BMC tool enumerates a depth bound $d$, starting from 0 upwards, and tries to find a counter example of length $d$, using a SAT-solver. Deep bug finding was one thing BDD-based methods were not good at. Since then, BMC techniques have also found their way into software model checkers. One example is the C model checker CBMC \cite{cbmc}. BMC techniques work well for software that is low-level (reasoning about bits, words, and arrays), and not well at all for software with higher-level features (pointers, recursive datastructures). 
+At the end of the 1990s, SAT-based Bounded Model Checking (BMC \cite{bmc}) was introduced as an alternative to BDD-based hardware model checking. BMC revolutionized the field; SAT-solvers by means of BMC provided a scalable and efficient search method for finding bugs. A BMC tool enumerates a depth bound $d$, starting from 0 upwards, and tries to find a counter example of length $d$, using a SAT-solver. Deep bug finding was one thing BDD-based methods were not good at. Since then, BMC techniques have also found their way into software model checkers. One example is the C model checker CBMC \cite{cbmc}. BMC techniques work well for software that is low-level (reasoning about bits, words, and arrays), and not well at all for software with higher-level features (pointers, recursive datastructures).
 
 Our aim in this paper is to take the first step towards bringing the power of SAT-based BMC to a high-level functional programming language, with algebraic datatypes and recursion. The goal is to provide a tool that can find inputs to programs that result in outputs with certain properties. Applications include property testing, finding solutions to search problems which are expressed as a predicate in a functional language, inverting functions in a program, finding test data that satisfies certain constraints, etc.
 
@@ -252,9 +242,11 @@ We can use the function |insist| to state that a given proposition has to hold. 
 The function |when| provides a way of keeping track of local assumptions. The expression |when a m| generates all constraints that are generated by |m|, but they will only hold conditionally under |a|. To explain better what |when| does, consider the following equivalences:
 %format === = "\Longleftrightarrow"
 \begin{code}
-when a (insist b)  ===  insist (a ==> b)
-when a (when b m)  ===  when (a /\ b) m
-when false m       ===  return ()
+when a (insist b)     ===  insist (a ==> b)
+when a (when b m)     ===  when (a /\ b) m
+when false m          ===  return ()
+when a m >> when a n  ===  when a (m >> n)
+when a m >> when b m  ===  when (a \/ b) m
 \end{code}
 These are logical equivalences, i.e.\ the expressions on the left and right hand side may generate syntactically different sets of constraints, but they are logically equivalent.
 
@@ -477,7 +469,7 @@ At this stage, it may be interesting to look at an example of a combination of |
 \begin{code}
 do  y <- new  ///  ===  /// do x >>> z
     x >>> y
-    y >>> z   
+    y >>> z
 \end{code}
 Both logically mean the same thing, if |y| is not used anywhere else. The left hand side creates a new |y|, copies |x| into |y| and also copies |y| into |z|. The first copy constraint has the effect of always making sure that |y| is logically equivalent to |x| under the current environment condition. As soon as any |Delay| in |x| becomes defined, which may happen after these constraints have been generated, |y| will follow suit. And whenever |y| expands a |Delay|, |z| will follow suit. So the effect of the left hand side is the same as the right hand side.
 
@@ -537,7 +529,7 @@ e ::=  let x = f s1 ... sn in e
          Kn -> en
     |  s
 \end{code}
-Function application can only happen inside a let-definition and only with simple expressions as arguments. Case-expressions can only match on constructors, the program has to use explicit selector functions to project out the arguments. 
+Function application can only happen inside a let-definition and only with simple expressions as arguments. Case-expressions can only match on constructors, the program has to use explicit selector functions to project out the arguments.
 
 As an example, consider the definition of the standard Haskell function |(++)|:
 \begin{code}
@@ -687,7 +679,7 @@ fSym e = do  r <- new
                do  c <- new
                    x <- new
                    y <- with c § fSym x
-                
+
                    when (isVar ce) §  do  sel1 ce >>> r
                    when (isAdd ce) §  do  insist c
                                           sel2 ce >>> x
@@ -699,7 +691,7 @@ fSym e = do  r <- new
                                           sel2 ce >>> x
                                           y >>> r
 \end{code}
-The above function first waits for its argument to be defined, and then creates a fresh context |c| and a fresh input |x|, and then it evaluates |fSym| with the input |x| in the context |c|. Then, the normal part of the case expression progresses, but instead of calling |fSym|, the branches simply use |insist| to make sure the context of the merged call is set, and copy the argument they need into |x|. This guarantees that |y| gets the correct value. An interesting thing to notice is that, because we are generating constraints and not evaluating values, 
+The above function first waits for its argument to be defined, and then creates a fresh context |c| and a fresh input |x|, and then it evaluates |fSym| with the input |x| in the context |c|. Then, the normal part of the case expression progresses, but instead of calling |fSym|, the branches simply use |insist| to make sure the context of the merged call is set, and copy the argument they need into |x|. This guarantees that |y| gets the correct value. An interesting thing to notice is that, because we are generating constraints and not evaluating values,
 
 Note that in the above code, because |(>>>)| is memoized, the call |y >>> r| only gets performed once although it appears in the code three times, and |sel2 ce >>> x| also gets performed only once although it appears twice.
 
@@ -796,7 +788,7 @@ wait d@(Delay m ref)  k =
                         case m of
                           Input     -> enqueue d
                           Internal  -> return ()
-        
+
         Right x  -> do  k x
 \end{code}
 When a |C| computation terminates and has generated constraints, we can look at the internal queue and see exactly which parts of the inputs (input delays) are requested by which parts of the program (contexts), and in which order this happened.
@@ -851,7 +843,7 @@ Thus, we use |postpone| on any function which is not structurally recursive {\em
 \label{examples}
 
 In this section we aim to describe how our system works in practice by
-looking at some examples. All experiments were run on 
+looking at some examples. All experiments were run on
 a laptop with a Intel Xeon E3-1200 processor.
 
 \subsection{Generating sorted lists}
@@ -859,13 +851,13 @@ a laptop with a Intel Xeon E3-1200 processor.
 Assume that we are given a predicate about unique and sorted lists,
 that all elements are pairwise larger than the next:
 \begin{code}
-usorted  ::  [Nat] -> Bool
-usorted (x:y:xs)  =  x < y && usorted (y:xs)
-usorted _         =  True
+unqsorted  ::  [Nat] -> Bool
+unqsorted (x:y:xs)  =  x < y && unqsorted (y:xs)
+unqsorted _         =  True
 \end{code}
 \noindent
 Now we can investigate the expansion strategy based on the assumption conflict set, by asking for |xs|
-such that |usorted xs| and |length xs > n|, given some bound |n|.
+such that |unqsorted xs| and |length xs > n|, given some bound |n|.
 Our tool can output a trace showing how the incremental values
 have been expanded so far.  With |n=2|, the trace looks like this:
 \begin{verbatim}
@@ -890,7 +882,7 @@ then the natural numbers start to be expanded. Note that
 in this case only the necessary values are evaluated.
 This can in general not be guaranteed.
 
-The same expansion behaviour happens also when increasing 
+The same expansion behaviour happens also when increasing
 the list length, |n|. The run time is also low, generating
 a sorted list of length at least 25 takes a little less than
 a second, and the list |[0..24]| is indeed obtained.
@@ -909,7 +901,7 @@ same context that the incremental value in |x| is waiting for, but since this is
 unsatisfiable, it will never be expanded.
 
 Let's return to the previous example with asking for an |xs|, such that
-|usorted xs| and |length xs > n|, but with  the new constraint that |all (< n)
+|unqsorted xs| and |length xs > n|, but with  the new constraint that |all (< n)
 xs|.  So the list must be sorted, but the upper bounds on the data are only
 local: namely that each element should be below |n|. We do not give an upper bound on the length of the list.
 The other constraint is a lower bound on the list: that it should at least have length |n|.
@@ -926,32 +918,32 @@ Contradiction!
 No value found.
 \end{verbatim}
 \noindent
-and thus efficiently proving the property (for a specific choice of |n|, not for all |n|.) This is perhaps surprising, because no explicit upper bound on the length of the list was given. 
+and thus efficiently proving the property (for a specific choice of |n|, not for all |n|.) This is perhaps surprising, because no explicit upper bound on the length of the list was given.
 
 We can use boolean predicates in general to give all kinds of bounds on inputs, for instance depth. If the predicates bound the input sufficiently much, the tool is guaranteed to terminate.
 
 % \subsubsection{Limitations of termination discovery}
-% 
+%
 % Our system is not an inductive prover and will not terminate on
-% 
+%
 % \begin{code}
 % nub xs = y:y:ys
 % \end{code}
-% 
+%
 % \noindent
 % (Note that it does not help even if the element type is finite.)
-% 
+%
 % nor on:
-% 
+%
 % \begin{code}
-% usorted (rev xs) && all (< n) xs && length xs > n
+% unqsorted (rev xs) && all (< n) xs && length xs > n
 % \end{code}
-% 
+%
 % \noindent
 % it keeps expanding the tail of the list, hoping for something....
-% 
+%
 % \subsubsection{Discussion about contracts checking a'la Leon}
-% 
+%
 % ....
 
 \subsection{Merging the calls in merge}
@@ -975,9 +967,9 @@ We can use boolean predicates in general to give all kinds of bounds on inputs, 
 % msort []   = []
 % msort [x]  = [x]
 % msort xs   = merge (msort (evens xs)) (msort (odds xs))
-% 
+%
 % Here, |evens, odds :: [Nat] -> [Nat]| picks ut the elements
-% at the even and the odd positions, respectively. 
+% at the even and the odd positions, respectively.
 
 
 This example about the function |merge| from merge sort aims to highlight how important
@@ -991,26 +983,26 @@ merge xs      []      = xs
 merge (x:xs)  (y:ys)  | x <= y     = x:merge xs (y:ys)
                       | otherwise  = y:merge (x:xs) ys
 \end{code}
-Evaluating merge on symbolic lists is expensive since |merge| 
-performs two recursive calls, leading to an exponential behaviour. 
+Evaluating merge on symbolic lists is expensive since |merge|
+performs two recursive calls, leading to an exponential behaviour.
 One first observation
 of the situation reveals that evaluating this expression:
 
-> merge [x_1, x_2, ..., x_n] [y_1, y_2, ..., y_m] 
+> merge [x_1, x_2, ..., x_n] [y_1, y_2, ..., y_m]
 
 makes these two calls:
 
-> merge [x_1, x_2, ..., x_n]  [y_2, ..., y_m] 
-> merge [x_2, ..., x_n]       [y_1, y_2, ..., y_m] 
+> merge [x_1, x_2, ..., x_n]  [y_2, ..., y_m]
+> merge [x_2, ..., x_n]       [y_1, y_2, ..., y_m]
 
 However, both of these will make the following call:
 
-> merge [x_2, ..., x_n] [y_2, ..., y_m] 
+> merge [x_2, ..., x_n] [y_2, ..., y_m]
 
 We can avoid to twice calculate this, by
 memoizing the function |merge|. This leads to quadratic behavior of the symbolic evaluator.
 
-Another observation is that the two recursive calls in |merge| 
+Another observation is that the two recursive calls in |merge|
 can be merged into one:
 \begin{code}
 merge' :: [Nat] -> [Nat] -> [Nat]
@@ -1034,7 +1026,7 @@ via a |msort| function that calls the different versions of |merge|.
 
 The results are in Figure \ref{inj}. The merged function is
 significantly better: allowing to go up to lists over size 20 within
-reasonable time instead of size 10. We hypothesise that this is 
+reasonable time instead of size 10. We hypothesise that this is
 due to the fact that we can move the exponential behavior to the
 SAT solver rather than in the size of the SAT problem.
 
@@ -1043,10 +1035,10 @@ one. We also compare our runtimes to Leon\cite{leon} and LazySmallCheck\cite{laz
 
 % The runtime is considerably better for the |merge'| version, and the memoised
 % version of |merge| is considerably better than the unmemoised version.
-% The runtimes are compared to Leon and LazySmallCheck.  
+% The runtimes are compared to Leon and LazySmallCheck.
 
-% We also applied the |merge| to |merge'| transformation 
-% by hand for them, but this did not improve their runtime. 
+% We also applied the |merge| to |merge'| transformation
+% by hand for them, but this did not improve their runtime.
 
 \begin{figure} \centering{
 \includegraphics[scale=0.60]{inj.pdf}}
@@ -1054,7 +1046,7 @@ one. We also compare our runtimes to Leon\cite{leon} and LazySmallCheck\cite{laz
 Run time to find |xs|, |ys| such that |xs /= ys|
 and |msort xs == msort ys| with a |length| constraint on |xs|.
 We compare our tool with different settings (\emph{merged}, \emph{memo}, \emph{unopt})
-as described in Section \ref{merge}. 
+as described in Section \ref{merge}.
 and with LazySmallCheck\cite{lazysc} and Leon\cite{leon}.
 \label{inj}
 }
@@ -1064,7 +1056,7 @@ The original |merge| function is structurally recursive,
 but this property is destroyed when symbolically
 merging to |merge'|. The symbolic values that are
 fed to the recursive calls are not smaller: for instance,
-the first one is |if x <= y then xs else x:xs| which 
+the first one is |if x <= y then xs else x:xs| which
 is as big as the input |x:xs|. We overcome this
 introduced non-termination by introducing a |postpone|
 as described in Section \ref{postpone}.
@@ -1074,19 +1066,19 @@ as described in Section \ref{postpone}.
 %format :-> = ":\rightarrow"
 %format env = "\rho"
 
-We will here consider a standard type-checker for 
-simply typed lambda calculus. It answers whether 
+We will here consider a standard type-checker for
+simply typed lambda calculus. It answers whether
 a given expression has a given type, in an environment:
 
 > tc :: [Type] -> Expr -> Type -> Bool
 > tc  env  (App f x tx)  t           = tc env f (tx :-> t) && tc env x tx
 > tc  env  (Lam e)       (tx :-> t)  = tc (tx:env) e t
 > tc  env  (Lam e)       _           = False
-> tc  env  (Var x)       t           =  case env `index` x of 
->                                         Just tx  -> tx == t 
+> tc  env  (Var x)       t           =  case env `index` x of
+>                                         Just tx  -> tx == t
 >                                         Nothing  -> False
 
-By inverting this function, we can use it 
+By inverting this function, we can use it
 to infer the type of a given expression,
 or even synthesise programs of a given type!
 For instance, we can get the S combinator
@@ -1099,31 +1091,31 @@ Upon which our tool answers this term, when pretty-printed:
 \x y z -> ((((\v w -> w) z) x) z) (y z)
 \end{code}
 This takes about 7 seconds, but as can be seen above,
-it contains redexes. Interestingly, we can 
+it contains redexes. Interestingly, we can
 avoid getting redexes \emph{and} reduce the search space by
-by adding a recursive predicate 
+by adding a recursive predicate
 |nf :: Expr -> Bool|
 that checks that there is no unreduced
 lambda in the expression. Now, we ask
 for the same as above, and that |nf e|.
 With this modification, finding the s combinator,
-in normal form, takes less a fraction of a second. 
+in normal form, takes less a fraction of a second.
 Comparison with and without normal form and
 with LazySmallCheck can be found in Table \ref{typetable}\footnote{We also ran Leon on this example but it timed out.}.
 
-Constraining the data in this way allows 
-cutting away big parts of the search space (only normal 
+Constraining the data in this way allows
+cutting away big parts of the search space (only normal
 forms). The context where the expression is not in normal
 form will become inconsistent due to the predicate,
 and no delayed computations are evaluated from inconsistent
 contexts. This would not be the case if we up from decided on how
-big our symbolic values were. So here we see a direct benefit from 
+big our symbolic values were. So here we see a direct benefit from
 incrementally expanding the program.
 
 Both the code for the type checker and the
-normal form predicate contains calls that 
+normal form predicate contains calls that
 can be merged in the fashion as the merge
-sort. Without merging these calls, finding the normal 
+sort. Without merging these calls, finding the normal
 form of the S combinator takes about a second,
 and 30 seconds without the normal form predicate.
 
@@ -1152,17 +1144,17 @@ is denoted with -.
 
 % \begin{code}
 % data Expr = App Expr Expr Type | Lam Expr | Var Nat
-% 
-% data Type = Type :-> Type | A | B | C 
-% tc  env  (App f x tx)  t           = tc env f (tx :-> t) 
+%
+% data Type = Type :-> Type | A | B | C
+% tc  env  (App f x tx)  t           = tc env f (tx :-> t)
 %                                    && tc env x tx
 % tc  env  (Lam e)       (tx :-> t)  = tc (tx:env) e t
 % tc  env  (Lam e)       _           = False
-% tc  env  (Var x)       t           =  case env `index` x of 
-%                                         Just tx  -> tx == t 
+% tc  env  (Var x)       t           =  case env `index` x of
+%                                         Just tx  -> tx == t
 %                                         Nothing  -> False
 % \end{code}
-% 
+%
 % \begin{code}
 % nf :: Expr -> Bool
 % nf (App (Lam _) _ _) = False
@@ -1190,28 +1182,28 @@ We used a regular expression library
 to falsify some plausible looking laws. The library has the following api:
 
 % We will call the main one |prop_repeat|:
-% 
+%
 % > Meps `notElem` p && s `elem` repp p i j & repp p i' j' ==> s `elem` repp p (maxx i i') (minn j j')
-% 
-% Here, |repp p i j| means repeat the regular expression |p| from |i| to |j| times. 
+%
+% Here, |repp p i j| means repeat the regular expression |p| from |i| to |j| times.
 % If |i > j|, then this regular expression does not recognize any string.
 % Conjunction of regular expressions is denoted by |&|.
-% 
+%
 % This property is false for |i = 0|, |j = 1|, |i' = j' = 2|, |p = a+aa| and |s = aa|,
 % since |reppp (a+aa) (maxx 0 2) (minn 1 2) = reppp (a+aa) 2 1 = Mempset|.
 
 
-> data RE a  = a :>: a  | a :+: a  | a :&: a 
+> data RE a  = a :>: a  | a :+: a  | a :&: a
 >            | Star a   | Eps      | Nil       | Atom Token
 
-> step  ::  RE -> Token -> RE 
+> step  ::  RE -> Token -> RE
 > eps   ::  RE -> Bool
 > rec   ::  RE -> [Token] -> Bool
 > rep   ::  RE -> Nat -> Nat -> RE
 
 The |step| function does Brzozowski differentiation, |eps|
 answers if the expression contains the empty string, |rec|
-answers if the word is recognised, and |rep p i j| 
+answers if the word is recognised, and |rep p i j|
 repeats a regular expression sequentially from |i| to |j| times.
 
 We can now ask our system for variables satisfying:
@@ -1238,13 +1230,13 @@ j': S Z
 s:  [A,A]
 \end{verbatim}
 
-This is a counterexample since 
+This is a counterexample since
 |rep p (max i i') (min j j')| = |rep p 2 1|, which recognizes
 no string, but |rep p [A,A]| does hold.
 
 We list our and LazySmallCheck's run times on
-|prop_repeat| above and on two seemingly simpler 
-properties, namely: 
+|prop_repeat| above and on two seemingly simpler
+properties, namely:
 \begin{code}
 prop_conj:  not (eps p) && rec (p :&: (p :>: p)) s
 prop_iter:  i /= j && not (eps p) && rec (iter i p :&: iter j p) s
@@ -1269,7 +1261,7 @@ to regular expression conjectures. The properties
 are defined in Section \ref{regexp}.}
 \label{regexptable}
 \end{table}%
-If we look more closely at the implementation of the regular expression library 
+If we look more closely at the implementation of the regular expression library
 we find that the calls are duplicated across the branches.
 For instance, the |eps| function looks like this:
 \begin{code}
@@ -1291,93 +1283,93 @@ the same pattern as for |eps| and memoization is enough there as well.
 % step  (Atom a)   x  = if a == x then Eps else Nil
 % step  (p :+: q)  x  =  step p x :+:  step q x
 % step  (p :&: q)  x  =  step p x :&:  step q x
-% step  (p :>: q)  x  =  (step p x :>: q) :+: 
+% step  (p :>: q)  x  =  (step p x :>: q) :+:
 %                        if eps p then step q x else Nil
 % step  (Star p)   x  =  step p x :>: Star p
 % step  _          x  = Nil
 % \end{code}
-% 
+%
 % The previous code uses the predicate |eps :: R a -> Bool|
-% which answers if a regular expression recognizes 
+% which answers if a regular expression recognizes
 % the empty string. We can now define the recognizer |rec|
 % for an input word:
-% 
+%
 % \begin{code}
 % rec :: RE Token -> [Token] -> Bool
 % rec p []      = eps p
 % rec p (x:xs)  = rec (step p x) xs
 % \end{code}
-% 
-% The first example we look at is 
+%
+% The first example we look at is
 % relating conjunction of regular expressions |(:&:)|
 % and sequential composition |(:>:)|:
-% 
-% > not (eps p) && rec (p :&: (p :>: p)) s 
-% 
+%
+% > not (eps p) && rec (p :&: (p :>: p)) s
+%
 % On this example, we get a counterexample after 28
 % seconds, having explored the right part of the
 % expression, but the list a little too far:
-% 
+%
 % \begin{verbatim}
 % p: (R(R(R__(T))_(T))(R__(T))(T))
 % s: (List(T)(List(T)(List(T)(List(T)_))))
-% 
+%
 % Counterexample!
 % p: Star (Atom B) :>: Atom B
 % s: Cons B (Cons B Nil)
 % \end{verbatim}
-% 
-% The second  property we looked at 
+%
+% The second  property we looked at
 % involves iterates a regular expression
 % with |iter| a number of times:
-% 
+%
 % \begin{code}
 % iter :: Nat -> R a -> R a
 % iter Z     _ = Eps
 % iter (S n) r = r :>: iter n r
 % \end{code}
-% 
+%
 % The property is now is trying to find such an expression
 % |p|, a word |s| and two numbers |i| and |j| such that:
-% 
+%
 % > i /= j && not (eps p) && rec (iter i p :&: iter j p) s
-% 
-% On this example we explore this: 
-% 
+%
+% On this example we explore this:
+%
 % \begin{verbatim}
 % i: (Nat(Nat(Nat_)))
 % j: (Nat(Nat(Nat_)))
 % p: (R(R(R__(T))_(T))(R__(T))(T))
 % s: (List(T)(List(T)(List(T)_)))
-% 
+%
 % Counterexample!
 % i: S (S Z)
 % j: S Z
 % p: Star (Atom A) :>: Atom A
 % s: Cons A (Cons A Nil)
 % \end{verbatim}
-% 
+%
 % Given this:
-% 
+%
 % \begin{code}
 % subtract1 :: Nat -> Nat
 % subtract1 Z      = Z
 % subtract1 (S x)  = x
-% 
+%
 % rep :: R T -> Nat -> Nat -> R T
-% rep p i      (S j)  = (cond (isZero i) :+: p) 
+% rep p i      (S j)  = (cond (isZero i) :+: p)
 %                     :>: rep p (subtract1 i) j
 % rep p Z      Z      = Eps
-% rep p (S _)  Z      = Nil 
+% rep p (S _)  Z      = Nil
 % \end{code}
-% 
+%
 % Prove this:
-% 
-% > not (eps p)  && rec (rep p i j :&: rep p i' j') s 
+%
+% > not (eps p)  && rec (rep p i j :&: rep p i' j') s
 % >              && not (rec (rep p (i `max` i') (j `min` j')))
-% 
+%
 % This is what we get:
-% 
+%
 % \begin{verbatim}
 % p8: (R(R(R__(T))(R__(T))(T))(R__(T))(T))
 % i0: (Nat(Nat(Nat_)))
@@ -1385,7 +1377,7 @@ the same pattern as for |eps| and memoization is enough there as well.
 % j0: (Nat(Nat(Nat_)))
 % j': (Nat(Nat(Nat_)))
 % s: (List(T)(List(T)(List(T)_)))
-% 
+%
 % == Try solve with 74 waits ==
 % Counterexample!
 % p8: (Atom A :>: Atom A) :+: Atom A
@@ -1397,9 +1389,9 @@ the same pattern as for |eps| and memoization is enough there as well.
 % \end{verbatim}
 
 % \subsection{Ambiguity detection}
-% 
+%
 % Showing stuff, inverse.
-% 
+%
 % \subsection{Integration from Differentiation}
 % Deriving expressions, inverse.
 
@@ -1423,7 +1415,7 @@ and a new head:
 
 > type Q' = (Nat,A) -> (A,Action)
 
-but we (currently) don't support functions, so we represent this 
+but we (currently) don't support functions, so we represent this
 tabulated in a list instead:
 
 > type Q      = [((Nat,A),(A,Action))]
@@ -1434,8 +1426,8 @@ the left, and the current symbol consed on to the symbols to the right:
 
 > type Configuration  = (Nat,[A],[A])
 
-The |step| function advances the machine one step, which 
-either terminates with the final tape, or 
+The |step| function advances the machine one step, which
+either terminates with the final tape, or
 ends up in a  new configuration.
 
 > step :: Q -> Configuration -> Either [A] Configuration
@@ -1457,7 +1449,7 @@ tape, by stepping it from the starting state |Zero| with |run|:
 
 We used our system to find Turing machines given a list of expected inserts the first symbol on the tape into the (sorted) rest of the symbols:
 
-> run q [A]            == [A] && 
+> run q [A]            == [A] &&
 > run q [B,A,A,A,A,B]  == [A,A,A,A,B,B]
 
 Asking to find such a |q|, we get this result in about thirty seconds:
@@ -1470,12 +1462,12 @@ Asking to find such a |q|, we get this result in about thirty seconds:
 \end{code}
 This machine contains a loop in state two, which is enters
 upon reading an inital |B| (which is replaced with an |A|).
-It then uses state two to skip by all the |A|s until 
+It then uses state two to skip by all the |A|s until
 it comes to a |B|, where it backtracks, and replaces
 the last |A| it found with a |B|. If the tape starts with
 |A| the program terminates immediately.
 
-In the above example we found by experimentation that 
+In the above example we found by experimentation that
 it was necessary to have no less than four A in the example,
 otherwise it the returned machine would "cheat" and instead
 of creating a loop, just count.
@@ -1492,27 +1484,27 @@ unrollings are needed.
 % ------------------------------------------------------------------------------
 
 % \section{Experimental evaluation}
-% 
+%
 % And again, there is the merge sort times.
-% 
+%
 % Regexp was evaluated against leon and
 % lazy small check. leon timed out on all of them
-% 
-% We evaluated the type checker against 
+%
+% We evaluated the type checker against
 % lazy small check with a timeout of 300s.
-% 
+%
 % Turing machines were evaluated...
 % LSC timed out.
 
-% 
+%
 % Compare some examples against Leon.
-% 
+%
 % Compare some examples against Lazy SmallCheck.
-% 
+%
 % Compare with/without memoization and with/without merging function calls.
-% 
+%
 % Compare with/without conflict minimization?
-% 
+%
 % Show timings of the above examples.
 
 % ------------------------------------------------------------------------------
@@ -1528,11 +1520,11 @@ Using uninterpreted
 functions in a SMT solver helps to derive equivalences between values
 that have not yet been fully expanded.
 
-QuickCheck\cite{quickcheck} is an embedded DSL for finding 
+QuickCheck\cite{quickcheck} is an embedded DSL for finding
 counterexamples for Haskell by using randomized testing.
 A potential drawback of random testing is that one
-has to write generators of random values suitable 
-for the domain. This becomes especially important in 
+has to write generators of random values suitable
+for the domain. This becomes especially important in
 the presence of preconditions, where the generator can
 essentially become the inverse of the predicate.
 
@@ -1541,7 +1533,7 @@ input values for testing. This is the approach taken in
 SmallCheck\cite{smallcheck} which
 enumerates values on depth, and can also handle nested quantifiers.
 Feat\cite{feat} instead enumerates values based on size.
-Using size instead of depth as measure can sometimes be 
+Using size instead of depth as measure can sometimes be
 beneficial as it grows slower, allowing for greater granularity.
 
 By evaluating tagged undefined values (in a lazy language),
@@ -1550,11 +1542,11 @@ demanded by the program. The forced parts of the value
 can be refined with concrete values and then repeated.
 This technique is called lazy narrowing, and is
 used in Curry \cite{curry}, the theorem prover Agsy\cite{agsy}, and the systems Reach\cite{reach} and Lazy SmallCheck\cite{lazysc}.
-The backtracking 
-techniques to stop exploring an unfruitful path 
+The backtracking
+techniques to stop exploring an unfruitful path
 varies between different systems. Reach has two
 modes, limiting the search space by predetermined
-depth either of the input values or the function call recursion. 
+depth either of the input values or the function call recursion.
 LazySmallCheck combines the ideas from SmallCheck and Reach to do lazy narrowing
 on the depth of the values as a DSL in Haskell.
 
@@ -1573,7 +1565,7 @@ In the beginning of the paper, we made three assumptions about the language we a
 Restriction (2) can be lifted also, but this is not shown in the paper. We can introduce an
 extra constructor to each data type that corresponds to a program crash. Every case should
 propagate program crashes. If we employ this technique, it will be possible to ask
-for values yielding crashes instead of returning |True| or |False|. 
+for values yielding crashes instead of returning |True| or |False|.
 
 Restriction (3) can also be lifted. Already we can translate higher-order functions, by simply calling argument functions when they are applied. We can also synthesize functions if we represent them as a look-up table. The Turing machine example from the previous section shows the feasibility of this approach.
 Systematically, the values of a higher
@@ -1582,15 +1574,15 @@ value, or a closure of a concrete function occurring in the program.
 
 We first sketched out a translation based on \ifthenelse{} in Section \ref{ite},
 but abandoned it for using |>>>| to be able to make incremental |new| (in Section \ref{dsl}.
-It is our current belief after working with this for some time that it is 
+It is our current belief after working with this for some time that it is
 not possible to implement incrementality in the \ifthenelse{} setting.
 
 In the Reach\cite{reach} setting, it is possible to annotate a target
 expression. We think this is a very convenient way of specifying all kinds of properties, and
-want to incorporate this feature in our tool as well. 
+want to incorporate this feature in our tool as well.
 
 Currently, we rely on the user to manually annotate function calls and
-data constructor arguments to be merged, and explicitly say 
+data constructor arguments to be merged, and explicitly say
 which function calls to memoize. This burden should be removed
 by appropriate default and automatic heuristics.
 
@@ -1600,7 +1592,7 @@ However, it is unclear what should happen when performing recursion over such in
 Any function doing this, even if it is structurally recursive, would need to be guarded
 by an occurrence of |postpone|, otherwise the constraint generation may not terminate.
 It would also be interesting to see what our gain could be from other theories, in particular those for
-equality and uninterpreted functions. 
+equality and uninterpreted functions.
 
 % ------------------------------------------------------------------------------
 
@@ -1619,7 +1611,8 @@ Our method works well for cases where the generation of the SAT-problem does not
 
 % We recommend abbrvnat bibliography style.
 
-\bibliographystyle{abbrvnat}
+%\bibliographystyle{abbrvnat}
+\bibliographystyle{plain}
 \bibliography{Paper}
 
 % The bibliography should be embedded for final submission.
