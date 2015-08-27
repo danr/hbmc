@@ -779,6 +779,7 @@ equalLiveOn k (LiveData _ c1 as1) (LiveData _ c2 as2) =
 instance Ord c => Equal (LiveData c) where
   (>>>)        = equalLiveOn (>>>)
   equalHere    = equalLiveOn equalHere
+  notEqualHere (LiveThunk th1)     (LiveThunk th2)     = notEqualHere th1 th2
   notEqualHere (LiveData _ c1 as1) (LiveData _ c2 as2) =
     choice
     [ do notEqualHere c1 c2
@@ -798,7 +799,7 @@ conData (ThunkDesc d)     c as = LiveThunk (this (conData d c as))
 conData (DataDesc s _ rs) c as =
   LiveData s (val c)
     (snd
-       (mapAccumR
+       (mapAccumL
          (\ as_rem (cs,_) ->
            if c `elem` cs then
              let hd:tl = as_rem
