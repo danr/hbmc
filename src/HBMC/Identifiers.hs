@@ -24,8 +24,8 @@ instance Booly Var where
 
 toHsId :: Var -> HsId Var
 toHsId (Prelude x)  = Qualified "Prelude" (Just "P") x
-toHsId (Api x)      = Qualified "LibHBMC" (Just "H") x
-toHsId (Proj x)     = Qualified "LibHBMC" (Just "H") ("proj" ++ show (x+1))
+toHsId (Api x)      = Qualified "HBMC.Lib" (Just "H") x
+toHsId (Proj x)     = Qualified "HBMC.Lib" (Just "H") ("proj" ++ show (x+1))
 toHsId (Var "main") = Exact "main"
 toHsId x            = Other x
 
@@ -72,6 +72,7 @@ data Var
 isCon :: Var -> Bool
 isCon Con{}       = True
 isCon SystemCon{} = True
+isCon (Refresh x _) = isCon x
 isCon _     = False
 
 proj :: Int -> Var

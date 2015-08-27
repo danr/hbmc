@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, RankNTypes, FlexibleContexts #-}
-module LibHBMC where
+module HBMC.Lib where
 
 import Control.Applicative
 import Control.Monad
@@ -342,7 +342,7 @@ memo tag h =
                   addClauseHere [c]
                   return y
 
-nomemo :: (Eq a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> a -> H b
+nomemo :: (Equal b, Constructive b) => String -> (a -> b -> H ()) -> a -> H b
 nomemo tag h t = do r <- new
                     h t r
                     return r
@@ -743,6 +743,101 @@ instance Value (Val a) where
 
 --------------------------------------------------------------------------------
 
+data LiveDesc c
+  = DataDesc String [c] [([c],LiveDesc c)]
+  | ThunkDesc (LiveDesc c)
+
+data LiveData c
+  = LiveData String (Val c) [([c],Maybe (LiveData c))]
+  | LiveThunk (Thunk (LiveData c))
+  deriving (Eq,Ord)
+
+newData :: Ord c => Bool -> LiveDesc c -> H (LiveData c)
+newData i (ThunkDesc d) =
+  do LiveThunk <$> delay i (newData i d)
+
+newData i (DataDesc tc cons args) =
+  do c <- newVal cons
+     as <- sequence [ do d <- newData i desc
+                         return (cs,Just d)
+                    | (cs,desc) <- args
+                    ]
+     return (LiveData tc c as)
+
+equalLiveOn :: Ord c => (forall a . Equal a => a -> a -> H ()) -> LiveData c -> LiveData c -> H ()
+equalLiveOn k (LiveThunk t1)      (LiveThunk t2)      = k t1 t2
+equalLiveOn k (LiveData _ c1 as1) (LiveData _ c2 as2) =
+  do equalHere c1 c2
+     ctx <- context
+     sequence_
+       [ do x <- new
+            sequence_ [ addClauseHere [nt (c1 =? c), x] | c <- cs ]
+            inContext x (do addClauseHere [ctx]; k x1 x2)
+       | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
+       ]
+
+instance Ord c => Equal (LiveData c) where
+  (>>>)        = equalLiveOn (>>>)
+  equalHere    = equalLiveOn equalHere
+  notEqualHere (LiveData _ c1 as1) (LiveData _ c2 as2) =
+    choice
+    [ do notEqualHere c1 c2
+    , do equalHere c1 c2
+         choice
+           [ do addClauseHere [ c1 =? c | c <- cs ]
+                notEqualHere x1 x2
+           | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
+           ]
+    ]
+
+-- projData :: Eq c => Int -> LiveData c -> LiveData c
+-- projData i (LiveData _ _ xs) = let (_,Just v):_ = drop i xs in v
+
+conData :: Eq c => LiveDesc c -> c -> [LiveData c] -> LiveData c
+conData (ThunkDesc d)     c as = LiveThunk (this (conData d c as))
+conData (DataDesc s _ rs) c as =
+  LiveData s (val c)
+    (snd
+       (mapAccumR
+         (\ as_rem (cs,_) ->
+           if c `elem` cs then
+             let hd:tl = as_rem
+             in  (tl,(cs,Just hd))
+           else
+             (as_rem,(cs,Nothing))
+         )
+         as rs))
+
+caseData :: LiveData c -> (Val c -> [LiveData c] -> H ()) -> H ()
+caseData (LiveThunk th)      k = ifForce th (\ ld -> caseData ld k)
+caseData (LiveData _tc v vs) k = k v (map (\ (_,~(Just v)) -> v) vs)
+
+data LiveValue c = ConValue c [LiveValue c] | ThunkValue
+
+instance Eq c => Value (LiveData c) where
+  type Type (LiveData c) = LiveValue c
+
+  dflt _ = ThunkValue
+
+  get (LiveThunk th)   = get th
+  get (LiveData _ v cns) =
+    do c <- get v
+       as <- sequence [ get d | (cs,Just d) <- cns, c `elem` cs ]
+       return (ConValue c as)
+
+instance Show c => Show (LiveValue c) where
+  show ThunkValue      = "_"
+  show (ConValue g []) = show g
+  show (ConValue g as) = "(" ++ show g ++ concat [ " " ++ show a | a <- as ] ++ ")"
+
+instance Show c => IncrView (LiveData c) where
+  incrView (LiveThunk th)      = incrView th
+  incrView (LiveData tc _ cns) =
+    do cns' <- sequence [ incrView mv | (_,mv) <- cns ]
+       return ("(" ++ tc ++ concat cns' ++ ")")
+
+-------------------------------------
+
 data Data c a = Con (Val c) a
   deriving ( Eq, Ord )
 
@@ -752,39 +847,6 @@ con c a = this (Con (val c) a)
 conStrict :: Ord c => c -> a -> Data c a
 conStrict c a = Con (val c) a
 
-{-
-proj :: Maybe a -> (a -> H ()) -> H ()
-proj (Just x) h = h x
-proj _        _ = return ()
--}
-
-proj1 :: (Maybe a, z) -> a
-proj1 (Just x, _) = x
-
-proj2 :: (x, (Maybe a, z)) -> a
-proj2 (_, (Just x, _)) = x
-
-proj3 :: (x, (y, (Maybe a, z))) -> a
-proj3 (_, (_, (Just x, _))) = x
-
-proj4 :: (x1, (x, (y, (Maybe a, z)))) -> a
-proj4 (_, (_, (_, (Just x, _)))) = x
-
-proj5 :: (x2, (x1, (x, (y, (Maybe a, z))))) -> a
-proj5 (_, (_, (_, (_, (Just x, _))))) = x
-
-proj6 :: (x3, (x2, (x1, (x, (y, (Maybe a, z)))))) -> a
-proj6 (_, (_, (_, (_, (_, (Just x, _)))))) = x
-
-proj7 :: (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z))))))) -> a
-proj7 (_, (_, (_, (_, (_, (_, (Just x, _))))))) = x
-
-proj8 :: (x5, (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z)))))))) -> a
-proj8 (_, (_, (_, (_, (_, (_, (_, (Just x, _)))))))) = x
-
-unJust :: Maybe a -> a
-unJust (Just x) = x
-unJust Nothing  = error "unJust"
 
 class (Show c, Ord c) => ConstructiveData c where
   constrs :: [c]
@@ -811,14 +873,16 @@ equalOn ::
   (forall x . Equal x => x -> x -> H ()) ->
   Data c a -> Data c a -> H ()
 
+{-
 equalOn k (Con (Val [(tt,c)]) x1) (Con c2 x2) =
-  do -- io (putStrLn "oneCon")
+  do -- io (putStrLn "oneCon L")
      must (c2 =? c) $
        do sequence_
             [ f x1 x2
             | (cs,f) <- equalData k
             , c `elem` cs
             ]
+-}
 
 equalOn k (Con c1 x1) (Con c2 x2) =
   do -- io (putStrLn "equalData")
@@ -882,6 +946,23 @@ getStrictData f d (Con c a) =
 class IncrView a where
   incrView :: a -> H String
 
+data Tagged a = Tagged [(String,a)]
+
+instance IncrView a => IncrView (Tagged a) where
+  incrView (Tagged [])         = return ""
+  incrView (Tagged ((x,xe):r)) =
+    do xe' <- incrView xe
+       r'  <- incrView (Tagged r)
+       return (x ++ ": " ++ xe' ++ "\n" ++ r')
+
+instance Show a => Show (Tagged a) where
+  show (Tagged xs) = unlines [ x ++ ": " ++ show xe | (x,xe) <- xs ]
+
+instance Value a => Value (Tagged a) where
+  type Type (Tagged a) = Tagged (Type a)
+  dflt _ = Tagged []
+  get (Tagged xs) = Tagged <$> sequence [ (,) x <$> get xe | (x,xe) <- xs ]
+
 data TagShow a b = TagCons String a b
 
 data TagNil = TagNil
@@ -942,3 +1023,33 @@ instance Value (TagNil) where
   type Type TagNil = TagNil
   dflt _ = TagNil
   get  _ = return TagNil
+
+-- Projection utilities
+
+proj1 :: (Maybe a, z) -> a
+proj1 (Just x, _) = x
+
+proj2 :: (x, (Maybe a, z)) -> a
+proj2 (_, (Just x, _)) = x
+
+proj3 :: (x, (y, (Maybe a, z))) -> a
+proj3 (_, (_, (Just x, _))) = x
+
+proj4 :: (x1, (x, (y, (Maybe a, z)))) -> a
+proj4 (_, (_, (_, (Just x, _)))) = x
+
+proj5 :: (x2, (x1, (x, (y, (Maybe a, z))))) -> a
+proj5 (_, (_, (_, (_, (Just x, _))))) = x
+
+proj6 :: (x3, (x2, (x1, (x, (y, (Maybe a, z)))))) -> a
+proj6 (_, (_, (_, (_, (_, (Just x, _)))))) = x
+
+proj7 :: (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z))))))) -> a
+proj7 (_, (_, (_, (_, (_, (_, (Just x, _))))))) = x
+
+proj8 :: (x5, (x4, (x3, (x2, (x1, (x, (y, (Maybe a, z)))))))) -> a
+proj8 (_, (_, (_, (_, (_, (_, (_, (Just x, _)))))))) = x
+
+unJust :: Maybe a -> a
+unJust (Just x) = x
+unJust Nothing  = error "unJust"

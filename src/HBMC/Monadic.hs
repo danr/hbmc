@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE DeriveFunctor #-}
 module HBMC.Monadic where
 
 import Tip.Core
@@ -21,14 +22,20 @@ import Control.Monad
 import Tip.Pretty
 import Tip.Pretty.SMT ()
 
+import Debug.Trace
+
 -- Translation to constraint-generation DSL:
 
-data Func a = Func a [a] a Bool (Mon a)
+data Verbosity = Quiet | Verbose deriving (Eq,Ord,Show,Read)
+
+data Func a = Func a [a] a a Bool (Mon a)
+  deriving (Eq,Ord,Show,Functor)
 
 data Prop a = Prop [a] (Mon a)
+  deriving (Eq,Ord,Show,Functor)
 
 data Pred a = a :=? a
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord,Show,Functor)
 
 data Guard = When | Unless
   deriving (Eq,Ord,Show)
@@ -36,6 +43,9 @@ data Guard = When | Unless
 data Rhs a
   = New Bool a
   | Call a [Simp a]
+  deriving (Eq,Ord,Show,Functor)
+
+data BinPrim = EqualHere | NotEqualHere
   deriving (Eq,Ord,Show)
 
 data Act a
@@ -43,14 +53,14 @@ data Act a
   | CaseData a (Simp a) a a (Mon a)
   | Simp a :>>>: a
   | a :<-: Rhs a
-  | EqualHere (Simp a) (Simp a)
-  deriving (Eq,Ord,Show)
+  | BinPrim BinPrim (Simp a) (Simp a)
+  deriving (Eq,Ord,Show,Functor)
 
 data Simp a
-  = Con a [Simp a]
-  | Proj Int (Simp a)
+  = Con a a [Simp a]
+  | Proj Int a
   | Var a
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord,Show,Functor)
 
 type Mon a = [Act a]
 
@@ -74,11 +84,10 @@ terminates f as e =
 trFunction :: Function Var -> Fresh (Func Var)
 trFunction Function{..} =
   do r <- fresh
-     simp_body <- toExpr func_body
      let args = map lcl_name func_args
-     let chk = terminates func_name args simp_body
-     body <- trExpr simp_body (Just r)
-     return (Func func_name args r chk body)
+     let chk = not (terminates func_name args func_body)
+     body <- trExpr func_body (Just r)
+     return (Func func_name args r (tyConOf func_res) chk body)
        {- let tt = modTyCon wrapData . trType
          in H.TySig func_name
               [ H.TyCon s [H.TyVar tv]
@@ -155,9 +164,14 @@ trExpr e00 mr =
       Gbl (Global g _ _) :@: _ | g == noopVar -> return []
 
       Gbl (Global (Api "equalHere") _ _) :@: [s1,s2] ->
-        return [EqualHere (trSimple s1) (trSimple s2)]
+        return [BinPrim EqualHere (trSimple s1) (trSimple s2)]
+
+      Gbl (Global (Api "notEqualHere") _ _) :@: [s1,s2] ->
+        return [BinPrim NotEqualHere (trSimple s1) (trSimple s2)]
 
       s | Just r <- mr -> return [trSimple s :>>>: r]
+
+      _ -> error $ "trExpr " ++ ppRender e0
 
 trMatch :: Expr Var -> [Case Var] -> Maybe Var -> Fresh (Act Var)
 trMatch e brs mr | TyCon tc _ <- exprType e =
@@ -192,8 +206,8 @@ trSimple :: Expr Var -> Simp Var
 trSimple s =
   case s of
     Lcl (Local x _) -> Var x
-    Gbl (Global k _ _) :@: [s] | Just i <- unproj k -> Proj i (trSimple s)
-    Gbl (Global k _ _) :@: ss -> Con k (map trSimple ss)
+    Gbl (Global k _ _) :@: [s] | Just i <- unproj k -> Proj i (let Var x = trSimple s in x)
+    Gbl (Global k (PolyType _ _ (TyCon tc _)) _) :@: ss -> Con tc k (map trSimple ss)
     _ -> error $ "trSimple, not simple: " ++ ppRender s
 
 trCase :: Var -> Maybe Var -> [Var] -> Case Var -> Fresh (Mon Var)

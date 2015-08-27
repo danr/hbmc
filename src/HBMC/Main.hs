@@ -29,6 +29,8 @@ import HBMC.Monadic hiding (Var)
 
 import HBMC.ToSimple
 
+import HBMC.Live
+
 import Tip.Passes
 
 import System.Environment
@@ -43,9 +45,12 @@ import System.FilePath
 import System.Directory
 import System.IO.Temp
 
-translate :: Theory Var -> WriterT [String] Fresh (Decls (HsId String))
-translate thy0 = do
-    [thy1] <-
+import Text.Show.Pretty (ppShow)
+
+--translate :: Theory Var -> WriterT [String] Fresh (Decls (HsId String))
+translate :: Theory Var -> WriterT [String] Fresh (IO ())
+translate thy0 =
+  do [thy1] <-
         map (addMaybeToTheory . addBoolToTheory) <$> lift
             (runPasses
               [ SimplifyAggressively
@@ -59,28 +64,45 @@ translate thy0 = do
               , RemoveAliases, CollapseEqual
               , SimplifyGently
               , CSEMatch
+              , TypeSkolemConjecture
               -- , EliminateDeadCode
               ] thy0)
 
-    let (dis,_) = unzip (map dataInfo (thy_datatypes thy1))
-        di      = concat dis
+     thy2 <- lift (monomorphise False thy1)
 
-    thy <- lift (projectPatterns di thy1)
+     let (dis,_) = unzip (map dataInfo (thy_datatypes thy2))
+         di      = concat dis
 
-    fn_decls <- sequence
-        [ do let e = func_body fn
-             es <- lift $ mergeTrace (scope thy) e
-             tell ("":map (ppRender . ren) es)
-             trFunc <$> lift (trFunction fn{ func_body = last es })
-        | fn <- thy_funcs thy
-        ]
+     thy <- lift (projectPatterns di thy2)
 
-    main_decls <- lift $ sequence
-        [ H.funDecl (Var "main") [] . trProp Verbose <$> trFormula prop
-        | prop <- thy_asserts thy
-        ]
+     fn_decls <- sequence
+         [ do let e = func_body fn
+              es <- lift $ mergeTrace (scope thy) e
+              tell ("":map (ppRender . ren) es)
+              {- trFunc <$> -}
+              lift (trFunction fn{ func_body = last es })
+         | fn <- thy_funcs thy
+         ]
 
-    dt_decls <- lift $ mapM (trDatatype False) (thy_datatypes thy)
+     main_decls@(main_prop:_) <- lift $ sequence
+         [ {- H.funDecl (Var "main") [] . trProp Verbose <$> -} trFormula prop
+         | prop <- thy_asserts thy
+         ]
+
+     tell [ppShow (thy_datatypes thy)]
+     tell [ppShow main_decls]
+
+     let lkup_data = dataDescs (map (fmap PPVar) (thy_datatypes thy))
+         static    = liveFuncs lkup_data (map (fmap PPVar) fn_decls)
+
+     return (liveProp Verbose static (fmap PPVar main_prop))
+
+{-
+    let rec_dts = recursiveDatatypes (thy_datatypes thy)
+
+    tell ("rec_dts:":map varStr rec_dts)
+
+    dt_decls <- lift $ mapM (trDatatype rec_dts False) (thy_datatypes thy)
 
     let decls = concat dt_decls ++ fn_decls ++ main_decls
 
@@ -90,6 +112,7 @@ translate thy0 = do
                               "MultiParamTypeClasses", "GeneralizedNewtypeDeriving"]
 
     return (Decls (langs ++ Module "Main" : ds))
+    -}
 
 ren = renameWith (disambig varStr)
 
@@ -97,12 +120,15 @@ main :: IO ()
 main = do
     f:es <- getArgs
     thy0 <- either error renameTheory <$> readHaskellOrTipFile f defaultParams
-    let (ds,dbg) = freshPass (runWriterT . translate) thy0
-    let mod_str = unlines (["{-"] ++ dbg ++ ["-}"] ++ [ppRender ds])
+    let (m,dbg) = freshPass (runWriterT . translate) thy0
+    -- let mod_str = unlines (["{-"] ++ dbg ++ ["-}"] ++ [ppRender ds])
     -- putStrLn mod
-    m <- runMod mod_str
+    -- m <- runMod mod_str
+    -- m
+    putStrLn (unlines dbg)
     m
 
+{-
 runMod :: String -> IO (IO ())
 runMod mod_str =
   fmap (either (error . showError) id) $
@@ -121,3 +147,4 @@ showError :: InterpreterError -> String
 showError (WontCompile ghcerrs) = unlines (map errMsg ghcerrs)
 showError (GhcException e) = e
 showError e = show e
+-}

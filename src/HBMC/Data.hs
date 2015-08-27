@@ -7,14 +7,41 @@ import Tip.Fresh
 import Data.List
 
 import Tip.Haskell.Repr as H
+import Tip.Utils (recursive)
+import Tip.Core  (defines,uses)
+import Tip.Pretty
 
 import HBMC.Identifiers
 import HBMC.Haskell
+import HBMC.Lib hiding (Type,caseData)
 
 import Tip.Core (Datatype(..),Constructor(..))
 import Control.Applicative
 
 type DataInfo a = [(a,(a,[Int]))]
+
+dataDescs :: forall a . (Show a,PrettyVar a,Ord a) => [Datatype a] -> a -> LiveDesc a
+dataDescs dts = lkup_desc
+  where
+  rec_dts = recursiveDatatypes dts
+  lkup_desc x = case lookup x tbl of Just desc -> desc
+                                     Nothing   -> error $ "Data type not found:" ++ varStr x
+  tbl =
+    [ (tc,
+       maybe_thunk $ DataDesc (varStr tc) [ c | Constructor c _ _ <- cons ]
+       [ case ty of
+           TyCon tc [] ->
+             ( [ c | (c,(_,ixs)) <- indexes, i `elem` ixs ]
+             , lkup_desc tc)
+       | (i,ty) <- [0..] `zip` types ])
+    | dt@(Datatype tc [] cons) <- dts
+    , let (indexes,types) = dataInfo dt
+    , let maybe_thunk | tc `elem` rec_dts = ThunkDesc
+                      | otherwise         = id
+    ]
+
+recursiveDatatypes :: Ord a => [Datatype a] -> [a]
+recursiveDatatypes = recursive defines uses
 
 trType :: T.Type a -> H.Type a
 trType t0 =
@@ -49,8 +76,8 @@ merge (xs:xss) = help xs (merge xss)
     help xs (y:ys) = y:help (delete y xs) ys
     help xs []     = xs
 
-trDatatype :: forall a . (a ~ Var) => Bool -> Datatype a -> Fresh [Decl a]
-trDatatype lazy dt@(Datatype tc tvs cons) =
+trDatatype :: forall a . (a ~ Var) => [a] -> Bool -> Datatype a -> Fresh [Decl a]
+trDatatype rec_dts lazy dt@(Datatype tc tvs cons) =
   do constructors <- mapM make_con cons
      case_data <- make_case_data
      equal <- make_equal
@@ -63,7 +90,8 @@ trDatatype lazy dt@(Datatype tc tvs cons) =
  where
   (indexes,types) = dataInfo dt
 
-  strict = not lazy && and [ null args | Constructor _ _ args <- cons ]
+  strict = not lazy && tc `notElem` rec_dts
+        -- and [ null args | Constructor _ _ args <- cons ]
 
   a ! b | strict    = b
         | otherwise = a

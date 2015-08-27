@@ -9,7 +9,7 @@ import Tip.Haskell.Repr as H
 -- Translation from constraint-generation dsl to Haskell
 
 trFunc :: Func Var -> Decl Var
-trFunc (Func f as r chk b) =
+trFunc (Func f as r _r_ty chk b) =
   funDecl f [] $
     Apply (api "nomemo")
       [ String f
@@ -19,8 +19,6 @@ trFunc (Func f as r chk b) =
   maybe_check
     | chk = H.Apply (api "check") . return
     | otherwise = id
-
-data Verbosity = Quiet | Verbose deriving (Eq,Ord,Show,Read)
 
 trProp :: Verbosity -> Prop Var -> Expr Var
 trProp v (Prop vs m) =
@@ -49,7 +47,11 @@ trAct a =
       Stmt
         (Apply (caseData tc) [trSimp s,
           Lam [H.ConPat (api "Con") [H.VarPat v,H.VarPat c]] (trMon m)])
-    EqualHere s1 s2 -> Stmt (Apply (api "equalHere") (map trSimp [s1,s2]))
+    BinPrim bp s1 s2 ->
+      Stmt (Apply (api bp') (map trSimp [s1,s2]))
+      where
+      bp' = case bp of EqualHere -> "equalHere"
+                       NotEqualHere -> "notEqualHere"
     s :>>>: x -> Stmt (trSimp s >>> var x)
     x :<-: rhs ->
       Bind x $
@@ -58,9 +60,9 @@ trAct a =
           New i _tc -> Apply (api (if i then "newInput" else "new")) []
 
 trSimp :: Simp Var -> Expr Var
-trSimp (Con x ss) = Apply (mkCon x) (map trSimp ss)
-trSimp (Proj i s) = Apply (proj i) [trSimp s]
-trSimp (Var x)    = var x
+trSimp (Con _ x ss) = Apply (mkCon x) (map trSimp ss)
+trSimp (Proj i x)   = Apply (proj i) [var x]
+trSimp (Var x)      = var x
 
 trPred :: Pred Var -> Expr Var
 trPred (x :=? lbl) = H.Apply (api "valEq") [var x,var (conLabel lbl)]
