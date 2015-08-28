@@ -125,8 +125,9 @@ terminates f as e =
            , f == f' ]
      | (a,i) <- as `zip` [0..] ]
   where
-  chase needle (Lcl (Local x _)) = needle == x
-  chase needle (Gbl (Global g _ _) :@: [e]) | Just{} <- unproj g = chase needle e
+  chase needle (Gbl (Global g _ _) :@: [Lcl (Local x _)])
+    | Just{} <- unproj g
+    = needle == x
   chase _ _ = False
 
 trFunction :: Function Var -> Fresh (Func Var)
