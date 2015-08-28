@@ -2,7 +2,7 @@
 module HBMC.Lib where
 
 import Control.Applicative
-import Control.Monad
+import Control.Monad hiding (when,unless)
 import Data.IORef
 import Data.List
 import qualified Data.Map as Mp
@@ -95,8 +95,10 @@ trySolve quiet = H (\env ->
                   else
                    let p0:_ = [ p | (p,_,_) <- ws, p `elem` qs ] in
                      do verbose ("Conflict: " ++ show (length qs))
-                        b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws, p `elem` qs, p /= p0 ])
-                        --b <- return True
+                        -- this is not always great when there are checks
+                        -- around that contain the counterex:
+                        -- b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws, p `elem` qs, p /= p0 ])
+                        b <- return True
                         if b then
                           let (p,unq,H h):_ = [ t | t@(p,_,_) <- ws, p `elem` qs ] in
                             do let ws' = [ t | t@(_,unq',_) <- reverse ws, unq /= unq' ]
@@ -787,10 +789,19 @@ equalLiveOn k (LiveThunk t1)        (LiveThunk t2)        = k t1 t2
 equalLiveOn k (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
   do equalHere c1 c2
      ctx <- context
+
+     let bigdmn = case domain c1 of
+                    dmn@(_:_:_) -> Just (sort dmn)
+                    _           -> Nothing
+
      sequence_
-       [ case domain c1 of
-           dmn@(_:_:_) | sort cs == sort dmn -> k x1 x2
-           _ -> do whens [ c1 =? c | c <- cs ] (k x1 x2)
+       [ case bigdmn of
+           -- Just dmn | length cs * 2 > length dmn
+           --   -> do let bs = [ c1 =? c | c <- sort dmn \\ sort cs ]
+           --         io $ putStrLn (unwords ["UNLESS",show (length bs),show (length cs),show (length dmn)])
+           --         unless bs (k x1 x2)
+           _ -> do -- io $ putStrLn "WHENS"
+                   whens [ c1 =? c | c <- cs ] (k x1 x2)
        | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
        ]
 
