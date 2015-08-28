@@ -7,6 +7,7 @@ import Data.Traversable (Traversable)
 
 import Tip.Core
 import Tip.Fresh
+import Tip.Utils
 
 import HBMC.Identifiers hiding (Con,Proj,Var)
 import HBMC.Identifiers (Var())
@@ -65,6 +66,52 @@ data Simp a
   | Var a
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
+simpMon :: Eq a => Mon a -> Mon a
+simpMon = map simpAct . collapse . filter (not . nullAct)
+  where
+  collapse m =
+    case
+      [ (l ++ m ++ [ab'] ++ r)
+      | (l,a,r1) <- cursor m
+      , (m,b,r)  <- cursor r1
+      , Just ab' <- [collapseAct a b] ] of
+      m':_ -> collapse m'
+      []   -> m
+
+simpAct :: Eq a => Act a -> Act a
+simpAct (Guard g p m)         = Guard g p (simpMon m)
+simpAct (CaseData tc s v c m) = CaseData tc s v c (simpMon m)
+simpAct a = a
+
+su :: (Eq a,Functor f) => a -> a -> f a -> f a
+su for what = fmap (\ x -> if x == what then for else x)
+
+nullAct :: Act a -> Bool
+nullAct (CaseData _ _ _ _ m) = all nullAct m
+nullAct (Guard When [] _)    = True
+nullAct (Guard g p m)        = all nullAct m
+nullAct _ = False
+
+collapseAct :: Eq a => Act a -> Act a -> Maybe (Act a)
+{-
+collapseAct
+  (Guard When a m)
+  (Guard When b n)
+  | m == n = Just (Guard When (a ++ b) m)
+-}
+
+collapseAct
+  (Guard g1 a m)
+  (Guard g2 b n)
+  | g1 == g2 && a == b = Just (Guard g1 a (m ++ n))
+
+collapseAct
+  (CaseData tc s1 v1 c1 m1)
+  (CaseData _  s2 v2 c2 m2)
+  | s1 == s2 = Just (CaseData tc s1 v1 c1 (m1 ++ map (su v1 v2 . su c1 c2) m2))
+
+collapseAct _ _ = Nothing
+
 type Mon a = [Act a]
 
 -- Simple termination check: there is some argument that always decreases
@@ -90,7 +137,7 @@ trFunction Function{..} =
      let args = map lcl_name func_args
      let chk = not (terminates func_name args func_body)
      body <- trExpr func_body (Just r)
-     return (Func func_name args r (tyConOf func_res) chk body)
+     return (Func func_name args r (tyConOf func_res) chk (simpMon body))
        {- let tt = modTyCon wrapData . trType
          in H.TySig func_name
               [ H.TyCon s [H.TyVar tv]
@@ -121,7 +168,7 @@ trFormula fm =
          let cs      = conjuncts (ifToBoolOp e')
          let news    = [ x :<-: New True (tyConOf t) | Local x t <- vs ]
          asserts <- mapM trToTrue cs
-         return (Prop (map lcl_name vs) (news ++ concat asserts))
+         return (Prop (map lcl_name vs) (simpMon (news ++ concat asserts)))
 
 trToTrue :: Expr Var -> Fresh (Mon Var)
 trToTrue e0 =

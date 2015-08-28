@@ -67,7 +67,7 @@ translate thy0 =
               , SimplifyGently
               , CSEMatch
               , TypeSkolemConjecture
-              -- , EliminateDeadCode
+              , EliminateDeadCode
               ] thy0)
 
      thy2 <- lift (monomorphise False thy1)
@@ -79,7 +79,7 @@ translate thy0 =
          [ do let e = func_body fn
               -- es <- lift $ sequence [ toExpr e ]
               es <- lift $ mergeTrace (scope thy) e
-              tell ("":map (ppRender . ren) (e:es))
+              tell (ppRender fn:map (ppRender . ren) (e:es))
               {- trFunc <$> -}
               lift (trFunction fn{ func_body = last es })
          | fn <- thy_funcs thy
