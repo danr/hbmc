@@ -252,9 +252,9 @@ callMerged = transformExprInM top
 
          let case_match x e =
                Match (Lcl x)
-                 [ Case (ConPat (nothingGbl (lcl_type x)) [])
+                 [ Case (ConPat (nothingGbl (unMaybeTy (lcl_type x))) [])
                         (noopExpr (exprType e))
-                 , Case (ConPat (justGbl (lcl_type x)) []) e
+                 , Case (ConPat (justGbl (unMaybeTy (lcl_type x))) []) e
                  ]
 
          let cases

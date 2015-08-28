@@ -792,9 +792,11 @@ equalLiveOn k (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) | tc1 == tc2 =
             sequence_ [ addClauseHere [nt (c1 =? c), x] | c <- cs ]
             inContext x (do addClauseHere [ctx]; k x1 x2) -}
        | ((cs,x1),(_cs,x2)) <- as1 `zip` as2
+       , any (`elem` cs) (domain c1) && any (`elem` cs) (domain c2)
        ]
   where
   fj (Just x) = x
+  fj Nothing  = error ("fromJust on " ++ tc1)
 
 instance Ord c => Equal (LiveData c) where
   (>>>)        = equalLiveOn (>>>)

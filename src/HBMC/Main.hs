@@ -58,11 +58,12 @@ translate thy0 =
               , RemoveNewtype
               , UncurryTheory
               , SimplifyGently
+              , IfToBoolOp
               , AddMatch
-              , BoolOpToIf
-              , CommuteMatch
               , SimplifyGently
               , RemoveAliases, CollapseEqual
+              , BoolOpToIf
+              , CommuteMatch
               , SimplifyGently
               , CSEMatch
               , TypeSkolemConjecture
@@ -78,7 +79,7 @@ translate thy0 =
          [ do let e = func_body fn
               -- es <- lift $ sequence [ toExpr e ]
               es <- lift $ mergeTrace (scope thy) e
-              tell ("":map (ppRender . ren) es)
+              tell ("":map (ppRender . ren) (e:es))
               {- trFunc <$> -}
               lift (trFunction fn{ func_body = last es })
          | fn <- thy_funcs thy
