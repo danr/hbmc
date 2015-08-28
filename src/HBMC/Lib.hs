@@ -917,25 +917,12 @@ equalOn ::
   (forall x . Equal x => x -> x -> H ()) ->
   Data c a -> Data c a -> H ()
 
-{-
-equalOn k (Con (Val [(tt,c)]) x1) (Con c2 x2) =
-  do -- io (putStrLn "oneCon L")
-     must (c2 =? c) $
-       do sequence_
-            [ f x1 x2
-            | (cs,f) <- equalData k
-            , c `elem` cs
-            ]
--}
-
 equalOn k (Con c1 x1) (Con c2 x2) =
   do -- io (putStrLn "equalData")
      equalHere c1 c2
      c <- context
      sequence_
-       [ do x <- new
-            sequence_ [ addClauseHere [nt (c1 =? c), x] | c <- cs ]
-            inContext x (do addClauseHere [c]; f x1 x2)
+       [ whens [ c1 =? c | c <- cs ] (f x1 x2)
        | (cs, f) <- equalData k
        , any (`elem` allcs) cs
        ]

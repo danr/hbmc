@@ -41,15 +41,16 @@ import qualified Data.Foldable as F
 import Control.Monad
 import Control.Monad.Writer
 
-import Language.Haskell.Interpreter
 import System.FilePath
 import System.Directory
 import System.IO.Temp
+import System.Process
 
 import Text.Show.Pretty (ppShow)
 
---translate :: Theory Var -> WriterT [String] Fresh (Decls (HsId String))
-translate :: Theory Var -> WriterT [String] Fresh (IO ())
+type Translated = ([Datatype Var],[Func Var],[Prop Var])
+
+translate :: Theory Var -> WriterT [String] Fresh Translated
 translate thy0 =
   do [thy1] <-
         map addBoolToTheory <$> lift
@@ -82,79 +83,74 @@ translate thy0 =
               -- es <- lift $ sequence [ toExpr e ]
               es <- lift $ mergeTrace (scope thy) e
               tell (ppRender fn:map (ppRender . ren) (e:es))
-              {- trFunc <$> -}
               lift (trFunction fn{ func_body = last es })
          | fn <- thy_funcs thy
          ]
 
-     main_decls@(main_prop:_) <- lift $ sequence
-         [ {- H.funDecl (Var "main") [] . trProp Verbose <$> -} trFormula prop
-         | prop <- thy_asserts thy
-         ]
+     props <- lift $ sequence [ trFormula prop | prop <- thy_asserts thy ]
 
      let thy' = addMaybesToTheory
-                  (concatMap F.toList fn_decls ++ concatMap F.toList main_decls)
+                  (concatMap F.toList fn_decls ++ concatMap F.toList props)
                   thy
 
      tell [ppShow (thy_datatypes thy')]
      tell (map ppShow fn_decls)
-     tell [ppShow main_decls]
+     tell [ppShow props]
 
-     let pp_var = PPVar
+     return (thy_datatypes thy', fn_decls, props)
 
-     let lkup_data = dataDescs (map (fmap pp_var) (thy_datatypes thy'))
-         static    = liveFuncs lkup_data (map (fmap pp_var) fn_decls)
+runLive :: Translated -> IO ()
+runLive (ds,fs,p:_) = liveProp Verbose static (fmap pp_var p)
+  where
+  pp_var = PPVar
 
-     return (liveProp Verbose static (fmap pp_var main_prop))
+  lkup_data = dataDescs (map (fmap pp_var) ds)
+  static    = liveFuncs lkup_data (map (fmap pp_var) fs)
 
-{-
-    let rec_dts = recursiveDatatypes (thy_datatypes thy)
+compile :: Translated -> Fresh String
+compile (ds,fs,props) =
+ do let main_decls =
+           [ H.funDecl (Var "main") [] (trProp Verbose p) | p <- props ]
 
-    tell ("rec_dts:":map varStr rec_dts)
+    let fn_decls = [ trFunc f | f <- fs ]
 
-    dt_decls <- lift $ mapM (trDatatype rec_dts False) (thy_datatypes thy)
+    let rec_dts = recursiveDatatypes ds
 
-    let decls = concat dt_decls ++ fn_decls ++ main_decls
+    dt_decls <- mapM (trDatatype rec_dts False) ds
+
+    let decls = concat dt_decls ++ fn_decls ++ take 1 main_decls
 
     let Decls ds = addImports $ fst $ renameDecls $ fmap toHsId (Decls decls)
 
     let langs = map LANGUAGE ["ScopedTypeVariables", "TypeFamilies", "FlexibleInstances",
                               "MultiParamTypeClasses", "GeneralizedNewtypeDeriving"]
 
-    return (Decls (langs ++ Module "Main" : ds))
-    -}
+    return (ppRender (Decls (langs ++ Module "Main" : ds)))
 
 ren = renameWith (disambig varStr)
+
+data Target = Live | Compile
 
 main :: IO ()
 main = do
     f:es <- getArgs
     thy0 <- either error renameTheory <$> readHaskellOrTipFile f defaultParams
-    let (m,dbg) = freshPass (runWriterT . translate) thy0
-    -- let mod_str = unlines (["{-"] ++ dbg ++ ["-}"] ++ [ppRender ds])
-    -- putStrLn mod
-    -- m <- runMod mod_str
-    -- m
+
+    let target = Compile
+
+    let h :: Translated -> Fresh (IO ())
+        h tr = case target of
+                 Live    -> return (runLive tr)
+                 Compile -> do c <- compile tr
+                               return $
+                                 do writeFile "Tmp.hs" c
+                                    rawSystem "ghc" ["Tmp.hs"]
+                                    rawSystem "./Tmp" []
+                                    return ()
+
+    let (m,dbg) = freshPass (runWriterT . (lift . h <=< translate)) thy0
+
     putStrLn (unlines dbg)
+
     m
 
-{-
-runMod :: String -> IO (IO ())
-runMod mod_str =
-  fmap (either (error . showError) id) $
-    do dir <- getCurrentDirectory -- createTempDirectory "." "tmp"
-       putStrLn dir
-       let a_file = dir </> "A" <.> "hs"
-       writeFile a_file mod_str
-       setCurrentDirectory dir
-       runInterpreter $
-         do set [searchPath := ["../lib"]]
-            loadModules ["A"]
-            setImports ["Main","LibHBMC","Prelude"]
-            interpret "main" (undefined :: IO ())
-
-showError :: InterpreterError -> String
-showError (WontCompile ghcerrs) = unlines (map errMsg ghcerrs)
-showError (GhcException e) = e
-showError e = show e
--}
