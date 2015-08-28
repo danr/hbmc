@@ -49,12 +49,13 @@ liveFuncs lkup_desc funcs = st
                                      Nothing   -> error $ "Function not found:" ++ varStr x
 
 liveFunc :: (Show a,PrettyVar a,Ord a) => Static a -> Func a -> [LiveData a] -> H (LiveData a)
-liveFunc st (Func _ as_vars r_var r_ty chk m) as =
-  do -- no memo right now
-     r <- newData False (lkup_desc st r_ty)
-     (if chk then check else id)
-       (liveMon (newEnv st ((r_var,r):as_vars `zip` as)) m >> return ())
-     return r
+liveFunc st (Func fname as_vars r_var r_ty chk m) =
+  (if chk then memoWith else nomemoWith)
+    (newData False (lkup_desc st r_ty))
+    (varStr fname) $
+      \ as r ->
+         (if chk then check else id)
+         (liveMon (newEnv st ((r_var,r):as_vars `zip` as)) m >> return ())
 
 liveMon :: (Show a,PrettyVar a,Ord a) => LiveEnv a -> Mon a -> H (Dynamic a)
 liveMon env []         = return (dynamic env)
@@ -110,3 +111,4 @@ liveSimp env (Var x)       = var_map (dynamic env) ! x
 (!) :: (Show k,Show v,Ord k) => Map k v -> k -> v
 m ! k = case M.lookup k m of Just v  -> v
                              Nothing -> error $ "Cannot find: " ++ show k
+

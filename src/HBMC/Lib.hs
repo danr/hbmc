@@ -327,9 +327,15 @@ nocall cl =
 
 --[ memo ]----------------------------------------------------------------------
 
-{-# NOINLINE memo #-}
-memo :: (Ord a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> (a -> H b)
-memo tag h =
+nomemoWith :: Equal b => H b -> String -> (a -> b -> H ()) -> a -> H b
+nomemoWith new_b tag h t =
+  do r <- new_b
+     h t r
+     return r
+
+{-# NOINLINE memoWith #-}
+memoWith :: (Ord a, Equal b) => H b -> String -> (a -> b -> H ()) -> (a -> H b)
+memoWith new_b tag h =
   unsafePerformIO $
     do -- putStrLn ("Creating table for " ++ tag ++ "...")
        ref <- newIORef Mp.empty
@@ -338,7 +344,7 @@ memo tag h =
                   -- io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (Mp.size xys))
                   (c,y) <- case Mp.lookup x xys of
                              Nothing ->
-                               do y <- new
+                               do y <- new_b
                                   c <- new
                                   io $ writeIORef ref (Mp.insert x (c,y) xys)
                                   inContext c $ h x y
@@ -351,10 +357,12 @@ memo tag h =
                   addClauseHere [c]
                   return y
 
+{-# NOINLINE memo #-}
+memo :: (Ord a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> (a -> H b)
+memo = memoWith new
+
 nomemo :: (Equal b, Constructive b) => String -> (a -> b -> H ()) -> a -> H b
-nomemo tag h t = do r <- new
-                    h t r
-                    return r
+nomemo = nomemoWith new
 
 --------------------------------------------------------------------------------
 
