@@ -71,7 +71,7 @@ simpMon = map simpAct . collapse . filter (not . nullAct)
   where
   collapse m =
     case
-      [ (l ++ m ++ [ab'] ++ r)
+      [ (l ++ [ab'] ++ m ++ r)
       | (l,a,r1) <- cursor m
       , (m,b,r)  <- cursor r1
       , Just ab' <- [collapseAct a b] ] of
