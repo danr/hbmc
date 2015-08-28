@@ -784,26 +784,22 @@ newData i desc@(DataDesc tc cons args) =
 
 equalLiveOn :: Ord c => (forall a . Equal a => a -> a -> H ()) -> LiveData c -> LiveData c -> H ()
 equalLiveOn k (LiveThunk t1)        (LiveThunk t2)        = k t1 t2
-equalLiveOn k (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) | tc1 == tc2 =
+equalLiveOn k (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
   do equalHere c1 c2
      ctx <- context
      sequence_
-       [ do whens [ c1 =? c | c <- cs ] (k (fj x1) (fj x2)) {- x <- new
-            sequence_ [ addClauseHere [nt (c1 =? c), x] | c <- cs ]
-            inContext x (do addClauseHere [ctx]; k x1 x2) -}
-       | ((cs,x1),(_cs,x2)) <- as1 `zip` as2
-       , any (`elem` cs) (domain c1) && any (`elem` cs) (domain c2)
+       [ case domain c1 of
+           dmn@(_:_:_) | sort cs == sort dmn -> k x1 x2
+           _ -> do whens [ c1 =? c | c <- cs ] (k x1 x2)
+       | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
        ]
-  where
-  fj (Just x) = x
-  fj Nothing  = error ("fromJust on " ++ tc1)
 
 instance Ord c => Equal (LiveData c) where
   (>>>)        = equalLiveOn (>>>)
   equalHere    = equalLiveOn equalHere
   notEqualHere (LiveThunk th1)       (LiveThunk th2)       = notEqualHere th1 th2
-  notEqualHere (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) | tc1 == tc2 =
-    do io (putStrLn "notEqualHere")
+  notEqualHere (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
+    do -- io (putStrLn "notEqualHere")
        choice
          [ do notEqualHere c1 c2
          , do equalHere c1 c2
