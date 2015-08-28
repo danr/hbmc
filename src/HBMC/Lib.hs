@@ -15,12 +15,14 @@ import Debug.Trace
 
 --------------------------------------------------------------------------------
 
+data Prio = Check | DelayedThunk
+  deriving (Eq,Ord,Show)
+
 data Env =
   Env
   { sat    :: Solver
   , here   :: Bit
-  , checks :: IORef [(Bit, H ())]
-  , waits  :: IORef [(Bit,Unique,H ())]
+  , waits  :: IORef [(Prio,(Bit,Unique,H ()))]
   }
 
 newtype H a = H (Env -> IO a)
@@ -43,9 +45,8 @@ instance Monad H where
 run :: H a -> IO a
 run (H m) =
   M.withNewSolver $ \s ->
-    do refc <- newIORef []
-       refw <- newIORef []
-       m (Env s tt refc refw)
+    do refw <- newIORef []
+       m (Env s tt refw)
 
 {-
 
@@ -77,34 +78,38 @@ miniConflict xs ys =
            xs1 = drop k xs
 -}
 
+prioritise :: [(Prio,a)] -> [(Prio,a)]
+prioritise ps =
+  let (chks,othr) = partition ((Check ==) . fst) ps
+  in  chks ++ othr
+
 trySolve :: Bool -> H (Maybe Bool)
 trySolve quiet = H (\env ->
-  do ws <- reverse `fmap` readIORef (waits env)
+  do ws <- (prioritise . reverse) `fmap` readIORef (waits env)
      verbose $ "== Try solve with " ++ show (length ws) ++ " waits =="
-     b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws ])
+     b <- solveBit (sat env) (here env : reverse [ nt p | (_,(p,_,_)) <- ws ])
      if b then
        do putStrLn "Counterexample!"
           return (Just True)
       else
         let mini =
               do qs' <- M.conflict (sat env)
-                 let qs = [ Lit q | q <- qs' ] ++ [ p | (p,_,_) <- ws, p == tt ]
+                 let qs = [ Lit q | q <- qs' ] ++ [ p | (_,(p,_,_)) <- ws, p == tt ]
                  if null qs then
                    do putStrLn "Contradiction!"
                       return (Just False)
                   else
-                   let p0:_ = [ p | (p,_,_) <- ws, p `elem` qs ] in
+                   let p0:_ = [ p | (_,(p,_,_)) <- ws, p `elem` qs ] in
                      do verbose ("Conflict: " ++ show (length qs))
-                        -- this is not always great when there are checks
-                        -- around that contain the counterex:
-                        -- b <- solveBit (sat env) (here env : reverse [ nt p | (p,_,_) <- ws, p `elem` qs, p /= p0 ])
+                        -- this can take a lot of time and doesn't necessarily help:
+                        -- b <- solveBit (sat env) (here env : reverse [ nt p | (_,(p,_,_)) <- ws, p `elem` qs, p /= p0 ])
                         b <- return True
                         if b then
-                          let (p,unq,H h):_ = [ t | t@(p,_,_) <- ws, p `elem` qs ] in
-                            do let ws' = [ t | t@(_,unq',_) <- reverse ws, unq /= unq' ]
+                          let (prio,(p,unq,H h)):_ = [ t | t@(_,(p,_,_)) <- ws, p `elem` qs ] in
+                            do let ws' = [ t | t@(_,(_,unq',_)) <- reverse ws, unq /= unq' ]
                                verbose ("Points: " ++ show (length ws'))
                                writeIORef (waits env) ws'
-                               verbose "Expanding..."
+                               verbose $ "Expanding " ++ show prio ++ "..."
                                h env{ here = p }
                                verbose "Expansion done"
                                return Nothing
@@ -185,10 +190,10 @@ inContext c h = inContext' c h
 inContext' :: Bit -> H a -> H a
 inContext' c (H m) = H (\env -> m env{ here = c })
 
-later :: Unique -> H () -> H ()
-later unq h = H (\env ->
+later :: Prio -> Unique -> H () -> H ()
+later prio unq h = H (\env ->
   do ws <- readIORef (waits env)
-     writeIORef (waits env) ((here env, unq, h):ws)
+     writeIORef (waits env) ((prio, (here env, unq, h)):ws)
   )
 
 {-
@@ -207,7 +212,7 @@ check h@(H m) = H (\env ->
 check :: H () -> H ()
 check h =
   do u <- io newUnique
-     later u h
+     later Check u h
 
 must :: Bit -> H () -> H ()
 must c h =
@@ -584,7 +589,7 @@ ifForce th@(Delay inp unq ref) h =
                           Just a <- peek th
                           inContext c (h a)
                      if inp then
-                       later unq $ poke th
+                       later DelayedThunk unq $ poke th
                       else
                        return ()
        Right a -> h a
