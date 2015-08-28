@@ -7,7 +7,7 @@ import HBMC.Monadic
 
 import Tip.Pretty
 
-import Data.Map (Map,(!))
+import Data.Map (Map)
 import qualified Data.Map as M
 
 data Static a =
@@ -99,7 +99,7 @@ liveMon env (act:acts) =
 
        _ -> liveMon env acts
 
-livePred :: Ord a => LiveEnv a -> Pred a -> Bit
+livePred :: (Show a,Ord a) => LiveEnv a -> Pred a -> Bit
 livePred env (v :=? x) = (pred_map (dynamic env) ! v) =? x
 
 liveSimp :: (Show a,Ord a) => LiveEnv a -> Simp a -> LiveData a
@@ -107,3 +107,6 @@ liveSimp env (Con tc k ss) = conData (lkup_desc (static env) tc) k (map (liveSim
 liveSimp env (Proj i x)    = let v:_ = drop i (proj_map (dynamic env) ! x) in v
 liveSimp env (Var x)       = var_map (dynamic env) ! x
 
+(!) :: (Show k,Show v,Ord k) => Map k v -> k -> v
+m ! k = case M.lookup k m of Just v  -> v
+                             Nothing -> error $ "Cannot find: " ++ show k

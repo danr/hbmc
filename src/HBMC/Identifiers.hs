@@ -130,6 +130,7 @@ instance Name Var where
   fresh        = refresh (Var "")
   freshNamed x = refresh (Var x)
   refreshNamed x s = freshNamed (varStr' s ++ x)
+  refresh (Refresh v _) = refresh v
   refresh v    = Refresh v `fmap` fresh
   getUnique    = varMax
 
