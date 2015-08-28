@@ -1,15 +1,21 @@
+{-# LANGUAGE RecordWildCards #-}
 module Main where
+
+import qualified HBMC.Params as Params
+import HBMC.Params (Params,getParams)
 
 import Tip.Pretty
 import Tip.Pretty.SMT ()
 import Tip.Pretty.Haskell
 
-import Tip.HaskellFrontend
+import qualified Tip.HaskellFrontend as Tip
+import Tip.HaskellFrontend hiding (Params)
 import Tip.Haskell.Rename
 import Tip.Haskell.Translate (addImports,HsId)
 import Tip.Haskell.Repr as H
 
 import Tip.Core
+import Tip.Utils
 
 import Tip.Fresh
 
@@ -50,8 +56,8 @@ import Text.Show.Pretty (ppShow)
 
 type Translated = ([Datatype Var],[Func Var],[Prop Var])
 
-translate :: Theory Var -> WriterT [String] Fresh Translated
-translate thy0 =
+translate :: Params -> Theory Var -> WriterT [String] Fresh Translated
+translate params thy0 =
   do [thy1] <-
         map addBoolToTheory <$> lift
             (runPasses
@@ -78,12 +84,16 @@ translate thy0 =
      thy <- lift $ do let (dis,_) = unzip (map dataInfo (thy_datatypes thy2))
                       projectPatterns (concat dis) thy2
 
+     let fn_comps = map (fmap func_name) (components defines uses (thy_funcs thy))
+
      fn_decls <- sequence
          [ do let e = func_body fn
-              -- es <- lift $ sequence [ toExpr e ]
-              es <- lift $ mergeTrace (scope thy) e
+              es <- lift $
+                if Params.merge params
+                    then mergeTrace (scope thy) e
+                    else sequence [toExpr e]
               tell (ppRender fn:map (ppRender . ren) (e:es))
-              lift (trFunction fn{ func_body = last es })
+              lift (trFunction params fn_comps fn{ func_body = last es })
          | fn <- thy_funcs thy
          ]
 
@@ -99,24 +109,24 @@ translate thy0 =
 
      return (thy_datatypes thy', fn_decls, props)
 
-runLive :: Translated -> IO ()
-runLive (ds,fs,p:_) = liveProp Verbose static (fmap pp_var p)
+runLive :: Params -> Translated -> IO ()
+runLive p (ds,fs,prop:_) = liveProp p static (fmap pp_var prop)
   where
   pp_var = PPVar
 
-  lkup_data = dataDescs (map (fmap pp_var) ds)
+  lkup_data = dataDescs (Params.delay_all_datatypes p) (map (fmap pp_var) ds)
   static    = liveFuncs lkup_data (map (fmap pp_var) fs)
 
-compile :: Translated -> Fresh String
-compile (ds,fs,props) =
+compile :: Params -> Translated -> Fresh String
+compile p (ds,fs,props) =
  do let main_decls =
-           [ H.funDecl (Var "main") [] (trProp Verbose p) | p <- props ]
+           [ H.funDecl (Var "main") [] (trProp p prop) | prop <- props ]
 
     let fn_decls = [ trFunc f | f <- fs ]
 
     let rec_dts = recursiveDatatypes ds
 
-    dt_decls <- mapM (trDatatype rec_dts False) ds
+    dt_decls <- mapM (trDatatype rec_dts (Params.delay_all_datatypes p)) ds
 
     let decls = concat dt_decls ++ fn_decls ++ take 1 main_decls
 
@@ -133,24 +143,25 @@ data Target = Live | Compile
 
 main :: IO ()
 main = do
-    f:es <- getArgs
-    thy0 <- either error renameTheory <$> readHaskellOrTipFile f defaultParams
-
-    let target = Compile
+    params <- getParams
+    thy0 <- either error renameTheory <$>
+      readHaskellOrTipFile
+        (Params.file params)
+        Tip.defaultParams{ Tip.prop_names = Params.prop_names params }
 
     let h :: Translated -> Fresh (IO ())
-        h tr = case target of
-                 Live    -> return (runLive tr)
-                 Compile -> do c <- compile tr
-                               return $
-                                 do writeFile "Tmp.hs" c
-                                    rawSystem "ghc" ["Tmp.hs"]
-                                    rawSystem "./Tmp" []
-                                    return ()
+        h tr = case Params.compile params of
+                 False -> return (runLive params tr)
+                 True  -> do c <- compile params tr
+                             return $
+                               do writeFile "Tmp.hs" c
+                                  rawSystem "ghc" ["Tmp.hs"]
+                                  rawSystem "./Tmp" []
+                                  return ()
 
-    let (m,dbg) = freshPass (runWriterT . (lift . h <=< translate)) thy0
+    let (m,dbg) = freshPass (runWriterT . (lift . h <=< translate params)) thy0
 
-    putStrLn (unlines dbg)
+    when (Params.debug params) (putStrLn (unlines dbg))
 
     m
 

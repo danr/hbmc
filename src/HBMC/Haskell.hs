@@ -3,15 +3,16 @@ module HBMC.Haskell where
 import HBMC.Monadic
 import HBMC.Identifiers hiding (Var,Con,Proj)
 import HBMC.Identifiers (Var())
+import HBMC.Params
 
 import Tip.Haskell.Repr as H
 
 -- Translation from constraint-generation dsl to Haskell
 
 trFunc :: Func Var -> Decl Var
-trFunc (Func f as r _r_ty chk b) =
+trFunc (Func f as r _r_ty mem chk b) =
   funDecl f [] $
-    Apply (api "nomemo")
+    Apply (api (if mem then "memo" else "nomemo"))
       [ String f
       , Lam [nestedTupPat (map VarPat as),VarPat r] (maybe_check (trMon b))
       ]
@@ -20,13 +21,15 @@ trFunc (Func f as r _r_ty chk b) =
     | chk = H.Apply (api "check") . return
     | otherwise = id
 
-trProp :: Verbosity -> Prop Var -> Expr Var
-trProp v (Prop vs m) =
+trProp :: Params -> Prop Var -> Expr Var
+trProp p (Prop vs m) =
   Apply (api "run")
     [trMon m `thenExpr`
        (H.Apply (api "solveAndSee")
-          [ var $ prelude $ case v of Quiet -> "True";  Verbose -> "False"
-          , var $ prelude $ case v of Quiet -> "False"; Verbose -> "True"
+          [ var $ prelude $ show (conflict_minimzation p)
+          , var $ prelude $ show (prio p)
+          , var $ prelude $ show (quiet p)
+          , var $ prelude $ show (not (quiet p))
           , tagShow vs
           ])]
 

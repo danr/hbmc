@@ -13,6 +13,7 @@ import HBMC.Identifiers hiding (Con,Proj,Var)
 import HBMC.Identifiers (Var())
 
 import HBMC.Bool
+import HBMC.Params
 import Tip.Passes
 
 import Data.Generics.Geniplate
@@ -32,7 +33,7 @@ import Debug.Trace
 
 data Verbosity = Quiet | Verbose deriving (Eq,Ord,Show,Read)
 
-data Func a = Func a [a] a a Bool (Mon a)
+data Func a = Func a [a] a a Bool Bool (Mon a)
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data Prop a = Prop [a] (Mon a)
@@ -130,15 +131,20 @@ terminates f as e =
     = needle == x
   chase _ _ = False
 
-trFunction :: Function Var -> Fresh (Func Var)
-trFunction Function{..} =
+trFunction :: Params -> [Component Var] -> Function Var -> Fresh (Func Var)
+trFunction p fn_comps Function{..} =
   do r <- fresh
+     let (rec,mut_rec) = case lookupComponent func_name fn_comps of
+                           Just (Rec xs) -> (True,length xs > 1)
+                           _             -> (False,False)
      let args = map lcl_name func_args
-     let chk = not (terminates func_name args func_body)
+     let chk = not (terminates func_name args func_body) || mut_rec
+     let mem = memo p && rec
      body <- trExpr func_body (Just r)
-     return (Func func_name args r (tyConOf func_res) chk (simpMon body))
-       {- let tt = modTyCon wrapData . trType
-         in H.TySig func_name
+     return (Func func_name args r (tyConOf func_res) mem chk (simpMon body))
+
+     {- let tt = modTyCon wrapData . trType
+        in H.TySig func_name
               [ H.TyCon s [H.TyVar tv]
               | tv <- func_tvs
               , s <- [api "Equal",prelude "Ord",api "Constructive"]

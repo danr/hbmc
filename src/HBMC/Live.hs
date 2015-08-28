@@ -2,6 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module HBMC.Live where
 
+import HBMC.Params
 import HBMC.Lib     hiding (Con,Call)
 import HBMC.Monadic
 
@@ -32,25 +33,25 @@ data LiveEnv a =
 newEnv :: Ord a => Static a -> [(a,LiveData a)] -> LiveEnv a
 newEnv st vs = LiveEnv st (Dynamic (M.fromList vs) M.empty M.empty)
 
-liveProp :: forall a . (Show a,PrettyVar a,Ord a) => Verbosity -> Static a -> Prop a -> IO ()
-liveProp v st (Prop vs m) =
+liveProp :: forall a . (Show a,PrettyVar a,Ord a) => Params -> Static a -> Prop a -> IO ()
+liveProp p st (Prop vs m) =
   run $ do dyn <- liveMon (newEnv st []) m
-           let quiet = v == Quiet
            solveAndSee
-             (quiet) (not quiet)
+             (conflict_minimzation p) (prio p)
+             (quiet p) (not (quiet p))
              (Tagged [ (varStr v,var_map dyn ! v) | v <- vs ])
 
 liveFuncs :: (Show a,PrettyVar a,Ord a) => (a -> LiveDesc a) -> [Func a] -> Static a
 liveFuncs lkup_desc funcs = st
   where
-  tbl         = [ (name,liveFunc st f) | f@(Func name _ _ _ _ _) <- funcs ]
+  tbl         = [ (name,liveFunc st f) | f@(Func name _ _ _ _ _ _) <- funcs ]
   st          = Static lkup_desc lkup_func
   lkup_func x = case lookup x tbl of Just func -> func
                                      Nothing   -> error $ "Function not found:" ++ varStr x
 
 liveFunc :: (Show a,PrettyVar a,Ord a) => Static a -> Func a -> [LiveData a] -> H (LiveData a)
-liveFunc st (Func fname as_vars r_var r_ty chk m) =
-  (if chk then memoWith else nomemoWith)
+liveFunc st (Func fname as_vars r_var r_ty mem chk m) =
+  (if mem then memoWith else nomemoWith)
     (newData False (lkup_desc st r_ty))
     (varStr fname) $
       \ as r ->

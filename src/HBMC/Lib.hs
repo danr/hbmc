@@ -83,9 +83,9 @@ prioritise ps =
   let (chks,othr) = partition ((Check ==) . fst) ps
   in  chks ++ othr
 
-trySolve :: Bool -> H (Maybe Bool)
-trySolve quiet = H (\env ->
-  do ws <- (prioritise . reverse) `fmap` readIORef (waits env)
+trySolve :: Bool -> Bool -> Bool -> H (Maybe Bool)
+trySolve confl_min prio quiet = H (\env ->
+  do ws <- ((if prio then prioritise else id) . reverse) `fmap` readIORef (waits env)
      verbose $ "== Try solve with " ++ show (length ws) ++ " waits =="
      b <- solveBit (sat env) (here env : reverse [ nt p | (_,(p,_,_)) <- ws ])
      if b then
@@ -102,8 +102,10 @@ trySolve quiet = H (\env ->
                    let p0:_ = [ p | (_,(p,_,_)) <- ws, p `elem` qs ] in
                      do verbose ("Conflict: " ++ show (length qs))
                         -- this can take a lot of time and doesn't necessarily help:
-                        -- b <- solveBit (sat env) (here env : reverse [ nt p | (_,(p,_,_)) <- ws, p `elem` qs, p /= p0 ])
-                        b <- return True
+                        b <- if confl_min then
+                               solveBit (sat env) (here env : reverse [ nt p | (_,(p,_,_)) <- ws, p `elem` qs, p /= p0 ])
+                             else
+                               return True
                         if b then
                           let (prio,(p,unq,H h)):_ = [ t | t@(_,(p,_,_)) <- ws, p `elem` qs ] in
                             do let ws' = [ t | t@(_,(_,unq',_)) <- reverse ws, unq /= unq' ]
@@ -147,20 +149,20 @@ trySolve quiet = H (\env ->
                    find (reverse ws)
 -}
 
-solve' :: Bool -> H () -> H Bool
-solve' quiet h =
+solve' :: Bool -> Bool -> Bool -> H () -> H Bool
+solve' confl_min prio quiet h =
   do h
-     mb <- trySolve quiet
+     mb <- trySolve confl_min prio quiet
      case mb of
-       Nothing -> solve' quiet h
+       Nothing -> solve' confl_min prio quiet h
        Just b  -> return b
 
 solve :: H Bool
-solve = solve' False (return ())
+solve = solve' False True False (return ())
 
-solveAndSee :: (Value a,Show (Type a),IncrView a) => Bool -> Bool -> a -> H ()
-solveAndSee quiet incremental see =
-  do b <- solve' quiet (if incremental then io . putStrLn =<< incrView see else return ())
+solveAndSee :: (Value a,Show (Type a),IncrView a) => Bool -> Bool -> Bool -> Bool -> a -> H ()
+solveAndSee confl_min prio quiet incremental_view see =
+  do b <- solve' confl_min prio quiet (if incremental_view then io . putStrLn =<< incrView see else return ())
      if b then
        do get see >>= (io . print)
      else
