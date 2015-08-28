@@ -93,12 +93,10 @@ nullAct (Guard g p m)        = all nullAct m
 nullAct _ = False
 
 collapseAct :: Eq a => Act a -> Act a -> Maybe (Act a)
-{-
 collapseAct
   (Guard When a m)
   (Guard When b n)
   | m == n = Just (Guard When (a ++ b) m)
--}
 
 collapseAct
   (Guard g1 a m)
