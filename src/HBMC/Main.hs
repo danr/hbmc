@@ -65,6 +65,7 @@ translate thy0 =
               , BoolOpToIf
               , CommuteMatch
               , SimplifyGently
+              , BoolOpToIf
               , CommuteMatch
               , CSEMatch
               , TypeSkolemConjecture
