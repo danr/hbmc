@@ -2,5 +2,5 @@
 
     ./install.sh
 
-    ./hbmc examples/RegExp.hs
+    hbmc examples/RegExp.hs
 
