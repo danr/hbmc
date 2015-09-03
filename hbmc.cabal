@@ -20,7 +20,9 @@ library
                        mtl >=2.1,
                        containers >=0.5,
                        transformers >=0.3,
-                       minisat >=0.1
+                       minisat >=0.1,
+                       pretty-show >=1.6,
+                       tip-lib == 0.1.2
 
 executable hbmc
   main-is:             HBMC/Main.hs

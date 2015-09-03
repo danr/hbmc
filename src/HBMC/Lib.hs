@@ -13,6 +13,8 @@ import System.IO.Unsafe
 
 import Debug.Trace
 
+import Text.Show.Pretty (parseValue,valToStr)
+
 --------------------------------------------------------------------------------
 
 data Prio = Check | DelayedThunk
@@ -989,7 +991,7 @@ instance IncrView a => IncrView (Tagged a) where
        return (x ++ ": " ++ xe' ++ "\n" ++ r')
 
 instance Show a => Show (Tagged a) where
-  show (Tagged xs) = unlines [ x ++ ": " ++ show xe | (x,xe) <- xs ]
+  show (Tagged xs) = unlines [ x ++ ": " ++ prettify (show xe) | (x,xe) <- xs ]
 
 instance Value a => Value (Tagged a) where
   type Type (Tagged a) = Tagged (Type a)
@@ -1086,3 +1088,18 @@ proj8 (_, (_, (_, (_, (_, (_, (_, (Just x, _)))))))) = x
 unJust :: Maybe a -> a
 unJust (Just x) = x
 unJust Nothing  = error "unJust"
+
+-- Prettify
+
+prettify :: String -> String
+prettify s = maybe s (undo . valToStr) (parseValue (esc s))
+  where
+  esc ('(':'_':s) = '(':'d':esc s
+  esc (' ':'_':s) = ' ':'d':esc s
+  esc (x:xs) = x:esc xs
+  esc [] = []
+
+  undo ('(':'d':s) = '(':'_':undo s
+  undo (' ':'d':s) = ' ':'_':undo s
+  undo (x:xs) = x:undo xs
+  undo [] = []
