@@ -188,3 +188,26 @@ addMaybesToTheory vs thy@Theory{..} = thy { thy_datatypes = maybe_decls ++ thy_d
     | t <- usort [ t | System "Maybe" (Just t) <- vs ]
     ]
 
+sk_nat = System "Nat" Nothing
+sk_zero = System "Z" Nothing
+sk_succ = System "S" Nothing
+
+skolemTypesToNat :: Theory Var -> Theory Var
+skolemTypesToNat thy@Theory{..} =
+  transformBi repl
+  (thy { thy_datatypes = nat_decl : thy_datatypes, thy_sigs = [] })
+  where
+  repl :: Type Var -> Type Var
+  repl (TyCon sk []) | sk `elem` sorts = TyCon sk_nat []
+  repl t0 = t0
+
+  sorts :: [Var]
+  sorts = usort [ n | Sort n [] <- thy_sorts ]
+
+  nat_decl =
+    Datatype sk_nat []
+      [ Constructor sk_zero (System "is-Z" Nothing) []
+      , Constructor sk_succ (System "is-S" Nothing) [(System "p" Nothing,TyCon sk_nat [])]
+      ]
+
+

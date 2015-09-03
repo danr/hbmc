@@ -59,7 +59,7 @@ type Translated = ([Datatype Var],[Func Var],[Prop Var])
 translate :: Params -> Theory Var -> WriterT [String] Fresh Translated
 translate params thy0 =
   do [thy1] <-
-        map addBoolToTheory <$> lift
+        map (skolemTypesToNat . addBoolToTheory) <$> lift
             (runPasses
               [ SimplifyAggressively
               , RemoveNewtype
