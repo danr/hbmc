@@ -110,6 +110,7 @@ translate params thy0 =
      return (thy_datatypes thy', fn_decls, props)
 
 runLive :: Params -> Translated -> IO ()
+runLive p (_,_,[])       = error "Needs at least one property!"
 runLive p (ds,fs,prop:_) = liveProp p static (fmap pp_var prop)
   where
   pp_var = PPVar
