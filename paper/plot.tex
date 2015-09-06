@@ -1,0 +1,39 @@
+\documentclass{article}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\begin{document}
+
+\begin{tikzpicture}
+\begin{axis}[
+  xlabel={hbmc with prio},
+  ylabel={hbmc without prio},
+  enlargelimits=false,
+  axis lines=left,
+  grid = major,
+  xmode = log,
+  ymode = log,
+  xmin = 0,
+  xmax = 60,
+  ymin = 0,
+  ymax = 60,
+  grid style={dashed, gray!30},
+  width=8cm,
+  height=8cm,
+]
+
+\addplot+[
+	only marks,
+	scatter,
+	mark size=1pt,
+]
+table[x=x, y=y]
+	{lr};
+
+\draw[-, gray!30] (-5,-5) -- (5,5);
+
+\end{axis}
+\end{tikzpicture}
+
+\end{document}
+
