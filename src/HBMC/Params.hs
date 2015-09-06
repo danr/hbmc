@@ -7,7 +7,6 @@ data Params =
   Params
     { file                 :: String
     , compile              :: Bool
-    , prio                 :: Bool
     , merge                :: Bool
     , memo                 :: Bool
     , quiet                :: Bool
@@ -23,7 +22,6 @@ defParams =
   Params
     { file                 = ""      &= argPos 0 &= typFile
     , compile              = False   &= name "g" &= help "Compile and run"
-    , prio                 = True    &= name "p" &= help "Prioritise checks over delays (on)"
     , merge                = True    &= name "f" &= help "Merge function calls          (on)"
     , memo                 = True    &= name "m" &= help "Memoise recursive functions   (on)"
     , quiet                = False   &= name "q" &= help "Be quiet"

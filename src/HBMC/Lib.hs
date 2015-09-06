@@ -17,14 +17,18 @@ import Text.Show.Pretty (parseValue,valToStr)
 
 --------------------------------------------------------------------------------
 
-data Prio = Check | DelayedThunk
-  deriving (Eq,Ord,Show)
+data Source = Check | Input
+  deriving (Eq,Ord)
+
+instance Show Source where
+  show Check = "check"
+  show Input = "input"
 
 data Env =
   Env
   { sat    :: Solver
   , here   :: Bit
-  , waits  :: IORef [(Prio,(Bit,Unique,H ()))]
+  , waits  :: IORef [(Source,(Bit,Unique,H ()))]
   }
 
 newtype H a = H (Env -> IO a)
@@ -80,14 +84,9 @@ miniConflict xs ys =
            xs1 = drop k xs
 -}
 
-prioritise :: [(Prio,a)] -> [(Prio,a)]
-prioritise ps =
-  let (chks,othr) = partition ((Check ==) . fst) ps
-  in  chks ++ othr
-
-trySolve :: Bool -> Bool -> Bool -> H (Maybe Bool)
-trySolve confl_min prio quiet = H (\env ->
-  do ws <- ((if prio then prioritise else id) . reverse) `fmap` readIORef (waits env)
+trySolve :: Bool -> Bool -> H (Maybe Bool)
+trySolve confl_min quiet = H (\env ->
+  do ws <- reverse `fmap` readIORef (waits env)
      verbose $ "== Try solve with " ++ show (length ws) ++ " waits =="
      b <- solveBit (sat env) (here env : reverse [ nt p | (_,(p,_,_)) <- ws ])
      if b then
@@ -109,11 +108,11 @@ trySolve confl_min prio quiet = H (\env ->
                              else
                                return True
                         if b then
-                          let (prio,(p,unq,H h)):_ = [ t | t@(_,(p,_,_)) <- ws, p `elem` qs ] in
+                          let (source,(p,unq,H h)):_ = [ t | t@(_,(p,_,_)) <- ws, p `elem` qs ] in
                             do let ws' = [ t | t@(_,(_,unq',_)) <- reverse ws, unq /= unq' ]
                                verbose ("Points: " ++ show (length ws'))
                                writeIORef (waits env) ws'
-                               verbose $ "Expanding " ++ show prio ++ "..."
+                               verbose $ "Expanding " ++ show source ++ "..."
                                h env{ here = p }
                                verbose "Expansion done"
                                return Nothing
@@ -151,20 +150,20 @@ trySolve confl_min prio quiet = H (\env ->
                    find (reverse ws)
 -}
 
-solve' :: Bool -> Bool -> Bool -> H () -> H Bool
-solve' confl_min prio quiet h =
+solve' :: Bool -> Bool -> H () -> H Bool
+solve' confl_min quiet h =
   do h
-     mb <- trySolve confl_min prio quiet
+     mb <- trySolve confl_min quiet
      case mb of
-       Nothing -> solve' confl_min prio quiet h
+       Nothing -> solve' confl_min quiet h
        Just b  -> return b
 
 solve :: H Bool
-solve = solve' False True False (return ())
+solve = solve' False False (return ())
 
-solveAndSee :: (Value a,Show (Type a),IncrView a) => Bool -> Bool -> Bool -> Bool -> a -> H ()
-solveAndSee confl_min prio quiet incremental_view see =
-  do b <- solve' confl_min prio quiet (if incremental_view then io . putStrLn =<< incrView see else return ())
+solveAndSee :: (Value a,Show (Type a),IncrView a) => Bool -> Bool -> Bool -> a -> H ()
+solveAndSee confl_min quiet incremental_view see =
+  do b <- solve' confl_min quiet (if incremental_view then io . putStrLn =<< incrView see else return ())
      if b then
        do get see >>= (io . print)
      else
@@ -194,10 +193,10 @@ inContext c h = inContext' c h
 inContext' :: Bit -> H a -> H a
 inContext' c (H m) = H (\env -> m env{ here = c })
 
-later :: Prio -> Unique -> H () -> H ()
-later prio unq h = H (\env ->
+later :: Source -> Unique -> H () -> H ()
+later source unq h = H (\env ->
   do ws <- readIORef (waits env)
-     writeIORef (waits env) ((prio, (here env, unq, h)):ws)
+     writeIORef (waits env) ((source, (here env, unq, h)):ws)
   )
 
 {-
@@ -601,7 +600,7 @@ ifForce th@(Delay inp unq ref) h =
                           Just a <- peek th
                           inContext c (h a)
                      if inp then
-                       later DelayedThunk unq $ poke th
+                       later Input unq $ poke th
                       else
                        return ()
        Right a -> h a

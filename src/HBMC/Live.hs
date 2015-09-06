@@ -37,7 +37,7 @@ liveProp :: forall a . (Show a,PrettyVar a,Ord a) => Params -> Static a -> Prop 
 liveProp p st (Prop vs m) =
   run $ do dyn <- liveMon (newEnv st []) m
            solveAndSee
-             (conflict_minimzation p) (prio p)
+             (conflict_minimzation p)
              (quiet p) (not (quiet p))
              (Tagged [ (varStr v,var_map dyn ! v) | v <- vs ])
 

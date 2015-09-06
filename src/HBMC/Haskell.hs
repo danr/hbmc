@@ -27,7 +27,6 @@ trProp p (Prop vs m) =
     [trMon m `thenExpr`
        (H.Apply (api "solveAndSee")
           [ var $ prelude $ show (conflict_minimzation p)
-          , var $ prelude $ show (prio p)
           , var $ prelude $ show (quiet p)
           , var $ prelude $ show (not (quiet p))
           , tagShow vs
