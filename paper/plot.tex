@@ -4,36 +4,74 @@
 \usepackage{pgfplotstable}
 \begin{document}
 
+\newcommand{\scatterplot}[4]{
+
 \begin{tikzpicture}
 \begin{axis}[
-  xlabel={hbmc with prio},
-  ylabel={hbmc without prio},
+  xlabel={#1},
+  ylabel={#2},
   enlargelimits=false,
   axis lines=left,
   grid = major,
   xmode = log,
   ymode = log,
-  xmin = 0,
+  xmin = #4,
   xmax = 60,
-  ymin = 0,
+  ymin = #4,
   ymax = 60,
   grid style={dashed, gray!30},
-  width=8cm,
-  height=8cm,
+  width=10cm,
+  height=10cm,
 ]
 
 \addplot+[
 	only marks,
-	scatter,
+%	scatter,
 	mark size=1pt,
+    black,
 ]
 table[x=x, y=y]
-	{lr};
+	{#3};
 
-\draw[-, gray!30] (-5,-5) -- (5,5);
+\draw[-, gray!30] (-7,-7) -- (5,5);
 
 \end{axis}
 \end{tikzpicture}
+}
+
+% \scatterplot{feat}{hbmc}{feat-vs-hbmc}{0.002}
+
+% \scatterplot{Lazy SmallCheck}{hbmc}{lazy-vs-hbmc}{0.007}
+
+% \scatterplot{hbmc without memoisation}{hbmc with memoisation}{hbmc-wwo-memo}{0.01}
+
+\begin{tikzpicture}
+\begin{axis}[
+  ylabel=solved problems (cumulative),
+  xlabel={after time [s]},
+  axis lines=left,
+  grid = major,
+  xmin = -1,
+  xmax = 1.779,
+  ymin = 0,
+  ymax = 800,
+  xtick = {-1,-0.522878,0,0.522878,1,1.522878},
+  xticklabels = {0.1,0.3,1,3,10,30},
+  grid style={dashed, gray!40},
+  width=12cm,
+  height=12cm,
+  legend pos=south east,
+  legend style={
+%    legend columns=-1,
+    cells={anchor=west},
+  },
+]
+\addplot [black,mark=o,      mark size=1.8pt,hist={cumulative,bins=100,handler/.style={only marks}}] table [y index=0] {hbmc-log};
+\addplot [red  ,mark=x,      mark size=1.8pt,hist={cumulative,bins=100,handler/.style={only marks}}] table [y index=0] {feat-log};
+\addplot [blue ,mark=diamond,mark size=1.8pt,hist={cumulative,bins=100,handler/.style={only marks}}] table [y index=0] {lazysc-log};
+\legend{hbmc,feat,LazySmallCheck}
+\end{axis}
+\end{tikzpicture}\hfill
 
 \end{document}
 
