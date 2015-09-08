@@ -1,8 +1,9 @@
 module Rec where
 
-import Tip.DSL
+import Tip
 
 f :: [Bool] -> Bool
+f [] = True
 f xs = g (f (h xs))
 
 h :: [Bool] -> [Bool]
@@ -13,5 +14,5 @@ g :: Bool -> Bool
 g False = True
 g True = False
 
-prop xs = f xs =:= False
+prop xs = f xs === False
 

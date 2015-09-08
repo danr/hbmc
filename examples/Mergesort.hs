@@ -3,9 +3,9 @@ module Mergesort(module Mergesort,module Nat) where
 
 import Prelude (Bool(..),undefined,Ordering(..), (&&), (||), otherwise, not, fmap, Eq(..), Ord, fst, snd)
 
-import HBMC
+import Tip
 
-import Nat (Nat(..),(+),(*),(===))
+import Nat (Nat(..),(+),(*),(=:=))
 
 -- import Test.QuickCheck hiding ((==>),(===))
 -- import GHC.Types
@@ -31,7 +31,7 @@ x < y = case y of
     Z   -> True
     S n -> n < m
 
-prop_lt x = x < Z =:= False
+prop_lt x = x < Z === False
 
 count :: Nat -> [Nat] -> Nat
 count n [] = Z
@@ -71,16 +71,16 @@ odds (_:y:xs) = y:odds xs
 -- FLAGS: cmerge
 merge :: [Nat] -> [Nat] -> [Nat]
 merge (x:xs) (y:ys)
-    | x <= y    = x:label [] (merge xs (y:ys))
-    | otherwise = y:label [] (merge (x:xs) ys)
+    | x <= y    = x:(merge xs (y:ys))
+    | otherwise = y:(merge (x:xs) ys)
 merge (x:xs) [] = x:xs
 merge []     [] = []
 merge [] ys = ys
 
 prop_merge_comm xs ys zs =
-  merge xs ys =:= merge ys xs ==>
-  merge xs zs =:= merge zs xs ==>
-  merge ys zs =:= merge zs ys
+  merge xs ys === merge ys xs ==>
+  merge xs zs === merge zs xs ==>
+  merge ys zs === merge zs ys
 
 ord :: [Nat] -> Bool
 ord (x:y:xs) = if x <= y then ord (y:xs) else False
@@ -103,19 +103,19 @@ allsmall n []     = True
 allsmall n (x:xs) = x < n && allsmall n xs
 
 {-
-assoc x xs ys zs = (xs ++ (ys ++ zs)) =:= ((xs ++ ys) ++ zs)
-               ==> ((x:xs) ++ (ys ++ zs)) =:= (((x:xs) ++ ys) ++ (zs :: [Bool]))
+assoc x xs ys zs = (xs ++ (ys ++ zs)) === ((xs ++ ys) ++ zs)
+               ==> ((x:xs) ++ (ys ++ zs)) === (((x:xs) ++ ys) ++ (zs :: [Bool]))
 
-assoc0 ys zs = [] ++ (ys ++ zs) =:= ([] ++ ys) ++ (zs :: [Bool])
+assoc0 ys zs = [] ++ (ys ++ zs) === ([] ++ ys) ++ (zs :: [Bool])
 -}
 
 {-
-pins y x xs = not (sorted xs) || sorted (insert x xs) =:= True
-          ==> sorted (x:xs) =:= True
-          ==> sorted (insert y (x:xs)) =:= True
+pins y x xs = not (sorted xs) || sorted (insert x xs) === True
+          ==> sorted (x:xs) === True
+          ==> sorted (insert y (x:xs)) === True
 -}
 
-pallsmall     xs = usorted (rev xs) =:= True ==> allsmall n1 xs =:= True ==> length xs <= n1 =:= True
+pallsmall     xs = usorted (rev xs) === True ==> allsmall n1 xs === True ==> length xs <= n1 === True
 
 unique :: [Nat] -> Bool
 unique []     = True
@@ -123,11 +123,11 @@ unique (x:xs) = if x `elem` xs then False else unique xs
 
 elem :: Nat -> [Nat] -> Bool
 x `elem` [] = False
-x `elem` (y:ys) = if x === y then True else x `elem` ys
+x `elem` (y:ys) = if x =:= y then True else x `elem` ys
 
 remove :: Nat -> [Nat] -> [Nat]
 remove x [] = []
-remove x (y:ys) = if x === y then ys else y:remove x ys
+remove x (y:ys) = if x =:= y then ys else y:remove x ys
 
 isort :: [Nat] -> [Nat]
 isort [] = []
@@ -171,13 +171,13 @@ qrev :: [a] -> [a] -> [a]
 qrev []     acc = acc
 qrev (x:xs) acc = qrev xs (x:acc)
 
-psorted      xs = sorted xs           =:= True ==> unique xs =:= True ==> length xs <= n3 =:= True
-psorted_rev  xs = sorted (rev xs)     =:= True ==> unique xs =:= True ==> length xs <= n3 =:= True
-psorted_qrev xs = sorted (qrev xs []) =:= True ==> unique xs =:= True ==> length xs <= n3 =:= True
+psorted      xs = sorted xs           === True ==> unique xs === True ==> length xs <= n3 === True
+psorted_rev  xs = sorted (rev xs)     === True ==> unique xs === True ==> length xs <= n3 === True
+psorted_qrev xs = sorted (qrev xs []) === True ==> unique xs === True ==> length xs <= n3 === True
 
-pusorted      xs = usorted xs           =:= True ==> length xs <= n25 =:= True
-pusorted_rev  xs = usorted (rev xs)     =:= True ==> length xs <= n9 =:= True
-pusorted_qrev xs = usorted (qrev xs []) =:= True ==> length xs <= n4 =:= True
+pusorted      xs = usorted xs           === True ==> length xs <= n25 === True
+pusorted_rev  xs = usorted (rev xs)     === True ==> length xs <= n9 === True
+pusorted_qrev xs = usorted (qrev xs []) === True ==> length xs <= n4 === True
 
 n0 = Z
 n1 = S n0
@@ -210,9 +210,9 @@ n27 = S n26
 n28 = S n27
 n29 = S n28
 
-#define INJ(sort,name,num) name xs ys = sort xs =:= sort ys ==> length xs <= num =:= False ==> xs =:= ys
-#define NUB(sort,name,num) name xs ys = sort xs =:= sort ys ==> length xs <= num =:= False ==> nub xs =:= xs ==> xs =:= ys
-#define UNQ(sort,name,num) name xs ys = sort xs =:= sort ys ==> length xs <= num =:= False ==> unique xs =:= True ==> xs =:= ys
+#define INJ(sort,name,num) name xs ys = sort xs === sort ys ==> length xs <= num === False ==> xs === ys
+#define NUB(sort,name,num) name xs ys = sort xs === sort ys ==> length xs <= num === False ==> nub xs === xs ==> xs === ys
+#define UNQ(sort,name,num) name xs ys = sort xs === sort ys ==> length xs <= num === False ==> unique xs === True ==> xs === ys
 
 INJ(msort,minj0,n0)
 INJ(msort,minj1,n1)
@@ -495,23 +495,23 @@ UNQ(isort,iunq29,n29)
 
 
 -- prop_cancel2 xs ys zs =
---         msort xs =:= zs
---      /\ msort ys =:= zs
---      /\ False =:= length xs <= five
---     ==> msort xs =:= xs
---      \/ msort ys =:= ys
---      \/ xs =:= ys
+--         msort xs === zs
+--      /\ msort ys === zs
+--      /\ False === length xs <= five
+--     ==> msort xs === xs
+--      \/ msort ys === ys
+--      \/ xs === ys
 
--- prop_msort_ord_not xs = ord (msort xs) =:= False
+-- prop_msort_ord_not xs = ord (msort xs) === False
 --
--- prop_msort_permutation_wrong1 xs x = count x xs <= five =:= False ==> count x xs =:= count (S x) (msort xs)
--- prop_msort_permutation_wrong2 xs x = count x xs <= five =:= False ==> count (S x) xs =:= count x (msort xs)
+-- prop_msort_permutation_wrong1 xs x = count x xs <= five === False ==> count x xs === count (S x) (msort xs)
+-- prop_msort_permutation_wrong2 xs x = count x xs <= five === False ==> count (S x) xs === count x (msort xs)
 
 
--- prop_atotal     a b = a <= b =:= True \/ b <= a =:= True
--- prop_atotal_not a b = a <= b =:= True /\ b <= a =:= True ==> True =:= False
+-- prop_atotal     a b = a <= b === True \/ b <= a === True
+-- prop_atotal_not a b = a <= b === True /\ b <= a === True ==> True === False
 --
--- -- prop_merge_ord      xs ys = ord xs =:= True  ==> ord ys =:= True  ==> ord (merge xs ys) =:= True
--- prop_merge_ord_not1 xs ys = ord xs =:= True  ==> ord ys =:= True  ==> ord (merge xs ys) =:= False
--- prop_merge_ord_not2 xs ys = ord xs =:= False ==> ord ys =:= True  ==> ord (merge xs ys) =:= True
--- prop_merge_ord_not3 xs ys = ord xs =:= True  ==> ord ys =:= False ==> ord (merge xs ys) =:= True
+-- -- prop_merge_ord      xs ys = ord xs === True  ==> ord ys === True  ==> ord (merge xs ys) === True
+-- prop_merge_ord_not1 xs ys = ord xs === True  ==> ord ys === True  ==> ord (merge xs ys) === False
+-- prop_merge_ord_not2 xs ys = ord xs === False ==> ord ys === True  ==> ord (merge xs ys) === True
+-- prop_merge_ord_not3 xs ys = ord xs === True  ==> ord ys === False ==> ord (merge xs ys) === True

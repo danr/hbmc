@@ -1,9 +1,8 @@
-{-# LANGUAGE OverlappingInstances,FlexibleInstances #-}
 module Kaleidoscope where
 
-import HBMC
+import Tip
 import Prelude hiding ((++))
-import Test.LazySmallCheck hiding ((==>))
+-- import Test.LazySmallCheck hiding ((==>))
 
 data Token
     = Butterfly
@@ -42,28 +41,28 @@ data VP = See NP | VP `VP_In` NP
   deriving (Show,Eq)
 
 linVP :: VP -> [Token]
-linVP (See np)      = [Saw]    ++         label 1 (linNP Obj np)
-linVP (VP_In vp np) = linVP vp ++ [In] ++ label 1 (linNP Obj np)
+linVP (See np)      = [Saw]    ++         linNP Obj np
+linVP (VP_In vp np) = linVP vp ++ [In] ++ linNP Obj np
 
 -- examples --
 
-ex1 s = linS s =:= [I,Saw,The,Butterfly,In,The,Kaleidoscope] ==> True =:= False
-
+-- ex1 s = linS s === [I,Saw,The,Butterfly,In,The,Kaleidoscope] ==> True === False
+--
 ex2 t1 t2 =
-        linS t1 =:= [I,Saw,The,Butterfly,In,The,Kaleidoscope]
-    ==> linS t2 =:= [I,Saw,The,Butterfly,In,The,Kaleidoscope]
-    ==> t1 =:= t2
+        linS t1 === [I,Saw,The,Butterfly,In,The,Kaleidoscope]
+    ==> linS t2 === [I,Saw,The,Butterfly,In,The,Kaleidoscope]
+    ==> t1 === t2
 
-ex3 t1 t2 = linS t1 =:= linS t2 ==> t1 =:= t2
+-- ex3 s t1 t2 = s === linS t1 ==> linS t1 === linS t2 ==> t1 === t2
 
-lscex1 s = neg (lift (linS s == [I,Saw,The,Butterfly,In,The,Kaleidoscope]))
-
-lscex2 t1 t2 =
-           lift (linS t1 == [I,Saw,The,Butterfly,In,The,Kaleidoscope])
-      *=>* lift (linS t2 == [I,Saw,The,Butterfly,In,The,Kaleidoscope])
-      *=>* lift (t1 == t2)
-
-lscex3 t1 t2 = lift (linS t1 == linS t2) *=>* lift (t1 == t2)
+-- lscex1 s = neg (lift (linS s == [I,Saw,The,Butterfly,In,The,Kaleidoscope]))
+--
+-- lscex2 t1 t2 =
+--            lift (linS t1 == [I,Saw,The,Butterfly,In,The,Kaleidoscope])
+--       *=>* lift (linS t2 == [I,Saw,The,Butterfly,In,The,Kaleidoscope])
+--       *=>* lift (t1 == t2)
+--
+-- lscex3 t1 t2 = lift (linS t1 == linS t2) *=>* lift (t1 == t2)
 
 -- append --
 

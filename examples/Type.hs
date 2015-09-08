@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternGuards #-}
 module Type where
 
-import HBMC
+import Tip
 import Prelude hiding ((&&))
 
 data Expr = App Expr Expr Ty | Lam Expr | Var Nat
@@ -25,30 +25,30 @@ False && _ = False
 
 nf :: Expr -> Bool
 nf (App Lam{} _ _) = False
-nf (App e x _) = label 1 (nf e) && nf x
-nf (Lam e)     = label 1 (nf e)
+nf (App e x _) = (nf e) && nf x
+nf (Lam e)     = (nf e)
 nf Var{}       = True
 
 tc1,tc2,tc3,tc4 :: [Ty] -> Expr -> Ty -> Bool
 
 tc1 env (Var x)      t | Just tx <- env `index` x = tx `eqType` t
-tc1 env (App f x tx) t          = label 1 (tc1 env f (tx :-> t)) && (tc1 env x tx)
-tc1 env (Lam e)      (tx :-> t) = label 1 (tc1 (tx:env) e t)
+tc1 env (App f x tx) t          = (tc1 env f (tx :-> t)) && (tc1 env x tx)
+tc1 env (Lam e)      (tx :-> t) = (tc1 (tx:env) e t)
 tc1 _   _            _ = False
 
 tc2 env (Var x)      t | Just tx <- env `index` x = tx `eqType` t
-tc2 env (App f x tx) t          = label 1 (tc2 env x tx) && (tc2 env f (tx :-> t))
-tc2 env (Lam e)      (tx :-> t) = label 1 (tc2 (tx:env) e t)
+tc2 env (App f x tx) t          = (tc2 env x tx) && (tc2 env f (tx :-> t))
+tc2 env (Lam e)      (tx :-> t) = (tc2 (tx:env) e t)
 tc2 _   _            _ = False
 
 tc3 env (Var x)      t | Just tx <- env `index` x = tx `eqType` t
-tc3 env (App x f tx) t          = label 1 (tc3 env f (tx :-> t)) && (tc3 env x tx)
-tc3 env (Lam e)      (tx :-> t) = label 1 (tc3 (tx:env) e t)
+tc3 env (App x f tx) t          = (tc3 env f (tx :-> t)) && (tc3 env x tx)
+tc3 env (Lam e)      (tx :-> t) = (tc3 (tx:env) e t)
 tc3 _   _            _ = False
 
 tc4 env (Var x)      t | Just tx <- env `index` x = tx `eqType` t
-tc4 env (App x f tx) t          = label 1 (tc4 env x tx) && (tc4 env f (tx :-> t))
-tc4 env (Lam e)      (tx :-> t) = label 1 (tc4 (tx:env) e t)
+tc4 env (App x f tx) t          = (tc4 env x tx) && (tc4 env f (tx :-> t))
+tc4 env (Lam e)      (tx :-> t) = (tc4 (tx:env) e t)
 tc4 _   _            _ = False
 
 tc1_S0 e = tc1 [] e (A :-> A) === False

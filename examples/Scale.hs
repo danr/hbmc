@@ -1,6 +1,6 @@
 module Scale where
 
-import HBMC
+import Tip
 import qualified Prelude
 import Prelude ( Bool(..) )
 
@@ -31,7 +31,20 @@ _   <= O11 = False
 _   <= _   = True
 
 x <  y = not (y <= x)
-x ~~ y = (x <= y) && (y <= x)
+
+O1  ~~ O1  = True
+O2  ~~ O2  = True
+O3  ~~ O3  = True
+O4  ~~ O4  = True
+O5  ~~ O5  = True
+O6  ~~ O6  = True
+O7  ~~ O7  = True
+O8  ~~ O8  = True
+O9  ~~ O9  = True
+O10 ~~ O10 = True
+O11 ~~ O11 = True
+O12 ~~ O12 = True
+_   ~~ _   = False
 
 otherwise = True
 
@@ -110,7 +123,7 @@ allCases = [(False,O1),(False,O2),(False,O3),(False,O4)
            ,(True,O5),(True,O6),(True,O7),(True,O8),(True,O9),(True,O10),(True,O11),(True,O12)
            ]
 
-prop s = depth (Succ (Succ (Succ Zero))) s =:= True ==> isSolution s =:= False
+prop s = depth (Succ (Succ (Succ Zero))) s === True ==> isSolution s === False
 
 {-
 allCases :: [(Bool,Object)]
@@ -122,7 +135,7 @@ allCases = [(False,O1),(False,O2),(False,O3),(False,O4)
            --,(True,O9),(True,O10),(True,O11),(True,O12)
            ]
 
-prop s = depth (Succ (Succ Zero)) s =:= True ==> isSolution s =:= False
+prop s = depth (Succ (Succ Zero)) s === True ==> isSolution s === False
 -}
 
 {-
@@ -135,5 +148,5 @@ allCases = [(False,O1),(False,O2),(False,O3),(False,O4)
            --,(True,O9),(True,O10),(True,O11),(True,O12)
            ]
 
-prop s = depth (Succ (Succ Zero)) s =:= True ==> isSolution s =:= False
+prop s = depth (Succ (Succ Zero)) s === True ==> isSolution s === False
 -}
