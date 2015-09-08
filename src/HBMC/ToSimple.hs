@@ -63,8 +63,8 @@ toExprSimpleEnd e0 =
   do r <- (`Local` exprType e0) <$> fresh
      let (lets,s) = collectLets (widenLetScope e0)
      (lets',Dual su) <- execWriterT $ sequence_ [ trLet x e | (x,e) <- lets ++ [(r,s)] ]
-     let lets'' = map fst (concat (orderLets lets'))
-     substMany su (makeLets lets'' (Lcl r))
+     -- let lets'' = map fst (concat (orderLets lets'))
+     reorderLets <$> substMany su (makeLets lets' (Lcl r))
 
 inlineOneMatch :: Expr Var -> Expr Var
 inlineOneMatch e0 =
@@ -118,4 +118,8 @@ orderLets lets =
   gr :: [(Expr a,Local a,[Local a])]
   gr = [ (e,x,locals e) | (x,e) <- lets ]
 
+reorderLets :: forall a . Ord a => Expr a -> Expr a
+reorderLets e0 =
+  let (lets,e) = collectLets e0
+  in  makeLets (map fst (concat (orderLets lets))) e
 
