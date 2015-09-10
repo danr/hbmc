@@ -25,7 +25,7 @@ import Tip.Scope
 
 import HBMC.Merge
 import HBMC.Identifiers
-import HBMC.Haskell
+-- import HBMC.Haskell
 
 import HBMC.Data
 import HBMC.Projections
@@ -86,14 +86,12 @@ translate params thy0 =
 
      let fn_comps = map (fmap func_name) (components defines uses (thy_funcs thy))
 
-     let ci | Params.insist_isnt params = flip lookup
+     let ci = flip lookup
               [ (c,all_cons \\ [c])
               | Datatype tc [] cons <- thy_datatypes thy
-              , not (isMaybeTC tc)
               , let all_cons = map con_name cons
               , c <- map con_name cons
               ]
-            | otherwise = const Nothing
 
      fn_decls <- sequence
          [ do let e = func_body fn
@@ -128,7 +126,8 @@ runLive p (ds,fs,prop:_) = liveProp p static (fmap pp_var prop)
   static    = liveFuncs lkup_data (map (fmap pp_var) fs)
 
 compile :: Params -> Translated -> Fresh String
-compile p (ds,fs,props) =
+compile p (ds,fs,props) = undefined
+{-
  do let main_decls =
            [ H.funDecl (Var "main") [] (trProp p prop) | prop <- props ]
 
@@ -146,6 +145,7 @@ compile p (ds,fs,props) =
                               "MultiParamTypeClasses", "GeneralizedNewtypeDeriving"]
 
     return (ppRender (Decls (langs ++ Module "Main" : ds)))
+-}
 
 ren = renameWith (disambig varStr)
 

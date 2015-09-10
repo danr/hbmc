@@ -13,7 +13,6 @@ data Params =
     , debug                :: Bool
     , conflict_minimzation :: Bool
     , delay_all_datatypes  :: Bool
-    , insist_isnt          :: Bool
     , prop_names           :: Maybe [String]
     }
   deriving (Show,Data,Typeable)
@@ -29,7 +28,6 @@ defParams =
     , debug                = False   &= name "d" &= help "Print debug info"
     , conflict_minimzation = False   &= name "c" &= help "Minimize conflicts"
     , delay_all_datatypes  = False   &= name "l" &= help "Delay all datatypes"
-    , insist_isnt          = False   &= name "i" &= help "Insist isn't when possible"
     , prop_names           = Nothing &= name "prop" &= help "Property to consider (default: first)"
     }
   &= program "hbmc" &= summary logo

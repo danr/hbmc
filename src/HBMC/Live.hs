@@ -69,8 +69,10 @@ liveMon env (act:acts) =
        _ :<-: _ -> return () -- NOTE: handled below
 
        InsistIsn't r c ->
-         do caseData (var_map ! r) $ \ v _ -> addClauseHere [nt (v =? c)]
+         do let LiveData _ tv _ = var_map ! r
+            addClauseHere [nt (tv `thunkValIs` c)]
 
+       {-
        Guard g ps m ->
          do let bs = map (livePred env) ps
             case g of
@@ -84,6 +86,12 @@ liveMon env (act:acts) =
                                    , pred_map = M.insert v_var v pred_map
                                    }
                             m
+                   return ()
+       -}
+       WhenCon _ s vs as_var m_simp m ->
+         do whenCon (liveSimp env s) vs (liveMon env m_simp >> return ()) $
+              \ as ->
+                do rec_with dynamic{ proj_map = M.insert as_var as proj_map } m
                    return ()
 
        BinPrim bp s1 s2 ->

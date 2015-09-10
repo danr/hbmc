@@ -38,6 +38,7 @@ trMon xs = mkDo (map trAct xs) Noop
 trAct :: Act Var -> Stmt Var
 trAct a =
   case a of
+  {-
     Guard w p m -> Stmt (Apply (api fn) [ps,trMon m])
       where
       (fn,ps) =
@@ -49,6 +50,7 @@ trAct a =
       Stmt
         (Apply (caseData tc) [trSimp s,
           Lam [H.ConPat (api "Con") [H.VarPat v,H.VarPat c]] (trMon m)])
+          -}
     BinPrim bp s1 s2 ->
       Stmt (Apply (api bp') (map trSimp [s1,s2]))
       where

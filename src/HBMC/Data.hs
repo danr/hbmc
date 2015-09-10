@@ -28,16 +28,21 @@ dataDescs lazy_datatypes dts = lkup_desc
                                      Nothing   -> error $ "Data type not found:" ++ varStr x ++ " (" ++ show x ++ ")"
   tbl =
     [ (tc,
-       maybe_thunk $ DataDesc (varStr tc) [ c | Constructor c _ _ <- cons ]
-       [ case ty of
-           TyCon tc [] ->
-             ( [ c | (c,(_,ixs)) <- indexes, i `elem` ixs ]
-             , lkup_desc tc)
-       | (i,ty) <- [0..] `zip` types ])
+       DataDesc (varStr tc)
+         [ c | Constructor c _ as <- cons, not (any (lazy . snd) as) ]
+         [ c | Constructor c _ as <- cons, any (lazy . snd) as ]
+         [ case ty of
+             TyCon tc [] ->
+               ( [ c | (c,(_,ixs)) <- indexes, i `elem` ixs ]
+               , lkup_desc tc)
+         | (i,ty) <- [0..] `zip` types ])
     | dt@(Datatype tc [] cons) <- dts
     , let (indexes,types) = dataInfo dt
+    , let lazy (T.TyCon tc' _) = tc' == tc -- && tc `elem` rec_dts
+    {-
     , let maybe_thunk | tc `elem` rec_dts || lazy_datatypes = ThunkDesc
                       | otherwise                           = id
+                      -}
     ]
 
 recursiveDatatypes :: Ord a => [Datatype a] -> [a]

@@ -6,6 +6,8 @@ import Control.Monad hiding (when,unless)
 import Data.IORef
 import Data.List
 import qualified Data.Map as Mp
+import qualified Data.Map as M
+import Data.Map (Map)
 import Data.Unique
 import qualified MiniSat as M
 import MiniSat ( Solver, Lit )
@@ -17,19 +19,26 @@ import Text.Show.Pretty (parseValue,valToStr)
 
 --------------------------------------------------------------------------------
 
-data Source = Check | Input
+data Source = Check | Input | ValThunk
   deriving (Eq,Ord)
 
 instance Show Source where
-  show Check = "check"
-  show Input = "input"
+  show Check    = "check"
+  show Input    = "input"
+  show ValThunk = "val thunk"
 
 data Env =
   Env
   { sat    :: Solver
   , here   :: Bit
   , waits  :: IORef [(Source,(Bit,Unique,H ()))]
+  , conts  :: IORef (Map Unique (H ()))
   }
+
+rememberEnv :: H () -> H (H ())
+rememberEnv (H h) =
+  do env <- ask
+     return (H (\ _ -> h env))
 
 newtype H a = H (Env -> IO a)
 
@@ -52,7 +61,8 @@ run :: H a -> IO a
 run (H m) =
   M.withNewSolver $ \s ->
     do refw <- newIORef []
-       m (Env s tt refw)
+       conw <- newIORef M.empty
+       m (Env s tt refw conw)
 
 {-
 
@@ -113,7 +123,7 @@ trySolve confl_min quiet = H (\env ->
                                verbose ("Points: " ++ show (length ws'))
                                writeIORef (waits env) ws'
                                verbose $ "Expanding " ++ show source ++ "..."
-                               h env{ here = p }
+                               h env -- { here = p }
                                verbose "Expansion done"
                                return Nothing
                         else
@@ -193,11 +203,16 @@ inContext c h = inContext' c h
 inContext' :: Bit -> H a -> H a
 inContext' c (H m) = H (\env -> m env{ here = c })
 
+ask :: H Env
+ask = H (\env -> return env)
+
 later :: Source -> Unique -> H () -> H ()
-later source unq h = H (\env ->
-  do ws <- readIORef (waits env)
-     writeIORef (waits env) ((source, (here env, unq, h)):ws)
-  )
+later source unq h =
+  do wref <- waits <$> ask
+     here_bit <- here <$> ask
+     ws <- io (readIORef wref)
+     h' <- rememberEnv h
+     io (writeIORef wref ((source, (here_bit, unq, h')):ws))
 
 {-
 check :: H () -> H ()
@@ -767,97 +782,274 @@ instance Value (Val a) where
 
 --------------------------------------------------------------------------------
 
+data ThunkVal a = ThunkVal (Val a) [(a,Unique)]
+                -- label of continuations that have to be run if it wakes up
+
+instance Eq a => Eq (ThunkVal a) where
+  ThunkVal v _ == ThunkVal v2 _ = v == v2
+
+instance Ord a => Ord (ThunkVal a) where
+  ThunkVal v _ `compare` ThunkVal v2 _ = v `compare` v2
+
+instance Show a => Show (ThunkVal a) where
+  show (ThunkVal v _) = show v
+
+newThunkVal :: Ord a => Bool -> [a] -> [a] -> H (ThunkVal a)
+newThunkVal inp strict lazy =
+  do v <- newVal (strict ++ lazy)
+     w_ref <- waits <$> ask
+     c_ref <- conts <$> ask
+     unqs <- io $ sequence
+       [ do u <- newUnique
+            let rm = do io (modifyIORef c_ref (M.delete u))
+                        -- io (putStrLn $ "Removing cont " ++ show u)
+
+            if inp then modifyIORef w_ref ((ValThunk,(v =? l,u,runCont u)):)
+                   else return ()
+              -- only add to wait list if they are inputs
+
+            modifyIORef c_ref (M.insert u rm)
+            return (l,u)
+       | l <- lazy
+       ]
+     return (ThunkVal v unqs)
+
+thunkVal :: a -> ThunkVal a
+thunkVal a = ThunkVal (val a) []
+
+thunkValIs :: Eq a => ThunkVal a -> a -> Bit
+thunkValIs (ThunkVal v _) a = v =? a
+
+instance Ord a => Equal (ThunkVal a) where
+  ThunkVal v _ >>>            ThunkVal v2 _ = v >>> v2
+  ThunkVal v _ `equalHere`    ThunkVal v2 _ = v `equalHere` v2
+  ThunkVal v _ `notEqualHere` ThunkVal v2 _ = v `notEqualHere` v2
+
+instance  Value (ThunkVal a) where
+  type Type (ThunkVal a) = a
+
+  dflt _ = error "no default value for ThunkVal"
+
+  get (ThunkVal v _) = get v
+
+runCont :: Unique -> H ()
+runCont u =
+  do -- io $ putStrLn $ "runCont " ++ show u
+     c_ref <- conts <$> ask
+     mm <- M.lookup u <$> io (readIORef c_ref)
+     case mm of
+       Just m  -> m
+       Nothing -> -- do io $ putStrLn $ "runCont nothing to run " ++ show u
+                  return ()
+
+instance Show Unique where
+  show = show . hashUnique
+
+addCont :: Unique -> H () -> H ()
+addCont u h =
+  do -- io $ putStrLn $ "addCont " ++ show u
+     c_ref <- conts <$> ask
+     mm <- M.lookup u <$> io (readIORef c_ref)
+     case mm of
+       Just m  -> do h' <- rememberEnv h
+                     io (modifyIORef c_ref (M.insert u (m >> h')))
+       Nothing -> do -- io $ putStrLn $ "addCont already awaken " ++ show u
+                     h -- already woken up at some point, run h now!
+
+forceVal :: Ord a => ThunkVal a -> [a] -> H ()
+forceVal (ThunkVal _ unq) as =
+  do -- io (putStrLn $ "forceVal")
+     sequence_ [ runCont u | (a,u) <- unq, a `elem` as ]
+
+whenVal :: Ord a => ThunkVal a -> [a] -> H () -> H ()
+whenVal tv@(ThunkVal v unq) as h
+  | null (domain v `intersect` as) = do -- io (putStrLn "whenVal ignore")
+                                        return ()
+  | any (`notElem` map fst unq) as = whens (map (v =?) as) $ do -- io (putStrLn "whenVal: run directly")
+                                                                forceVal tv as >> h -- run directly
+  | otherwise =
+         -- try to suspend
+      do -- io (putStrLn "whenVal: suspend")
+         been_run_ref <- io $ newIORef False
+         let h' = do been_run <- io $ readIORef been_run_ref
+                     if not been_run
+                       then do -- io (putStrLn "whenVal: running h'")
+                               io $ writeIORef been_run_ref True
+                               whens (map (v =?) as) $ do -- io (putStrLn "whenVal: running h' under whens")
+                                                          h
+                                                          forceVal tv as
+                                                          -- io (putStrLn "whenVal: h has been run")
+                       else do return ()
+         sequence_ [ addCont u h' | (a,u) <- unq , a `elem` as ]
+
+--------------------------------------------------------------------------------
+
 data LiveDesc c
-  = DataDesc String [c] [([c],LiveDesc c)]
-  | ThunkDesc (LiveDesc c)
+  = DataDesc String [c] -- strict
+                    [c] -- lazy
+                    [([c],LiveDesc c)] -- if not elem strict, construct this lazily
   deriving (Eq,Ord)
 
 descTC :: LiveDesc c -> String
-descTC (DataDesc tc _ _) = tc
-descTC (ThunkDesc d)     = descTC d
+descTC (DataDesc tc _ _ _) = tc
 
 instance Show c => Show (LiveDesc c) where
-  show (DataDesc s cs xs) = s ++ " " ++ show cs ++ " " ++ show [(cs',descTC d)|(cs',d)<-xs]
-  show (ThunkDesc d)      = "Thunk (" ++ show d ++ ")"
+  show (DataDesc s cs cl xs) = s ++ " " ++ show cs ++ " " ++ show cl ++ " " ++ show [(cs',descTC d)|(cs',d)<-xs]
+
+data MiniThunk a = An a | Thunk MTU (IORef (Maybe a))
+
+newtype MTU = MTU Unique
+  deriving (Eq,Ord,Show)
+
+newMTU :: IO MTU
+newMTU = MTU <$> newUnique
+
+instance Eq a => Eq (MiniThunk a) where
+  An x      == An y      = x == y
+  Thunk p _ == Thunk q _ = p == q
+  _         == _         = False
+
+instance Ord a => Ord (MiniThunk a) where
+  An x      `compare` An y      = x `compare` y
+  Thunk p _ `compare` Thunk q _ = p `compare` q
+  An _      `compare` _         = LT
+  _         `compare` An _      = GT
+
+
+
+instance Show a => Show (MiniThunk a) where
+  show (An x)      = "An " ++ show x
+  show (Thunk u _) = "Thunk " ++ show u
+
+readMiniThunk :: MiniThunk a -> H a
+readMiniThunk mt =
+  do ma <- readMiniThunkMaybe mt
+     case ma of
+       Just a  -> return a
+       Nothing -> return (error "readMiniThunk: missing value!")
+
+readMiniThunkMaybe :: MiniThunk a -> H (Maybe a)
+readMiniThunkMaybe (An x)      = return (Just x)
+readMiniThunkMaybe (Thunk _ r) = io (readIORef r)
+
+instance Value a => Value (MiniThunk a) where
+  type Type (MiniThunk a) = Type a
+  dflt ~(An x) = dflt x
+  get m = get =<< readMiniThunk m
+
+instance IncrView c => IncrView (MiniThunk c) where
+  incrView mt =
+    do mc <- readMiniThunkMaybe mt
+       case mc of
+         Just c  -> incrView c
+         Nothing -> return "!"
+
+miniThunkMemo :: MiniThunk a -> MiniThunk a -> (a -> a -> H ()) -> H ()
+miniThunkMemo t1@(Thunk (MTU u1) _) t2@(Thunk (MTU u2) _) k =
+  do x1 <- readMiniThunk t1
+     x2 <- readMiniThunk t2
+     if u1 /= u2 then equalUnique u1 u2 (k x1 x2)
+                 else return ()
+miniThunkMemo t1 t2 k = onMiniThunks t1 t2 k
+
+onMiniThunks :: MiniThunk a -> MiniThunk a -> (a -> a -> H ()) -> H ()
+onMiniThunks t1 t2 k =
+  do x1 <- readMiniThunk t1
+     x2 <- readMiniThunk t2
+     k x1 x2
 
 data LiveData c
-  = LiveData String (Val c) [([c],Maybe (LiveData c))]
-  | LiveThunk (Thunk (LiveData c))
+  = LiveData String (ThunkVal c) [([c],Maybe (MiniThunk (LiveData c)))]
   deriving (Eq,Ord,Show)
 
 newData :: (Show c,Ord c) => Bool -> LiveDesc c -> H (LiveData c)
-newData i (ThunkDesc d) =
-  do LiveThunk <$> delay i (newData i d)
-
-newData i desc@(DataDesc tc cons args) =
-  do c <- newVal cons
-     as <- sequence [ do d <- newData i desc
-                         return (cs,Just d)
-                    | (cs,desc) <- args
-                    ]
+newData i desc0@(DataDesc tc strict lazy args) =
+  do c <- newThunkVal i strict lazy
+     as <- sequence
+             [ do u <- io newMTU
+                  r <- io $ newIORef Nothing
+                  -- io $ putStrLn $ "newData(" ++ tc ++ ") " ++ show u
+                  whenVal c cs $
+                    do -- io $ putStrLn $ "creating data " ++ show u
+                       d' <- newData i desc
+                       io $ writeIORef r (Just d')
+                  return (cs,Just (Thunk u r))
+             | (cs,desc) <- args
+             ]
      let d = LiveData tc c as
-     -- io (print desc)
+     -- io (print desc0)
      -- io (print d)
      return d
 
-equalLiveOn :: Ord c => (forall a . Equal a => a -> a -> H ()) -> LiveData c -> LiveData c -> H ()
-equalLiveOn k (LiveThunk t1)        (LiveThunk t2)        = k t1 t2
-equalLiveOn k (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
+data EqualMode = Copy | Equalise
+  deriving (Eq)
+
+equalLiveOn :: Ord c => EqualMode -> LiveData c -> LiveData c -> H ()
+equalLiveOn eqm (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
   do equalHere c1 c2
-     ctx <- context
-
-     let bigdmn = case domain c1 of
-                    dmn@(_:_:_) -> Just (sort dmn)
-                    _           -> Nothing
-
      sequence_
-       [ case bigdmn of
-           -- Just dmn | length cs * 2 > length dmn
-           --   -> do let bs = [ c1 =? c | c <- sort dmn \\ sort cs ]
-           --         io $ putStrLn (unwords ["UNLESS",show (length bs),show (length cs),show (length dmn)])
-           --         unless bs (k x1 x2)
-           _ -> do -- io $ putStrLn "WHENS"
-                   whens [ c1 =? c | c <- cs ] (k x1 x2)
-       | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
+       [ whenVal c1 cs $
+         (if eqm == Copy then \ h -> forceVal c2 cs >> h else whenVal c2 cs) $
+         miniThunkMemo t1 t2 (equalLiveOn eqm)
+       | ((cs,Just t1),(_cs,Just t2)) <- as1 `zip` as2
        ]
 
 instance Ord c => Equal (LiveData c) where
-  (>>>)        = equalLiveOn (>>>)
-  equalHere    = equalLiveOn equalHere
-  notEqualHere (LiveThunk th1)       (LiveThunk th2)       = notEqualHere th1 th2
+  (>>>)        = equalLiveOn Copy
+  equalHere    = equalLiveOn Equalise
   notEqualHere (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
     do -- io (putStrLn "notEqualHere")
        choice
          [ do notEqualHere c1 c2
          , do equalHere c1 c2
               choice
-                [ do addClauseHere [ c1 =? c | c <- cs ]
-                     notEqualHere x1 x2
-                | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
+                [ do addClauseHere [ c1 `thunkValIs` c | c <- cs ]
+                     whenVal c1 cs $ whenVal c2 cs $ onMiniThunks t1 t2 notEqualHere
+                | ((cs,Just t1),(_cs,Just t2)) <- as1 `zip` as2
                 ]
          ]
 
 conData :: (Show c,Eq c) => LiveDesc c -> c -> [LiveData c] -> LiveData c
-conData (ThunkDesc d)     c as =
-  -- snd $ traceShowId $ (,) "conData" $
-    LiveThunk (this (conData d c as))
-conData (DataDesc s _ rs) c as =
-  -- snd $ traceShowId $ (,) "conData" $
-    LiveData s (val c)
+conData (DataDesc s _ _ rs) c as =
+  -- snd $ traceShowId $ (,) ("conData",show c) $
+    LiveData s (thunkVal c)
       (snd
          (mapAccumL
            (\ as_rem (cs,_) ->
              if c `elem` cs then
                let hd:tl = as_rem
-               in  (tl,(cs,Just hd))
+               in  (tl,(cs,Just (An hd)))
              else
                (as_rem,(cs,Nothing))
            )
            as rs))
 
+whenCon :: (Show c,Ord c) => LiveData c -> [c] -> H () -> ([LiveData c] -> H ()) -> H ()
+whenCon ld@(LiveData _tc v vs) as k_simp k =
+  do -- io (putStrLn $ "whenCon on " ++ show ld ++ " as: " ++ show as)
+     whens (map (v `thunkValIs`) as) k_simp
+     whenVal v as $ do -- io (putStrLn $ "running whenCon on " ++ show ld ++ " as: " ++ show as)
+                       vs' <-
+                         sequence
+                           [ case jt of
+                               Just t  ->
+                                 do jx <- readMiniThunkMaybe t
+                                    case jx of
+                                      Just x -> return x
+                                      Nothing ->
+                                        return $ error $ "whenCon empty thunk " ++ show t ++ " for label: " ++ show lbl
+                                                        ++ " v:" ++ show v ++ " as: " ++ show as ++ "\nld:" ++ show ld
+                               Nothing -> return $ error $ "whenCon missing argument for label: " ++ show lbl
+                                                        ++ " v:" ++ show v ++ " as: " ++ show as ++ " ld:" ++ show ld
+                           | (lbl,jt) <- vs
+                           ]
+                       k vs'
+
+{-
 caseData :: LiveData c -> (Val c -> [LiveData c] -> H ()) -> H ()
 caseData (LiveThunk th)      k = ifForce th (\ ld -> caseData ld k)
 caseData (LiveData _tc v vs) k = k v (map (\ (_,~(Just v)) -> v) vs)
+-}
 
 data LiveValue c = ConValue c [LiveValue c] | ThunkValue
 
@@ -866,7 +1058,6 @@ instance Eq c => Value (LiveData c) where
 
   dflt _ = ThunkValue
 
-  get (LiveThunk th)   = get th
   get (LiveData _ v cns) =
     do c <- get v
        as <- sequence [ get d | (cs,Just d) <- cns, c `elem` cs ]
@@ -878,7 +1069,6 @@ instance Show c => Show (LiveValue c) where
   show (ConValue g as) = "(" ++ show g ++ concat [ " " ++ show a | a <- as ] ++ ")"
 
 instance Show c => IncrView (LiveData c) where
-  incrView (LiveThunk th)      = incrView th
   incrView (LiveData tc _ cns) =
     do cns' <- sequence [ incrView mv | (_,mv) <- cns ]
        return ("(" ++ tc ++ concat cns' ++ ")")

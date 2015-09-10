@@ -57,9 +57,10 @@ data BinPrim = EqualHere | NotEqualHere
   deriving (Eq,Ord,Show)
 
 data Act a
-  = Guard Guard [Pred a] (Mon a)
+  -- = Guard Guard [Pred a] (Mon a)
+  -- | CaseData a (Simp a) a a (Mon a)
+  = WhenCon a (Simp a) [a] a (Mon a) (Mon a)
   | InsistIsn't a a
-  | CaseData a (Simp a) a a (Mon a)
   | Simp a :>>>: a
   | a :<-: Rhs a
   | BinPrim BinPrim (Simp a) (Simp a)
@@ -84,34 +85,30 @@ simpMon = map simpAct . collapse . filter (not . nullAct)
       []   -> m
 
 simpAct :: Eq a => Act a -> Act a
-simpAct (Guard g p m)         = Guard g p (simpMon m)
-simpAct (CaseData tc s v c m) = CaseData tc s v c (simpMon m)
+simpAct (WhenCon tc s cs c m2 m)   = WhenCon tc s cs c (simpMon m2) (simpMon m)
 simpAct a = a
 
 su :: (Eq a,Functor f) => a -> a -> f a -> f a
 su for what = fmap (\ x -> if x == what then for else x)
 
 nullAct :: Act a -> Bool
-nullAct (CaseData _ _ _ _ m) = all nullAct m
-nullAct (Guard When [] _)    = True
-nullAct (Guard g p m)        = all nullAct m
+nullAct (WhenCon _ _ _ _ _ m) = all nullAct m
+--nullAct (Guard When [] _)    = True
+--nullAct (Guard g p m)        = all nullAct m
 nullAct _ = False
 
 collapseAct :: Eq a => Act a -> Act a -> Maybe (Act a)
 collapseAct
-  (Guard When a m)
-  (Guard When b n)
-  | m == n = Just (Guard When (a ++ b) m)
+  (WhenCon tc s1 vs1 c1 [] m1)
+  (WhenCon _  s2 vs2 c2 [] m2)
+  | s1 == s2 && m1 == map (su c1 c2) m2
+  = Just (WhenCon tc s1 (vs1 ++ vs2) c1 [] m1)
 
 collapseAct
-  (Guard g1 a m)
-  (Guard g2 b n)
-  | g1 == g2 && a == b = Just (Guard g1 a (m ++ n))
-
-collapseAct
-  (CaseData tc s1 v1 c1 m1)
-  (CaseData _  s2 v2 c2 m2)
-  | s1 == s2 = Just (CaseData tc s1 v1 c1 (m1 ++ map (su v1 v2 . su c1 c2) m2))
+  (WhenCon tc s1 vs1 c1 ms1 m1)
+  (WhenCon _  s2 vs2 c2 ms2 m2)
+  | s1 == s2 && vs1 == vs2
+  = Just (WhenCon tc s1 vs1 c1 (ms1 ++ map (su c1 c2) ms2) (m1 ++ map (su c1 c2) m2))
 
 collapseAct _ _ = Nothing
 
@@ -234,20 +231,37 @@ trExpr ci e00 mr =
 
 trMatch :: ConInfo Var -> Expr Var -> [Case Var] -> Maybe Var -> Fresh (Mon Var)
 trMatch ci e brs mr | TyCon tc _ <- exprType e =
-  do c <- fresh
+  do -- c <- fresh
      s <- fresh
 
      let ls = Local s (exprType e)
 
-     let ctors = [ k | Case (ConPat (Global k _ _) _) _ <- brs ]
+     let Just ctors = sequence [ ci k | Case (ConPat (Global k _ _) _) _ <- brs ]
+         others     = foldr1 intersect ctors
 
-     brs' <- mapM (trCase ci c mr ctors . replaceProj e ls) brs
+     concat <$> sequence
+       [ do body <- trExpr ci (replaceProj e ls rhs) mr
+            let vs = case pat of
+                       Default -> others
+                       ConPat (Global k _ _) _ -> [k]
 
-     -- waitCase e $ \ (Con c s) ->
-     --   ...
-     --   when (c =? K_i) $ do [[ br_i (sel s // sel e) ]]=> r
-     --   ...
+            let to_con :: Expr Var -> Maybe [Var]
+                to_con (Gbl g :@: _) = ci (gbl_name g)
+                to_con _             = Nothing
 
+            let con_others =
+                  case (mr,sequence (map to_con (rhssUnderLet rhs))) of
+                    (Just r,Just (os:oss)) -> [InsistIsn't r o | o <- foldr intersect os oss]
+                    _                      -> []
+
+            return $
+              case body of
+                [] -> []
+                _  -> [ WhenCon tc (trSimple e) vs s con_others body ]
+       | Case pat rhs <- brs
+       ]
+
+     {-
      let to_con :: Expr Var -> Maybe [Var]
          to_con (Gbl g :@: _) = ci (gbl_name g)
          to_con _             = Nothing
@@ -256,8 +270,7 @@ trMatch ci e brs mr | TyCon tc _ <- exprType e =
            case (mr,sequence (map to_con (rhssUnderLet (Match e brs)))) of
              (Just r,Just (os:oss)) -> [InsistIsn't r o | o <- foldr intersect os oss]
              _                      -> []
-
-     return $ CaseData tc (trSimple e) c s (concat brs'):con_others
+     -}
 
 trMatch _ _ _ _ = error "trMatch: Not a TyCon!"
 
@@ -267,9 +280,9 @@ rhssUnderLet (Let _ _ e)   = rhssUnderLet e
 rhssUnderLet e             = [ e | not (isNoop e) ]
 
 -- sel s // sel e
-replaceProj :: Expr Var -> Local Var -> Case Var -> Case Var
-replaceProj e s (Case p rhs) =
-  Case p $ (`transformExprIn` rhs) $
+replaceProj :: Expr Var -> Local Var -> Expr Var -> Expr Var
+replaceProj e s =
+  transformExprIn $
     \ e0 -> case e0 of
       hd@(Gbl (Global g _ _)) :@: [e'] | e == e', Just{} <- unproj g -> hd :@: [Lcl s]
 
@@ -282,18 +295,6 @@ trSimple s =
     Gbl (Global k _ _) :@: [s] | Just i <- unproj k -> Proj i (let Var x = trSimple s in x)
     Gbl (Global k (PolyType _ _ (TyCon tc _)) _) :@: ss -> Con tc k (map trSimple ss)
     _ -> error $ "trSimple, not simple: " ++ ppRender s
-
-trCase :: ConInfo Var -> Var -> Maybe Var -> [Var] -> Case Var -> Fresh (Mon Var)
-trCase ci c mr cons (Case pat rhs) =
-  do body <- trExpr ci rhs mr
-     return $
-       case body of
-         [] -> []
-         _  ->
-           return $
-             case pat of
-               Default                 -> Guard Unless [c :=? k | k <- cons] body
-               ConPat (Global k _ _) _ -> Guard When   [c :=? k] body
 
 isMatch :: Expr a -> Bool
 isMatch Match{} = True
