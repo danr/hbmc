@@ -29,6 +29,9 @@ import Tip.Pretty.SMT ()
 
 import Debug.Trace
 
+-- the other constructors
+type ConInfo a = a -> Maybe [a]
+
 -- Translation to constraint-generation DSL:
 
 data Verbosity = Quiet | Verbose deriving (Eq,Ord,Show,Read)
@@ -55,6 +58,7 @@ data BinPrim = EqualHere | NotEqualHere
 
 data Act a
   = Guard Guard [Pred a] (Mon a)
+  | InsistIsn't a a
   | CaseData a (Simp a) a a (Mon a)
   | Simp a :>>>: a
   | a :<-: Rhs a
@@ -131,8 +135,8 @@ terminates f as e =
     = needle == x
   chase _ _ = False
 
-trFunction :: Params -> [Component Var] -> Function Var -> Fresh (Func Var)
-trFunction p fn_comps Function{..} =
+trFunction :: Params -> ConInfo Var -> [Component Var] -> Function Var -> Fresh (Func Var)
+trFunction p ci fn_comps Function{..} =
   do r <- fresh
      let (rec,mut_rec) = case lookupComponent func_name fn_comps of
                            Just (Rec xs) -> (True,length xs > 1)
@@ -140,7 +144,7 @@ trFunction p fn_comps Function{..} =
      let args = map lcl_name func_args
      let chk = not (terminates func_name args func_body) || mut_rec
      let mem = memo p && rec
-     body <- trExpr func_body (Just r)
+     body <- trExpr ci func_body (Just r)
      return (Func func_name args r (tyConOf func_res) mem chk (simpMon body))
 
      {- let tt = modTyCon wrapData . trType
@@ -163,20 +167,20 @@ superSimple e =
     _ -> False
     -}
 
-trFormula :: Formula Var -> Fresh (Prop Var)
-trFormula fm =
+trFormula :: ConInfo Var -> Formula Var -> Fresh (Prop Var)
+trFormula ci fm =
   case fm of
     Formula r      (_:_) e -> error "trFormula, TODO: translate type variables"
-    Formula Prove  []    e -> trFormula (Formula Assert [] (neg e))
+    Formula Prove  []    e -> trFormula ci (Formula Assert [] (neg e))
     Formula Assert []    e ->
       do let (vs,e') = fmap neg (forallView (neg e))
          let cs      = conjuncts (ifToBoolOp e')
          let news    = [ x :<-: New True (tyConOf t) | Local x t <- vs ]
-         asserts <- mapM trToTrue cs
+         asserts <- mapM (trToTrue ci) cs
          return (Prop (map lcl_name vs) (simpMon (news ++ concat asserts)))
 
-trToTrue :: Expr Var -> Fresh (Mon Var)
-trToTrue e0 =
+trToTrue :: ConInfo Var -> Expr Var -> Fresh (Mon Var)
+trToTrue ci e0 =
   case e0 of
     Builtin Equal    :@: ~[e1,e2] -> tr True  e1 e2
     Builtin Distinct :@: ~[e1,e2] -> tr False e1 e2
@@ -188,7 +192,7 @@ trToTrue e0 =
        let equal_fn = blankGlobal
                         (api (if pol then "equalHere" else "notEqualHere"))
                         (error "trToTrue global type")
-       trExpr (makeLets (lets1 ++ lets2) (Gbl equal_fn :@: [s1,s2])) Nothing
+       trExpr ci (makeLets (lets1 ++ lets2) (Gbl equal_fn :@: [s1,s2])) Nothing
 
 conjuncts :: Expr a -> [Expr a]
 conjuncts e0 =
@@ -199,8 +203,8 @@ conjuncts e0 =
     _                                             -> [e0]
 
 -- [[ e ]]=> r
-trExpr :: Expr Var -> Maybe Var -> Fresh (Mon Var)
-trExpr e00 mr =
+trExpr :: ConInfo Var -> Expr Var -> Maybe Var -> Fresh (Mon Var)
+trExpr ci e00 mr =
   let (lets,rest) = collectLets e00
       (matches,fn_calls)  = partition (isMatch . snd) lets
   in  ([x :<-: New False (tyConOf t) | (Local x t,_) <- matches ] ++)
@@ -209,12 +213,12 @@ trExpr e00 mr =
   go e0 =
     case e0 of
       Let x (Match s brs) e ->
-        (:) <$> trMatch s brs (Just (lcl_name x)) <*> go e
+        (++) <$> trMatch ci s brs (Just (lcl_name x)) <*> go e
 
       Let x (Gbl (Global f _ _) :@: ss) e ->
         (lcl_name x :<-: Call f (map trSimple ss) :) <$> go e
 
-      Match s brs -> (:[]) <$> trMatch s brs mr
+      Match s brs -> trMatch ci s brs mr
 
       Gbl (Global (SystemCon "noop" _) _ _) :@: _ -> return []
 
@@ -228,8 +232,8 @@ trExpr e00 mr =
 
       _ -> error $ "trExpr " ++ ppRender e0
 
-trMatch :: Expr Var -> [Case Var] -> Maybe Var -> Fresh (Act Var)
-trMatch e brs mr | TyCon tc _ <- exprType e =
+trMatch :: ConInfo Var -> Expr Var -> [Case Var] -> Maybe Var -> Fresh (Mon Var)
+trMatch ci e brs mr | TyCon tc _ <- exprType e =
   do c <- fresh
      s <- fresh
 
@@ -237,16 +241,30 @@ trMatch e brs mr | TyCon tc _ <- exprType e =
 
      let ctors = [ k | Case (ConPat (Global k _ _) _) _ <- brs ]
 
-     brs' <- mapM (trCase c mr ctors . replaceProj e ls) brs
+     brs' <- mapM (trCase ci c mr ctors . replaceProj e ls) brs
 
      -- waitCase e $ \ (Con c s) ->
      --   ...
      --   when (c =? K_i) $ do [[ br_i (sel s // sel e) ]]=> r
      --   ...
 
-     return $ CaseData tc (trSimple e) c s (concat brs')
+     let to_con :: Expr Var -> Maybe [Var]
+         to_con (Gbl g :@: _) = ci (gbl_name g)
+         to_con _             = Nothing
 
-trMatch _ _ _ = error "trMatch: Not a TyCon!"
+     let con_others =
+           case (mr,sequence (map to_con (rhssUnderLet (Match e brs)))) of
+             (Just r,Just (os:oss)) -> [InsistIsn't r o | o <- foldr intersect os oss]
+             _                      -> []
+
+     return $ CaseData tc (trSimple e) c s (concat brs'):con_others
+
+trMatch _ _ _ _ = error "trMatch: Not a TyCon!"
+
+rhssUnderLet :: Expr Var -> [Expr Var]
+rhssUnderLet (Match _ brs) = concatMap (rhssUnderLet . case_rhs) brs
+rhssUnderLet (Let _ _ e)   = rhssUnderLet e
+rhssUnderLet e             = [ e | not (isNoop e) ]
 
 -- sel s // sel e
 replaceProj :: Expr Var -> Local Var -> Case Var -> Case Var
@@ -265,9 +283,9 @@ trSimple s =
     Gbl (Global k (PolyType _ _ (TyCon tc _)) _) :@: ss -> Con tc k (map trSimple ss)
     _ -> error $ "trSimple, not simple: " ++ ppRender s
 
-trCase :: Var -> Maybe Var -> [Var] -> Case Var -> Fresh (Mon Var)
-trCase c mr cons (Case pat rhs) =
-  do body <- trExpr rhs mr
+trCase :: ConInfo Var -> Var -> Maybe Var -> [Var] -> Case Var -> Fresh (Mon Var)
+trCase ci c mr cons (Case pat rhs) =
+  do body <- trExpr ci rhs mr
      return $
        case body of
          [] -> []

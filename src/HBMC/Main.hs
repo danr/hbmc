@@ -86,6 +86,15 @@ translate params thy0 =
 
      let fn_comps = map (fmap func_name) (components defines uses (thy_funcs thy))
 
+     let ci | Params.insist_isnt params = flip lookup
+              [ (c,all_cons \\ [c])
+              | Datatype tc [] cons <- thy_datatypes thy
+              , not (isMaybeTC tc)
+              , let all_cons = map con_name cons
+              , c <- map con_name cons
+              ]
+            | otherwise = const Nothing
+
      fn_decls <- sequence
          [ do let e = func_body fn
               es <- lift $
@@ -93,11 +102,11 @@ translate params thy0 =
                     then mergeTrace (scope thy) e
                     else sequence [toExpr e]
               tell (ppRender fn:map (ppRender . ren) (e:es))
-              lift (trFunction params fn_comps fn{ func_body = last es })
+              lift (trFunction params ci fn_comps fn{ func_body = last es })
          | fn <- thy_funcs thy
          ]
 
-     props <- lift $ sequence [ trFormula prop | prop <- thy_asserts thy ]
+     props <- lift $ sequence [ trFormula ci prop | prop <- thy_asserts thy ]
 
      let thy' = addMaybesToTheory
                   (concatMap F.toList fn_decls ++ concatMap F.toList props)

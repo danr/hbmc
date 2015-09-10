@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE PatternGuards #-}
 module HBMC.Identifiers where
 
 import Tip.Core
@@ -9,6 +10,8 @@ import Tip.Fresh
 import Tip.Haskell.Translate -- Why is HsId exported from here?!
 import Tip.Utils.Rename
 import Tip.Utils
+
+import Data.Maybe
 
 import Data.Generics.Geniplate
 
@@ -143,8 +146,15 @@ nothingVar = SystemCon "Nothing" . Just
 maybeTy :: Type Var -> Type Var
 maybeTy x = TyCon (maybeTC x) []
 
+unMaybeTC :: Var -> Maybe (Type Var)
+unMaybeTC (System "Maybe" jx) = jx
+unMaybeTC _ = Nothing
+
+isMaybeTC :: Var -> Bool
+isMaybeTC = isJust . unMaybeTC
+
 unMaybeTy :: Type Var -> Type Var
-unMaybeTy (TyCon (System "Maybe" (Just x)) []) = x
+unMaybeTy (TyCon mmtc []) | Just tc <- unMaybeTC mmtc = tc
 unMaybeTy _ = error "unMaybeTy: Not a Maybe Type!"
 
 justGbl :: Type Var -> Global Var

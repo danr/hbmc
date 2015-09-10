@@ -68,6 +68,9 @@ liveMon env (act:acts) =
      case act of
        _ :<-: _ -> return () -- NOTE: handled below
 
+       InsistIsn't r c ->
+         do caseData (var_map ! r) $ \ v _ -> addClauseHere [nt (v =? c)]
+
        Guard g ps m ->
          do let bs = map (livePred env) ps
             case g of
