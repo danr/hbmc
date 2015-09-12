@@ -51,12 +51,13 @@ liveFuncs lkup_desc funcs = st
 
 liveFunc :: (Show a,PrettyVar a,Ord a) => Static a -> Func a -> [LiveData a] -> H (LiveData a)
 liveFunc st (Func fname as_vars r_var r_ty mem chk m) =
-  (if mem then memoWith else nomemoWith)
-    (newData False (lkup_desc st r_ty))
+  (if mem then HBMC.Lib.memo else nomemo)
     (varStr fname) $
-      \ as r ->
-         (if chk then check else id)
-         (liveMon (newEnv st ((r_var,r):as_vars `zip` as)) m >> return ())
+      \ as ->
+         do r <- newData False (lkup_desc st r_ty)
+            (if chk then check else id)
+              (liveMon (newEnv st ((r_var,r):as_vars `zip` as)) m >> return ())
+            return r
 
 liveMon :: (Show a,PrettyVar a,Ord a) => LiveEnv a -> Mon a -> H (Dynamic a)
 liveMon env []         = return (dynamic env)

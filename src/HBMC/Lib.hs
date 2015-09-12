@@ -210,14 +210,6 @@ withSolver h = H (\env -> h (sat env))
 context :: H Bit
 context = H (\env -> return (here env))
 
-withExtraContext :: Bit -> H () -> H ()
-withExtraContext c _ | c == ff = return ()
-withExtraContext c h =
-  do x <- new
-     addClauseHere [nt c, x]
-     c0 <- context
-     inContext x (do addClauseHere [c0]; addClauseHere [c]; h)
-
 inContext :: Bit -> H () -> H ()
 inContext c _ | c == ff = return ()
 inContext c h = inContext' c h
@@ -305,7 +297,8 @@ unless cs h
 -- happens when one of them is true
 whens :: [Bit] -> H () -> H ()
 whens cs h
-  | null cs'  = return ()
+  | null cs'        = return ()
+  | all (tt ==) cs' = h
   | otherwise =
     do c0 <- context
        c1 <- new
@@ -367,15 +360,9 @@ nocall cl =
 
 --[ memo ]----------------------------------------------------------------------
 
-nomemoWith :: Equal b => H b -> String -> (a -> b -> H ()) -> a -> H b
-nomemoWith new_b tag h t =
-  do r <- new_b
-     h t r
-     return r
-
-{-# NOINLINE memoWith #-}
-memoWith :: (Ord a, Equal b) => H b -> String -> (a -> b -> H ()) -> (a -> H b)
-memoWith new_b tag h =
+{-# NOINLINE memo #-}
+memo :: Ord a => String -> (a -> H b) -> (a -> H b)
+memo tag h =
   unsafePerformIO $
     do -- putStrLn ("Creating table for " ++ tag ++ "...")
        ref <- newIORef Mp.empty
@@ -384,10 +371,9 @@ memoWith new_b tag h =
                   -- io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (Mp.size xys))
                   (c,y) <- case Mp.lookup x xys of
                              Nothing ->
-                               do y <- new_b
-                                  c <- new
+                               do c <- new
+                                  y <- inContext' c $ h x
                                   io $ writeIORef ref (Mp.insert x (c,y) xys)
-                                  inContext c $ h x y
                                   return (c,y)
 
                              Just (c,y) ->
@@ -397,12 +383,8 @@ memoWith new_b tag h =
                   addClauseHere [c]
                   return y
 
-{-# NOINLINE memo #-}
-memo :: (Ord a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> (a -> H b)
-memo = memoWith new
-
-nomemo :: (Equal b, Constructive b) => String -> (a -> b -> H ()) -> a -> H b
-nomemo = nomemoWith new
+nomemo :: String -> (a -> H b) -> a -> H b
+nomemo _ = id
 
 --------------------------------------------------------------------------------
 
@@ -717,6 +699,10 @@ instance Value a => Value (Thunk a) where
 newtype Val a = Val [(Bit,a)] -- sorted on a
  deriving ( Eq, Ord )
 
+staticVal :: Val a -> Bool
+staticVal (Val [_]) = True
+staticVal _         = False
+
 instance Show a => Show (Val a) where
   show (Val xs) = "[" ++ concat (intersperse "," [ show x | (_,x) <- xs ]) ++ "]"
 
@@ -806,6 +792,9 @@ instance Value (Val a) where
 
 data ThunkVal a = ThunkVal (Val a) [(a,Unique)]
                 -- label of continuations that have to be run if it wakes up
+
+staticTVal :: ThunkVal a -> Bool
+staticTVal (ThunkVal v _) = staticVal v
 
 instance Eq a => Eq (ThunkVal a) where
   ThunkVal v _ == ThunkVal v2 _ = v == v2
@@ -913,6 +902,12 @@ data LiveDesc c
                     [([c],LiveDesc c)] -- if not elem strict, construct this lazily
   deriving (Eq,Ord)
 
+unitDesc :: c -> LiveDesc c
+unitDesc c = DataDesc "Unit" [c] [] []
+
+unitVal :: (Show c,Eq c) => c -> LiveData c
+unitVal c = conData (unitDesc c) c []
+
 descTC :: LiveDesc c -> String
 descTC (DataDesc tc _ _ _) = tc
 
@@ -1007,9 +1002,13 @@ newData i desc0@(DataDesc tc strict lazy args) =
 data EqualMode = Copy | Equalise
   deriving (Eq)
 
+staticHead :: LiveData c -> Bool
+staticHead (LiveData _ c _) = staticTVal c
+
 equalLiveOn :: Ord c => EqualMode -> LiveData c -> LiveData c -> H ()
-equalLiveOn eqm (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
+equalLiveOn eqm d1@(LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
   do equalHere c1 c2
+
      sequence_
        [ whenVal c1 cs $
          (if eqm == Copy then \ h -> forceVal c2 cs >> h else whenVal c2 cs) $
@@ -1047,11 +1046,40 @@ conData (DataDesc s _ _ rs) c as =
            )
            as rs))
 
+caseData ::
+   LiveData c ->
+   Maybe (LiveData c) ->
+   [([Val c],
+     [LiveData c] -> H (LiveData c),
+     -- run when the head is static, and the result is Nothing
+
+     [LiveData c] -> LiveData c -> H (),
+     -- run when head is static and result Just r,
+     -- or when head is symbolic
+     -- if result is Nothing, a new value to put the result in is created.
+
+     LiveData c -> H ()
+     -- run when head is symbolic but is suspended,
+     -- to be able to peek through what's going to happen
+     -- (what constructor is to be returned)
+     -- it is known that there will be some variable to put the result in now.
+
+     )] -> H (LiveData c)
+caseData ld mr hs = undefined
+  -- staticHead ld, run the right continuation
+  -- the arguments are there, in An:s (but what if you have a lazy tuple?
+  -- better poke at the thunks)
+
+  -- dynamicHead ld
+
 whenCon :: (Show c,Ord c) => LiveData c -> [c] -> H () -> ([LiveData c] -> H ()) -> H ()
 whenCon ld@(LiveData _tc v vs) as k_simp k =
   do -- io (putStrLn $ "whenCon on " ++ show ld ++ " as: " ++ show as)
      whens (map (v `thunkValIs`) as) k_simp
      whenVal v as $ do -- io (putStrLn $ "running whenCon on " ++ show ld ++ " as: " ++ show as)
+                       if staticHead ld
+                         then io (putStrLn "knowncon")
+                         else return ()
                        vs' <-
                          sequence
                            [ case jt of
