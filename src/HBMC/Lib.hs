@@ -18,6 +18,28 @@ import Debug.Trace
 import Text.Show.Pretty (parseValue,valToStr)
 
 --------------------------------------------------------------------------------
+-- Valthunk version todos:
+-- 1) differentiate between the newThunkVal building continuation
+--    and the ones using the value in whenCon.
+--
+-- 2) Then in whenCon, if it has to be run now (since it's partly a strict
+--    value), then only run the building continuations.
+--
+-- 3) Thus, try to make it so that the constructors with smallest
+--    dependencies are run first.
+--    Example: run Lam before App because Lam has 1 of App's 3 constructors.
+--
+-- 4) Only do the insist-isn't-peeking if the evaluation is suspended
+--
+-- Try evaluation on binary numbers rather than unary numbers.
+--
+-- Simple examples to try expansion on:
+--
+--   len (reverse xs) > 20
+--
+--   head xs > 20 && len xs > 20
+
+--------------------------------------------------------------------------------
 
 data Source = Check | Input | ValThunk
   deriving (Eq,Ord)
@@ -807,6 +829,7 @@ newThunkVal inp strict lazy =
             if inp then modifyIORef w_ref ((ValThunk,(v =? l,u,runCont u)):)
                    else return ()
               -- only add to wait list if they are inputs
+              -- TODO: make it so that they are only added if they are cased on (whenVal).
 
             modifyIORef c_ref (M.insert u rm)
             return (l,u)
