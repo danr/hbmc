@@ -281,16 +281,15 @@ callSkeleton ty need_maybe i = go
 -- simplify match where all rhs are same
 -- cannot do this when there are projections:
 -- must check that rhs contains no projections of the matched thing
-simplifySameMatch :: Ord a => Expr a -> Expr a
+simplifySameMatch :: Expr Var -> Expr Var
 simplifySameMatch =
   transformExprIn $ \ e0 ->
     case e0 of
       Match s all_brs@(Case _ rhs:brs)
         | all ((== rhs) . case_rhs) brs
-        , and [ x `notElem` locals s
-              | Case _ e <- all_brs
-              , x <- locals e
-              ]
+        , and [ isNothing (unproj g)
+              | Gbl (Global g _ _) :@: [s'] <- universeBi rhs
+              , s == s' ]
         -> rhs
 
       _ -> e0
