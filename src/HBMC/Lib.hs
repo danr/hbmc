@@ -187,11 +187,11 @@ withExtraContext c h =
      inContext x (do addClauseHere [c0]; addClauseHere [c]; h)
 
 inContext :: Bit -> H () -> H ()
-inContext c _ | c == ff = return ()
-inContext c h = inContext' c h
+inContext c h = inContext' c h >> return ()
 
-inContext' :: Bit -> H a -> H a
-inContext' c (H m) = H (\env -> m env{ here = c })
+inContext' :: Bit -> H a -> H (Maybe a)
+inContext' c _ | c == ff = return Nothing
+inContext' c h = H (\env -> Just <$> m env{ here = c })
 
 later :: Source -> Unique -> H () -> H ()
 later source unq h = H (\env ->
@@ -233,7 +233,7 @@ impossible = addClauseHere []
 noop :: a -> H ()
 noop _ = return ()
 
-when :: Bit -> H () -> H ()
+when :: Bit -> H a -> H (Maybe a)
 when c h = whens [c] h
 
 
@@ -266,15 +266,15 @@ unless cs h
   cs' = filter (/=ff) cs
 
 -- happens when one of them is true
-whens :: [Bit] -> H () -> H ()
+whens :: [Bit] -> H a -> H (Maybe a)
 whens cs h
-  | null cs'  = return ()
+  | null cs'  = return Nothing
   | otherwise =
     do c0 <- context
        c1 <- new
        sequence_ [ addClauseHere [nt c, c1] | c <- cs' ]
                                -- c => c1
-       inContext c1 $
+       inContext' c1 $
          do addClauseHere [c0]
             addClauseHere cs'
             h
@@ -536,6 +536,46 @@ solveBit s xs =
 
 --------------------------------------------------------------------------------
 
+squash :: [(Lit,LiveData a)] -> H (LiveData a)
+squash = go . sortBy (comparing snd)
+  where
+  go [(_,d)] = return d
+  go ((b1,d1):(b2,d2):xs) =
+    do d12 <- squash b1 b2 d1 d2
+       b12 <- orl [b1,b2]
+       go ((b12,d12):xs)
+
+squashTwo :: Lit -> Lit -> LiveData a -> LiveData a -> H (LiveData a)
+squashTwo b1 b2 (LiveThunk t1) (LiveThunk t2)
+  | t1 == t2 = return t1 -- jinga!
+  | otherwise
+  = do mx1 <- peek t1
+       mx2 <- peek t2
+       case (mx1,mx2) of
+         (Just x1,Just x2) -> do this . LiveThunk <$> squashTwo b1 b2 x1 x2
+         _ -> delay False $ do x1 <- force t1 -- todo: check that we don't force input
+                               x2 <- force t2 -- and do not cause non-termination
+                               LiveThunk <$> squashTwo b1 b2 x1 x2
+squashTwo b1 b2 (LiveData tc v1 as1) (LiveData _ v2 as2)
+  = do v <- newVal (domain v1 `intersect` domain v2)
+       when b1 (equalHere v v1)
+       when b2 (equalHere v v2)
+       as <- sequence
+         [ (,) cs <$> whens [ v =? c | c <- cs ] (squashTwo b1 b2 x1 x2)
+         | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
+         ]
+       return (LiveData tc v as)
+
+afterThunk :: Thunk a -> (a -> H b) -> H (Thunk b)
+afterThunk th h =
+  delay False $
+    do x <- force th
+       h x
+  -- ?
+  -- + if input th later poke th?
+  -- now caseData can return a Thunk, always (?)
+  -- what!
+
 data Thunk a = This a | Delay Bool Unique (IORef (Either (H ()) a))
 
 instance Show a => Show (Thunk a) where
@@ -560,7 +600,8 @@ delay :: Bool -> H a -> H (Thunk a)
 delay inp (H m) =
   do c <- context
      ref <- io $ newIORef undefined
-     io $ writeIORef ref (Left (H (\env -> m (env{ here = c }) >>= (writeIORef ref . Right))))
+     io $ writeIORef ref $ Left $ H $ \env -> do x <- m (env{ here = c })
+                                                 writeIORef ref (Right x)
      unq <- io $ newUnique
      return (Delay inp unq ref)
 
@@ -804,22 +845,12 @@ equalLiveOn :: Ord c => (forall a . Equal a => a -> a -> H ()) -> LiveData c -> 
 equalLiveOn k (LiveThunk t1)        (LiveThunk t2)        = k t1 t2
 equalLiveOn k (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
   do equalHere c1 c2
-     ctx <- context
-
-     let bigdmn = case domain c1 of
-                    dmn@(_:_:_) -> Just (sort dmn)
-                    _           -> Nothing
-
      sequence_
-       [ case bigdmn of
-           -- Just dmn | length cs * 2 > length dmn
-           --   -> do let bs = [ c1 =? c | c <- sort dmn \\ sort cs ]
-           --         io $ putStrLn (unwords ["UNLESS",show (length bs),show (length cs),show (length dmn)])
-           --         unless bs (k x1 x2)
-           _ -> do -- io $ putStrLn "WHENS"
-                   whens [ c1 =? c | c <- cs ] (k x1 x2)
+       [ whens [ c1 =? c | c <- cs ] (k x1 x2)
        | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
        ]
+equalLiveOn _ (LiveData tc _ _) _ = error $ "equalLiveOn " ++ tc
+equalLiveOn _ _ (LiveData tc _ _) = error $ "equalLiveOn " ++ tc
 
 instance Ord c => Equal (LiveData c) where
   (>>>)        = equalLiveOn (>>>)
