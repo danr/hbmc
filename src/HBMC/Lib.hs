@@ -10,6 +10,7 @@ import Data.Unique
 import qualified MiniSat as M
 import MiniSat ( Solver, Lit )
 import System.IO.Unsafe
+import Data.Ord ( comparing )
 
 import Debug.Trace
 
@@ -112,7 +113,7 @@ trySolve confl_min quiet = H (\env ->
                             do let ws' = [ t | t@(_,(_,unq',_)) <- reverse ws, unq /= unq' ]
                                verbose ("Points: " ++ show (length ws'))
                                writeIORef (waits env) ws'
-                               verbose $ "Expanding " ++ show source ++ "..."
+                               verbose $ "Expanding " ++ show source ++ "..." ++ show unq
                                h env{ here = p }
                                verbose "Expansion done"
                                return Nothing
@@ -190,12 +191,16 @@ inContext :: Bit -> H () -> H ()
 inContext c h = inContext' c h >> return ()
 
 inContext' :: Bit -> H a -> H (Maybe a)
-inContext' c _ | c == ff = return Nothing
-inContext' c h = H (\env -> Just <$> m env{ here = c })
+inContext' c _     | c == ff = return Nothing
+inContext' c (H m) = H (\env -> Just <$> m env{ here = c })
+
+instance Show Unique where
+  show = show . hashUnique
 
 later :: Source -> Unique -> H () -> H ()
 later source unq h = H (\env ->
   do ws <- readIORef (waits env)
+     putStrLn $ "later " ++ show unq
      writeIORef (waits env) ((source, (here env, unq, h)):ws)
   )
 
@@ -212,10 +217,16 @@ check h@(H m) = H (\env ->
   )
 -}
 
-check :: H () -> H ()
+check :: H (Delayed a) -> H (Delayed a)
+check = error "check todo"
+{- ... todo check
+check :: H a -> H (Thunk a)
 check h =
-  do u <- io newUnique
+  do delay True h
+
+      u <- io newUnique
      later Check u h
+     -}
 
 must :: Bit -> H () -> H ()
 must c h =
@@ -293,52 +304,11 @@ ifThenElse :: Bit -> (H (), H ()) -> H ()
 ifThenElse b (yes,no) =
   choice [ do addClauseHere [b]; yes, do addClauseHere [nt b]; no ]
 
---[ call ]----------------------------------------------------------------------
-
-data Call a b =
-  Call
-  { doit   :: Bit
-  , invoke :: a -> H b
-  }
-
-newCall :: (Constructive a, Constructive b, Equal a, Equal b)
-        => (a -> H (Maybe b)) -> H (Call a b)
-newCall h =
-  do b <- new
-     x <- new
-     c <- context
-     my <- inContext' b $
-       do addClauseHere [c]
-          h x
-     return $
-       Call{ doit   = b
-           , invoke = \x' -> do case my of
-                                  Nothing -> error "Invoked Nothing!"
-                                  Just y  -> do x' >>> x
-                                                return y
-
-           }
-
-call :: Call a b -> a -> H b
-call cl x =
-  do addClauseHere [doit cl]
-     invoke cl x
-
-nocall :: Call a b -> H ()
-nocall cl =
-  do addClauseHere [nt (doit cl)]
-
 --[ memo ]----------------------------------------------------------------------
 
-nomemoWith :: Equal b => H b -> String -> (a -> b -> H ()) -> a -> H b
-nomemoWith new_b tag h t =
-  do r <- new_b
-     h t r
-     return r
-
-{-# NOINLINE memoWith #-}
-memoWith :: (Ord a, Equal b) => H b -> String -> (a -> b -> H ()) -> (a -> H b)
-memoWith new_b tag h =
+{-# NOINLINE memo #-}
+memo :: Ord a => String -> (a -> H b) -> (a -> H b)
+memo tag h =
   unsafePerformIO $
     do -- putStrLn ("Creating table for " ++ tag ++ "...")
        ref <- newIORef Mp.empty
@@ -347,10 +317,9 @@ memoWith new_b tag h =
                   -- io $ putStrLn ("Table size for " ++ tag ++ ": " ++ show (Mp.size xys))
                   (c,y) <- case Mp.lookup x xys of
                              Nothing ->
-                               do y <- new_b
-                                  c <- new
+                               do c <- new
+                                  Just y <- inContext' c $ h x
                                   io $ writeIORef ref (Mp.insert x (c,y) xys)
-                                  inContext c $ h x y
                                   return (c,y)
 
                              Just (c,y) ->
@@ -360,12 +329,8 @@ memoWith new_b tag h =
                   addClauseHere [c]
                   return y
 
-{-# NOINLINE memo #-}
-memo :: (Ord a, Equal b, Constructive b) => String -> (a -> b -> H ()) -> (a -> H b)
-memo = memoWith new
-
-nomemo :: (Equal b, Constructive b) => String -> (a -> b -> H ()) -> a -> H b
-nomemo = nomemoWith new
+nomemo :: String -> (a -> H b) -> a -> H b
+nomemo _ = id
 
 --------------------------------------------------------------------------------
 
@@ -536,51 +501,11 @@ solveBit s xs =
 
 --------------------------------------------------------------------------------
 
-squash :: [(Lit,LiveData a)] -> H (LiveData a)
-squash = go . sortBy (comparing snd)
-  where
-  go [(_,d)] = return d
-  go ((b1,d1):(b2,d2):xs) =
-    do d12 <- squash b1 b2 d1 d2
-       b12 <- orl [b1,b2]
-       go ((b12,d12):xs)
-
-squashTwo :: Lit -> Lit -> LiveData a -> LiveData a -> H (LiveData a)
-squashTwo b1 b2 (LiveThunk t1) (LiveThunk t2)
-  | t1 == t2 = return t1 -- jinga!
-  | otherwise
-  = do mx1 <- peek t1
-       mx2 <- peek t2
-       case (mx1,mx2) of
-         (Just x1,Just x2) -> do this . LiveThunk <$> squashTwo b1 b2 x1 x2
-         _ -> delay False $ do x1 <- force t1 -- todo: check that we don't force input
-                               x2 <- force t2 -- and do not cause non-termination
-                               LiveThunk <$> squashTwo b1 b2 x1 x2
-squashTwo b1 b2 (LiveData tc v1 as1) (LiveData _ v2 as2)
-  = do v <- newVal (domain v1 `intersect` domain v2)
-       when b1 (equalHere v v1)
-       when b2 (equalHere v v2)
-       as <- sequence
-         [ (,) cs <$> whens [ v =? c | c <- cs ] (squashTwo b1 b2 x1 x2)
-         | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
-         ]
-       return (LiveData tc v as)
-
-afterThunk :: Thunk a -> (a -> H b) -> H (Thunk b)
-afterThunk th h =
-  delay False $
-    do x <- force th
-       h x
-  -- ?
-  -- + if input th later poke th?
-  -- now caseData can return a Thunk, always (?)
-  -- what!
-
 data Thunk a = This a | Delay Bool Unique (IORef (Either (H ()) a))
 
 instance Show a => Show (Thunk a) where
   show (This x) = "This " ++ show x
-  show (Delay b u r) = "Delay"
+  show (Delay b u r) = "Delay " ++ show u
 
 instance Eq a => Eq (Thunk a) where
   This x      == This y      = x == y
@@ -630,24 +555,43 @@ force th =
 doForce :: Thunk a -> (a -> H ()) -> H ()
 doForce t h = force t >>= h
 
+enqueue :: Thunk a -> H ()
+enqueue This{} = return ()
+enqueue th@(Delay inp unq ref) =
+  do ema <- io $ readIORef ref
+     case ema of
+       Left{} | inp -> later Input unq $ poke th
+       _            -> return ()
+
 ifForce :: Thunk a -> (a -> H ()) -> H ()
 ifForce (This x)               h = h x
 ifForce th@(Delay inp unq ref) h =
   do ema <- io $ readIORef ref
+     enqueue th
      case ema of
        Left m  -> do c <- context
                      io $ writeIORef ref $ Left $
                        do m
                           Just a <- peek th
                           inContext c (h a)
-                     if inp then
-                       later Input unq $ poke th
-                      else
-                       return ()
        Right a -> h a
 
 withoutForce :: a -> (a -> H ()) -> H ()
 withoutForce x h = h x
+
+joinThunks :: Thunk (Thunk a) -> H (Thunk a)
+joinThunks t = delay False (force =<< force t)
+
+afterThunk :: Thunk a -> (a -> H b) -> H (Thunk b)
+afterThunk t h = delay False (h =<< force t)
+
+bindThunk :: Thunk a -> (a -> H (Thunk b)) -> H (Thunk b)
+bindThunk t h = delay False (force =<< h =<< force t)
+
+register :: Thunk a -> Thunk b -> H (Thunk b)
+register ta tb =
+  do ifForce ta (\ _ -> poke tb)
+     return tb
 
 instance Constructive a => Constructive (Thunk a) where
   newPoint inp = delay inp $ do -- io (putStrLn ("newThunk " ++ show inp))
@@ -808,55 +752,88 @@ instance Value (Val a) where
 
 --------------------------------------------------------------------------------
 
-data LiveDesc c
-  = DataDesc String [c] [([c],LiveDesc c)]
-  | ThunkDesc (LiveDesc c)
+data DataDesc c = DataDesc String [c] [([c],DataDesc c)]
   deriving (Eq,Ord)
 
-descTC :: LiveDesc c -> String
+descTC :: DataDesc c -> String
 descTC (DataDesc tc _ _) = tc
-descTC (ThunkDesc d)     = descTC d
 
-instance Show c => Show (LiveDesc c) where
+instance Show c => Show (DataDesc c) where
   show (DataDesc s cs xs) = s ++ " " ++ show cs ++ " " ++ show [(cs',descTC d)|(cs',d)<-xs]
-  show (ThunkDesc d)      = "Thunk (" ++ show d ++ ")"
 
-data LiveData c
-  = LiveData String (Val c) [([c],Maybe (LiveData c))]
-  | LiveThunk (Thunk (LiveData c))
+data Data c = Data String (Val c) [([c],Maybe (Delayed c))]
   deriving (Eq,Ord,Show)
 
-newData :: (Show c,Ord c) => Bool -> LiveDesc c -> H (LiveData c)
-newData i (ThunkDesc d) =
-  do LiveThunk <$> delay i (newData i d)
+type Delayed c = Thunk (Data c)
 
+newDelayed :: (Show c,Ord c) => Bool -> DataDesc c -> H (Delayed c)
+newDelayed i d = delay i (newData i d)
+
+newData :: (Show c,Ord c) => Bool -> DataDesc c -> H (Data c)
 newData i desc@(DataDesc tc cons args) =
   do c <- newVal cons
-     as <- sequence [ do d <- newData i desc
+     as <- sequence [ do d <- newDelayed i desc
                          return (cs,Just d)
                     | (cs,desc) <- args
                     ]
-     let d = LiveData tc c as
+     let d = Data tc c as
      -- io (print desc)
      -- io (print d)
      return d
 
-equalLiveOn :: Ord c => (forall a . Equal a => a -> a -> H ()) -> LiveData c -> LiveData c -> H ()
-equalLiveOn k (LiveThunk t1)        (LiveThunk t2)        = k t1 t2
-equalLiveOn k (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
+squash :: Ord a => [(Bit,Delayed a)] -> H (Delayed a)
+squash = go . sortBy (comparing snd) . filter ((/= ff) . fst)
+  where
+  go [(_,d)] = return d
+  go ((b1,d1):(b2,d2):xs) =
+    do d12 <- squashTwo b1 b2 d1 d2
+       b12 <- orl [b1,b2]
+       go ((b12,d12):xs)
+
+squashTwo :: Ord a => Bit -> Bit -> Delayed a -> Delayed a -> H (Delayed a)
+squashTwo b1 b2 t1 t2 -- use memo on unique here?
+  | t1 == t2 = return t1 -- jinga!
+  | otherwise
+  = do mx1 <- peek t1
+       mx2 <- peek t2
+       case (mx1,mx2) of
+         (Just x1,Just x2) -> do this <$> squashTwoData b1 b2 x1 x2
+         _ -> delay False $ do x1 <- force t1 -- todo: check that we don't force input
+                               x2 <- force t2 -- and do not cause non-termination
+                                              -- backup plan here is to use new+copy
+                                              -- (always works)
+                                              -- (to use new, we need the DataDesc)
+                               squashTwoData b1 b2 x1 x2
+
+squashTwoData :: Ord a => Bit -> Bit -> Data a -> Data a -> H (Data a)
+squashTwoData b1 b2 (Data tc v1 as1) (Data _ v2 as2)
+  = do v <- newVal (domain v1 `union` domain v2)
+       let dom = domain v
+       when b1 (equalHere v v1)
+       when b2 (equalHere v v2)
+       as <- sequence
+         [ (,) cs <$> whens [ v =? c | c <- cs, c `elem` dom ]
+                            (do case (m1,m2) of
+                                  (Just x1,Just x2) -> squashTwo b1 b2 x1 x2
+                                  (Nothing,Just x2) -> return x2
+                                  (Just x1,Nothing) -> return x1
+                                  (Nothing,Nothing) -> error "noone knows what the value is!")
+         | ((cs,m1),(_cs,m2)) <- as1 `zip` as2
+         ]
+       return (Data tc v as)
+
+equalOn :: Ord c => (forall a . Equal a => a -> a -> H ()) -> Data c -> Data c -> H ()
+equalOn k (Data tc1 c1 as1) (Data tc2 c2 as2) = -- | tc1 == tc2 =
   do equalHere c1 c2
      sequence_
        [ whens [ c1 =? c | c <- cs ] (k x1 x2)
        | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
        ]
-equalLiveOn _ (LiveData tc _ _) _ = error $ "equalLiveOn " ++ tc
-equalLiveOn _ _ (LiveData tc _ _) = error $ "equalLiveOn " ++ tc
 
-instance Ord c => Equal (LiveData c) where
-  (>>>)        = equalLiveOn (>>>)
-  equalHere    = equalLiveOn equalHere
-  notEqualHere (LiveThunk th1)       (LiveThunk th2)       = notEqualHere th1 th2
-  notEqualHere (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
+instance Ord c => Equal (Data c) where
+  (>>>)        = equalOn (>>>)
+  equalHere    = equalOn equalHere
+  notEqualHere (Data tc1 c1 as1) (Data tc2 c2 as2) = -- | tc1 == tc2 =
     do -- io (putStrLn "notEqualHere")
        choice
          [ do notEqualHere c1 c2
@@ -868,13 +845,13 @@ instance Ord c => Equal (LiveData c) where
                 ]
          ]
 
-conData :: (Show c,Eq c) => LiveDesc c -> c -> [LiveData c] -> LiveData c
-conData (ThunkDesc d)     c as =
-  -- snd $ traceShowId $ (,) "conData" $
-    LiveThunk (this (conData d c as))
+conDelayed :: (Show c,Eq c) => DataDesc c -> c -> [Delayed c] -> Delayed c
+conDelayed desc c as = this (conData desc c as)
+
+conData :: (Show c,Eq c) => DataDesc c -> c -> [Delayed c] -> Data c
 conData (DataDesc s _ rs) c as =
-  -- snd $ traceShowId $ (,) "conData" $
-    LiveData s (val c)
+  snd $ traceShowId $ (,) "conData" $
+    Data s (val c)
       (snd
          (mapAccumL
            (\ as_rem (cs,_) ->
@@ -886,19 +863,29 @@ conData (DataDesc s _ rs) c as =
            )
            as rs))
 
-caseData :: LiveData c -> (Val c -> [LiveData c] -> H ()) -> H ()
-caseData (LiveThunk th)      k = ifForce th (\ ld -> caseData ld k)
-caseData (LiveData _tc v vs) k = k v (map (\ (_,~(Just v)) -> v) vs)
+caseDelayed :: (Show c,Ord c) => Delayed c -> [(c,[Delayed c] -> H (Delayed c))] -> H (Delayed c)
+caseDelayed th ks =
+  do enqueue th
+     th `bindThunk` \ ld -> caseData ld ks
+
+caseData :: (Show c,Ord c) => Data c -> [(c,[Delayed c] -> H (Delayed c))] -> H (Delayed c)
+caseData d@(Data _tc v as) ks =
+  do let as' = map (\ (_,mv) -> case mv of Just v -> v; Nothing -> error $ show d) as
+     ds <-
+       sequence
+         [ (,) (v =? c) <$> when (v =? c) (k as')
+         | (c,k) <- ks
+         ]
+     squash [ (b,d) | (b,Just d) <- ds ]
 
 data LiveValue c = ConValue c [LiveValue c] | ThunkValue
 
-instance Eq c => Value (LiveData c) where
-  type Type (LiveData c) = LiveValue c
+instance Eq c => Value (Data c) where
+  type Type (Data c) = LiveValue c
 
   dflt _ = ThunkValue
 
-  get (LiveThunk th)   = get th
-  get (LiveData _ v cns) =
+  get (Data _ v cns) =
     do c <- get v
        as <- sequence [ get d | (cs,Just d) <- cns, c `elem` cs ]
        return (ConValue c as)
@@ -908,14 +895,14 @@ instance Show c => Show (LiveValue c) where
   show (ConValue g []) = show g
   show (ConValue g as) = "(" ++ show g ++ concat [ " " ++ show a | a <- as ] ++ ")"
 
-instance Show c => IncrView (LiveData c) where
-  incrView (LiveThunk th)      = incrView th
-  incrView (LiveData tc _ cns) =
+instance Show c => IncrView (Data c) where
+  incrView (Data tc _ cns) =
     do cns' <- sequence [ incrView mv | (_,mv) <- cns ]
        return ("(" ++ tc ++ concat cns' ++ ")")
 
 -------------------------------------
 
+{-
 data Data c a = Con (Val c) a
   deriving ( Eq, Ord )
 
@@ -1005,6 +992,7 @@ getStrictData :: (c -> a -> H b) -> b -> Data c a -> H b
 getStrictData f d (Con c a) =
          do x <- get c
             f x a
+            -}
 
 -----------------------------------------------------------------
 
@@ -1047,11 +1035,13 @@ instance (IncrView a,IncrView b) => IncrView (TagShow a b) where
     r' <- incrView r
     return (x ++ ": " ++ xe' ++ "\n" ++ r')
 
+    {-
 instance (Show c,IncrView c,IncrView a) => IncrView (Data c a) where
   incrView (Con v c) =
     do v' <- incrView v
        c' <- incrView c
        return ("(" ++ v' ++ c' ++ ")")
+       -}
 
 instance (Show a,IncrView a) => IncrView (Val a) where
   incrView (Val bs) =

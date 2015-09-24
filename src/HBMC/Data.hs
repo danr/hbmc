@@ -12,7 +12,7 @@ import Tip.Core  (defines,uses)
 import Tip.Pretty
 
 import HBMC.Identifiers
-import HBMC.Haskell
+-- import HBMC.Haskell
 import HBMC.Lib hiding (Type,caseData)
 
 import Tip.Core (Datatype(..),Constructor(..))
@@ -20,7 +20,7 @@ import Control.Applicative
 
 type DataInfo a = [(a,(a,[Int]))]
 
-dataDescs :: forall a . (Show a,PrettyVar a,Ord a) => Bool -> [Datatype a] -> a -> LiveDesc a
+dataDescs :: forall a . (Show a,PrettyVar a,Ord a) => Bool -> [Datatype a] -> a -> DataDesc a
 dataDescs lazy_datatypes dts = lkup_desc
   where
   rec_dts = recursiveDatatypes dts
@@ -36,7 +36,7 @@ dataDescs lazy_datatypes dts = lkup_desc
        | (i,ty) <- [0..] `zip` types ])
     | dt@(Datatype tc [] cons) <- dts
     , let (indexes,types) = dataInfo dt
-    , let maybe_thunk | tc `elem` rec_dts || lazy_datatypes = ThunkDesc
+    , let maybe_thunk | tc `elem` rec_dts || lazy_datatypes = id
                       | otherwise                           = id
     ]
 
@@ -76,6 +76,7 @@ merge (xs:xss) = help xs (merge xss)
     help xs (y:ys) = y:help (delete y xs) ys
     help xs []     = xs
 
+{-
 trDatatype :: forall a . (a ~ Var) => [a] -> Bool -> Datatype a -> Fresh [Decl a]
 trDatatype rec_dts lazy_datatypes dt@(Datatype tc tvs cons) =
   do constructors <- mapM make_con cons
@@ -270,5 +271,5 @@ trDatatype rec_dts lazy_datatypes dt@(Datatype tc tvs cons) =
     (TyCon (api "IncrView") [TyCon (conLabel tc) []])
     [FunDecl (api "incrView")
       [([WildPat],returnExpr (String (conRepr tc)))]]
-
+-}
 

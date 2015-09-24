@@ -25,7 +25,6 @@ import Tip.Scope
 
 import HBMC.Merge
 import HBMC.Identifiers
-import HBMC.Haskell
 
 import HBMC.Data
 import HBMC.Projections
@@ -127,29 +126,7 @@ runLive p (ds,fs,prop:_) = liveProp p static (fmap pp_var prop)
   lkup_data = dataDescs (Params.delay_all_datatypes p) (map (fmap pp_var) ds)
   static    = liveFuncs lkup_data (map (fmap pp_var) fs)
 
-compile :: Params -> Translated -> Fresh String
-compile p (ds,fs,props) =
- do let main_decls =
-           [ H.funDecl (Var "main") [] (trProp p prop) | prop <- props ]
-
-    let fn_decls = [ trFunc f | f <- fs ]
-
-    let rec_dts = recursiveDatatypes ds
-
-    dt_decls <- mapM (trDatatype rec_dts (Params.delay_all_datatypes p)) ds
-
-    let decls = concat dt_decls ++ fn_decls ++ take 1 main_decls
-
-    let Decls ds = addImports $ fst $ renameDecls $ fmap toHsId (Decls decls)
-
-    let langs = map LANGUAGE ["ScopedTypeVariables", "TypeFamilies", "FlexibleInstances",
-                              "MultiParamTypeClasses", "GeneralizedNewtypeDeriving"]
-
-    return (ppRender (Decls (langs ++ Module "Main" : ds)))
-
 ren = renameWith (disambig varStr)
-
-data Target = Live | Compile
 
 main :: IO ()
 main = do
@@ -162,12 +139,7 @@ main = do
     let h :: Translated -> Fresh (IO ())
         h tr = case Params.compile params of
                  False -> return (runLive params tr)
-                 True  -> do c <- compile params tr
-                             return $
-                               do writeFile "Tmp.hs" c
-                                  rawSystem "ghc" ["Tmp.hs"]
-                                  rawSystem "./Tmp" []
-                                  return ()
+                 True  -> error "compile not supported"
 
     let (m,dbg) = freshPass (runWriterT . (lift . h <=< translate params)) thy0
 
