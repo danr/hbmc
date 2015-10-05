@@ -759,9 +759,9 @@ descTC :: DataDesc c -> String
 descTC (DataDesc tc _ _) = tc
 
 instance Show c => Show (DataDesc c) where
-  show (DataDesc s cs xs) = s ++ " " ++ show cs ++ " " ++ show [(cs',descTC d)|(cs',d)<-xs]
+  show (DataDesc s cs xs) = s -- ++ " " ++ show cs ++ " " ++ show [(cs',descTC d)|(cs',d)<-xs]
 
-data Data c = Data String (Val c) [([c],Maybe (Delayed c))]
+data Data c = Data (DataDesc c) (Val c) [([c],Maybe (Delayed c))]
   deriving (Eq,Ord,Show)
 
 type Delayed c = Thunk (Data c)
@@ -776,37 +776,46 @@ newData i desc@(DataDesc tc cons args) =
                          return (cs,Just d)
                     | (cs,desc) <- args
                     ]
-     let d = Data tc c as
+     let d = Data desc c as
      -- io (print desc)
      -- io (print d)
      return d
 
-squash :: Ord a => [(Bit,Delayed a)] -> H (Delayed a)
-squash = go . sortBy (comparing snd) . filter ((/= ff) . fst)
+squash :: (Show a,Ord a) => DataDesc a -> [(Bit,Delayed a)] -> H (Delayed a)
+squash desc = go . sortBy (comparing snd) . filter ((/= ff) . fst)
   where
+  go [] = error $ "squash empty list: " ++ show desc
   go [(_,d)] = return d
   go ((b1,d1):(b2,d2):xs) =
-    do d12 <- squashTwo b1 b2 d1 d2
+    do d12 <- squashTwo desc b1 b2 d1 d2
        b12 <- orl [b1,b2]
        go ((b12,d12):xs)
 
-squashTwo :: Ord a => Bit -> Bit -> Delayed a -> Delayed a -> H (Delayed a)
-squashTwo b1 b2 t1 t2 -- use memo on unique here?
+squashTwo :: (Show a,Ord a) => DataDesc a -> Bit -> Bit -> Delayed a -> Delayed a -> H (Delayed a)
+squashTwo desc b1 b2 t1 t2 -- use memo on unique here?
   | t1 == t2 = return t1 -- jinga!
   | otherwise
   = do mx1 <- peek t1
        mx2 <- peek t2
        case (mx1,mx2) of
-         (Just x1,Just x2) -> do this <$> squashTwoData b1 b2 x1 x2
-         _ -> delay False $ do x1 <- force t1 -- todo: check that we don't force input
+         (Just x1,Just x2) ->
+              do io (putStrLn "squashTwoData :)")
+                 this <$> squashTwoData b1 b2 x1 x2
+         _ -> do io (putStrLn "squashTwoNew  :(")
+                 x <- newDelayed False desc
+                 when b1 (t1 >>> x)
+                 when b2 (t2 >>> x)
+                 return x
+              {- delay False $ do x1 <- force t1 -- todo: check that we don't force input
                                x2 <- force t2 -- and do not cause non-termination
                                               -- backup plan here is to use new+copy
                                               -- (always works)
                                               -- (to use new, we need the DataDesc)
                                squashTwoData b1 b2 x1 x2
+              -}
 
-squashTwoData :: Ord a => Bit -> Bit -> Data a -> Data a -> H (Data a)
-squashTwoData b1 b2 (Data tc v1 as1) (Data _ v2 as2)
+squashTwoData :: (Show a,Ord a) => Bit -> Bit -> Data a -> Data a -> H (Data a)
+squashTwoData b1 b2 (Data desc v1 as1) (Data _ v2 as2)
   = do v <- newVal (domain v1 `union` domain v2)
        let dom = domain v
        when b1 (equalHere v v1)
@@ -814,13 +823,13 @@ squashTwoData b1 b2 (Data tc v1 as1) (Data _ v2 as2)
        as <- sequence
          [ (,) cs <$> whens [ v =? c | c <- cs, c `elem` dom ]
                             (do case (m1,m2) of
-                                  (Just x1,Just x2) -> squashTwo b1 b2 x1 x2
+                                  (Just x1,Just x2) -> squashTwo desc b1 b2 x1 x2
                                   (Nothing,Just x2) -> return x2
                                   (Just x1,Nothing) -> return x1
                                   (Nothing,Nothing) -> error "noone knows what the value is!")
          | ((cs,m1),(_cs,m2)) <- as1 `zip` as2
          ]
-       return (Data tc v as)
+       return (Data desc v as)
 
 equalOn :: Ord c => (forall a . Equal a => a -> a -> H ()) -> Data c -> Data c -> H ()
 equalOn k (Data tc1 c1 as1) (Data tc2 c2 as2) = -- | tc1 == tc2 =
@@ -849,9 +858,9 @@ conDelayed :: (Show c,Eq c) => DataDesc c -> c -> [Delayed c] -> Delayed c
 conDelayed desc c as = this (conData desc c as)
 
 conData :: (Show c,Eq c) => DataDesc c -> c -> [Delayed c] -> Data c
-conData (DataDesc s _ rs) c as =
-  snd $ traceShowId $ (,) "conData" $
-    Data s (val c)
+conData desc@(DataDesc _ _ rs) c as =
+  -- snd $ traceShowId $ (,) "conData" $
+    Data desc (val c)
       (snd
          (mapAccumL
            (\ as_rem (cs,_) ->
@@ -865,18 +874,19 @@ conData (DataDesc s _ rs) c as =
 
 caseDelayed :: (Show c,Ord c) => Delayed c -> [(c,[Delayed c] -> H (Delayed c))] -> H (Delayed c)
 caseDelayed th ks =
-  do enqueue th
-     th `bindThunk` \ ld -> caseData ld ks
+  do r <- th `bindThunk` \ ld -> caseData ld ks
+     ifForce th (\ _ -> poke r)
+     return r
 
 caseData :: (Show c,Ord c) => Data c -> [(c,[Delayed c] -> H (Delayed c))] -> H (Delayed c)
-caseData d@(Data _tc v as) ks =
+caseData d@(Data desc v as) ks =
   do let as' = map (\ (_,mv) -> case mv of Just v -> v; Nothing -> error $ show d) as
      ds <-
        sequence
          [ (,) (v =? c) <$> when (v =? c) (k as')
          | (c,k) <- ks
          ]
-     squash [ (b,d) | (b,Just d) <- ds ]
+     squash desc [ (b,d) | (b,Just d) <- ds ]
 
 data LiveValue c = ConValue c [LiveValue c] | ThunkValue
 
@@ -898,7 +908,7 @@ instance Show c => Show (LiveValue c) where
 instance Show c => IncrView (Data c) where
   incrView (Data tc _ cns) =
     do cns' <- sequence [ incrView mv | (_,mv) <- cns ]
-       return ("(" ++ tc ++ concat cns' ++ ")")
+       return ("(" ++ descTC tc ++ concat cns' ++ ")")
 
 -------------------------------------
 
