@@ -11,13 +11,18 @@
 % 11pt          To set in 11-point type instead of 9-point.
 % authoryear    To obtain author/year citation style instead of numeric.
 
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
 \usepackage{amsmath}
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{textcomp}
+\usepackage{verbatim}
 \usepackage[final]{microtype}
+\usepackage{url}
 
-\newcommand{\comment}[1]{\emph{COMMENT: #1}}
+\newcommand{\comm}[1]{\marginpar{\footnotesize #1}}
 \newcommand{\ifthenelse}{|if|-|then|-|else|}
 %format § = $
 
@@ -48,31 +53,20 @@
 
 \title{SAT-based Bounded Model Checking\\for Functional Programs}
 \titlerunning{DRAFT SAT-based Bounded Model Checking\\for Functional Programs}
-\subtitle{}
 
-%%sigplan
-%\authorinfo{Koen Claessen \and Dan Ros{\'e}n}
-%           {Chalmers University of Technology}
-%           {\{koen,danr\}chalmers.se}
 \author{Koen Claessen \and Dan Ros{\'e}n}
+%
+\authorrunning{Koen Claessen et al.}
+
 \institute{Department of Computer Science and Engineering, Chalmers University of Technology
-	\email{\{koen,danr\}@@chalmers.se}
-	}
+\email{\{koen,danr\}@@chalmers.se}
+}
 
 \maketitle
 
 \begin{abstract}
 We present a new symbolic evaluation method for functional programs that generates input to a SAT-solver. The result is a Bounded Model Checking (BMC) method for functional programs that can find concrete inputs that cause the program to produce certain outputs, or show the inexistence of such inputs under certain bounds. SAT-solvers have long been used for BMC on hardware and low-level software. This paper presents the first method for SAT-based BMC for high-level programs containing algebraic datatypes and unlimited recursion. Our method works {\em incrementally}, i.e. it increases bounds on inputs until it finds a solution. We also present a novel optimization, namely {\em function call merging}, that can greatly reduce the complexity of symbolic evaluation for recursive functions over datatypes with multiple recursive constructors.
 \end{abstract}
-
-%%sigplan
-%% DO THIS FOR THE FINAL VERSION!!!
-%\category{CR-number}{subcategory}{third-level}
-
-% general terms are not compulsory anymore,
-% you may leave them out
-%\terms
-%bounded model checking, SAT
 
 \keywords
 bounded model checking, SAT, symbolic evaluation
@@ -81,15 +75,44 @@ bounded model checking, SAT, symbolic evaluation
 
 \section{Introduction}
 
-At the end of the 1990s, SAT-based Bounded Model Checking (BMC \cite{bmc}) was introduced as an alternative to BDD-based hardware model checking. BMC revolutionized the field; SAT-solvers by means of BMC provided a scalable and efficient search method for finding bugs. A BMC tool enumerates a depth bound $d$, starting from 0 upwards, and tries to find a counter example of length $d$, using a SAT-solver. Deep bug finding was one thing BDD-based methods were not good at. Since then, BMC techniques have also found their way into software model checkers. One example is the C model checker CBMC \cite{cbmc}. BMC techniques work well for software that is low-level (reasoning about bits, words, and arrays), and not well at all for software with higher-level features (pointers, recursive datastructures).
+At the end of the 1990s, SAT-based Bounded Model Checking (BMC \cite{bmc}) was
+introduced as an alternative to BDD-based hardware model checking. BMC
+revolutionized the field; SAT-solvers by means of BMC provided a scalable and
+efficient search method for finding bugs. A BMC tool enumerates a depth
+bound~$d$, starting from 0 upwards, and tries to find a counter example of
+length~$d$, using a SAT-solver. Deep bug finding was one thing BDD-based
+methods were not good at. Since then, BMC techniques have also found their way
+into software model checkers. One example is the C model checker CBMC
+\cite{cbmc}. BMC techniques work well for software that is low-level (reasoning
+about bits, words, and arrays), and not well at all for software with
+higher-level features (pointers, recursive datastructures).
 
-Our aim in this paper is to take the first step towards bringing the power of SAT-based BMC to a high-level functional programming language, with algebraic datatypes and recursion. The goal is to provide a tool that can find inputs to programs that result in outputs with certain properties. Applications include property testing, finding solutions to search problems which are expressed as a predicate in a functional language, inverting functions in a program, finding test data that satisfies certain constraints, etc.
+Our aim in this paper is to take the first step towards bringing the power of
+SAT-based BMC to a high-level functional programming language, with algebraic
+datatypes and recursion. The goal is to provide a tool that can find inputs to
+programs that result in outputs with certain properties. Applications include
+property testing, finding solutions to search problems which are expressed as a
+predicate in a functional language, inverting functions in a program, finding
+test data that satisfies certain constraints, etc.
 
-There exist alternatives to using a SAT-solver for these problems. For example, QuickCheck \cite{quickcheck} is a tool for random property-based testing that has been shown to be quite effective at finding bugs in programs. However, to find intricate bugs, often a lot of work has to be spent on test data generators, and a lot of insight is required. A dedicated search procedure could alleviate some of that work. Also, random testing would not work at all for finding solutions to search problems, or inverting a function.
+We built this on top of only a SAT solver. \comm{comment on why only sat}
+No SMT-techniques, such as uninterpreted functions or data
+types, were used. However, it is easy to change the SAT solver that is used
+in this article to leverage other useful theories from SMT such as
+integer linear arithmetic or bit vectors.
+
+There exist alternatives to using a SAT-solver for these problems. For example,
+QuickCheck \cite{quickcheck} is a tool for random property-based testing that
+has been shown to be quite effective at finding bugs in programs. However, to
+find intricate bugs, often a lot of work has to be spent on test data
+generators, and a lot of insight is required. A dedicated search procedure
+could alleviate some of that work. Also, random testing would not work at all
+for finding solutions to search problems, or inverting a function.
 
 %format ==> = "\Longrightarrow"
 
-As an example, imagine we have made a large recursive datatype |T| and have just written a |show| function for it:
+As an example, imagine we have made a large recursive datatype |T| and have
+just written a |show| function for it:
 \begin{code}
 show :: T -> String
 \end{code}
@@ -101,15 +124,34 @@ prop_Unambiguous x y = x /= y ==> show x /= show y
 Even if two such elements |x| and |y| exist, it is very unlikely that we would find them using random testing. Instead, one either has to write a dedicated generator for pairs of elements |(x,y)| that are likely to map to the same string (requiring deep insights about the |show| function and where the bug may be), or implement the inverse of the |show| function, a {\em parser}, to be able to say something like this:
 \begin{code}
 prop_Unambiguous' :: T -> Property
-prop_Unambiguous' x = all (x ==) (parse (show x))
+prop_Unambiguous' x = parse (show x) == [x]
 \end{code}
-Implementing a parser is much harder than a |show| function, which makes this an even less attractive option.
+Implementing a parser is much harder than a |show| function, which makes this
+an even less attractive option.
 
-The tool we present in this paper can easily find pairs of such elements on the original property |prop_Unambiguous|, even for quite large sets of mutually recursive datatypes.
+The tool we present in this paper can easily find pairs of such elements on the
+original property |prop_Unambiguous|, even for quite large sets of mutually
+recursive datatypes.\comm{Add the concrete example... If then else?}
 
-There already exist dedicated search procedures for inputs that lead to certain outputs. Most notably, there are a number of tools (such as Reach \cite{reach}, Lazy SmallCheck \cite{lazysc}, and Agsy \cite{agsy}) that employ a backtracking technique called {\em lazy narrowing} to search for inputs. These tools are much better than random testing at finding intricate inputs, but they have one big shortcoming: they employ a depth-limitation on the input. In order to use these tools, a maximum search depth has to be specified (or the tool itself can enumerate larger and larger depths). Increasing the maximum depth of a set of terms affects the size of the search space exponentially. For example, Lazy SmallCheck times out for instances of |prop_Unambiguous| when the depth gets larger than ~4, because there are just too many cases to check.
+There already exist dedicated search procedures for inputs that lead to certain
+outputs. Most notably, there are a number of tools (such as Reach \cite{reach},
+Lazy SmallCheck \cite{lazysc}, and Agsy \cite{agsy}) that employ a backtracking
+technique called {\em lazy narrowing} to search for inputs. These tools are
+much better than random testing at finding intricate inputs, but they have one
+big shortcoming: they employ a depth-limitation on the input. In order to use
+these tools, a maximum search depth has to be specified (or the tool itself can
+enumerate larger and larger depths). Increasing the maximum depth of a set of
+terms affects the size of the search space exponentially. For example, Lazy
+SmallCheck times out for instances of |prop_Unambiguous| when the depth gets
+larger than ~4, because there are just too many cases to check.
 
-To overcome this depth problem, we do not limit the search by depth. Rather, we provide a different way of bounding the input, namely by letting the solver carefully expand the input one (symbolic) constructor at a time, carving out an input shape rather than an maximal input depth. We also hope that the sophisticated search strategies in a SAT-solver are able to beat a backtracking search, as long as the encoding of the search problem in SAT is natural enough for the solver to work with.
+To overcome this depth problem, we do not limit the search by depth. Rather, we
+provide a different way of bounding the input, namely by letting the solver
+carefully expand the input one (symbolic) constructor at a time, carving out an
+input shape rather than an maximal input depth. We also hope that the
+sophisticated search strategies in a SAT-solver are able to beat a backtracking
+search, as long as the encoding of the search problem in SAT is natural enough
+for the solver to work with.
 
 This paper contains the following contributions:
 
@@ -129,6 +171,7 @@ We also show a number of different examples, and experimental evaluations on the
 
 % ------------------------------------------------------------------------------
 
+%\begin{comment}
 \section{Symbolic datatypes}
 \label{ite}
 
@@ -208,6 +251,7 @@ For these reasons, we move from an {\em expression-based} view (using \ifthenels
 
 % ------------------------------------------------------------------------------
 
+%\end{comment}
 \section{A DSL for generating constraints}
 \label{dsl}
 
@@ -231,24 +275,33 @@ true, false               :: Prop
 Note however that there is no way to create a variable with a given name of type |Prop|. Variable creation happens inside the constraints generating monad |C|, using the function |newVar|:
 \begin{code}
 type C a
-instance Monad C
+instance Monad C  -- defines |return :: a -> C a|,
+                  -- |(>>) :: C a -> C a -> C a|, and
+                  -- |(>>=) :: C a -> (a -> C b) -> C b|.
 
 newVar  :: C Prop
 insist  :: Prop -> C ()
 when    :: Prop -> C () -> C ()
 \end{code}
 We can use the function |insist| to state that a given proposition has to hold. In this way, we generate constraints.
-
-The function |when| provides a way of keeping track of local assumptions. The expression |when a m| generates all constraints that are generated by |m|, but they will only hold conditionally under |a|. To explain better what |when| does, consider the following equivalences:
+On its own, |insist| enjoys a few laws:
 %format === = "\Longleftrightarrow"
 \begin{code}
-when a (insist b)     ===  insist (a ==> b)
-when a (when b m)     ===  when (a /\ b) m
-when false m          ===  return ()
-when a m >> when a n  ===  when a (m >> n)
-when a m >> when b m  ===  when (a \/ b) m
+insist true        === return ()
+insist false >> m  === insist false
+m >> insist false  === insist false
 \end{code}
 These are logical equivalences, i.e.\ the expressions on the left and right hand side may generate syntactically different sets of constraints, but they are logically equivalent.
+
+The function |when| provides a way of keeping track of local assumptions. The expression |when a m| generates all constraints that are generated by |m|, but they will only hold conditionally under |a|.
+The following logical equivalences hold for |when|:
+\begin{code}
+when a (insist b)     ===  insist (a ==> b)
+when false m          ===  return ()
+when a (when b m)     ===  when (a /\ b) m
+when a m >> when b m  ===  when (a \/ b) m
+when a m >> when a n  ===  when a (m >> n)
+\end{code}
 
 |C| can be thought of as a reader monad in the environment condition (hereafter called the {\em context}), a writer monad in the constraints, and a state monad in variable identifiers. In reality, it is implemented on top of a SAT-solver (in our case, we are using MiniSat \cite{minisat}). The function |newVar| simply creates a new variable in the solver, |insist| generates clauses from a given proposition and the environment condition, and |when| conjoins its proposition argument with the current environment condition to generate the environment for its second argument.
 
@@ -465,6 +518,7 @@ For |Delay a|, we wait until |s| gets defined, and as soon as this happens, we m
 At this stage, it may be interesting to look at an example of a combination of |new| and |>>>|. Consider the following two |C|-expressions:
 %format ¤ = "\phantom"
 %format /// = "\;\;\;"
+%format quad = "\quad"
 %format //  = "\;"
 \begin{code}
 do  y <- new  ///  ===  /// do x >>> z
@@ -493,18 +547,17 @@ We can see that copying runs the same recursive call to |>>>| multiple times in 
 
 \section{Translating programs into constraints}
 
+%format (sym (x)) = "\mathit{" x "}^\dagger"
 %format pSym = "\mathit{p}^\dagger"
 %format ASym = "\mathit{A}^\dagger"
 %format BSym = "\mathit{B}^\dagger"
-In this section, we explain how we can translate a program |p :: A -> B| in a simple functional programming language into a monadic program |pSym :: ASym -> C BSym| in Haskell, such that when |pSym| is run on symbolic input, it generates constraints in a SAT-solver that correspond to the behavior of |p|.
+In this section, we explain how we can translate a program |p :: A -> B| in a simple functional programming language into a monadic program |sym p :: sym A -> C (sym B)| in Haskell, such that when |pSym| is run on symbolic input, it generates constraints in a SAT-solver that correspond to the behavior of |p|.
 
 For now, we assume that the datatypes and programs we deal with are first-order. We also assume that all definitions are total, i.e.\ terminating and non-crashing. We will later have a discussion on how these restrictions can be lifted.
+\comm{termination/crash restriction}
 
 \subsection{The language}
 
-We start by presenting the syntax of the language we translate. This language is very restricted syntactically, but it is easy to see that more expressive languages can be translated into this language.
-
-Function definitions |d| and recursion can only happen on top-level. A program is a sequence of definitions |d|.
 %format x1
 %format xn = "\mathit{x}_n"
 %format e1
@@ -513,23 +566,42 @@ Function definitions |d| and recursion can only happen on top-level. A program i
 %format sn = "\mathit{s}_n"
 %format K1
 %format Kn = "\mathit{K}_n"
-\begin{code}
-d ::= f x1 ... xn = e
-\end{code}
-Expressions are separated into two categories: {\em simple} expressions and regular expressions. Simple expressions are constructor applications, selector functions, or variables. Regular expressions are let-expressions with a function application, case-expressions, or simple expressions.
+
+%format (transr (e)) = "\llbracket" e "\rrbracket\!\!\!\Rightarrow\!\!\!"
+%format (transc (e)) = "\llbracket" e "\rrbracket\!\!\!\Rightarrow_c\!\!\!"
+%format (trans (e))  = "\llbracket" e "\rrbracket"
+
+%format isK1 = "\mathit{isK}_1"
+%format isKn = "\mathit{isK}_n"
+
+
+We start by presenting the syntax of the language we translate. This language is very restricted syntactically, but it is easy to see that more expressive languages can be translated into this language.
+
+The language is presented in Figure~\ref{fig:lang}.
+Function definitions |d| and recursion can only happen on top-level. A program is a sequence of definitions |d|.
+Expressions are separated into two categories: {\em simple} expressions |s|, and regular expressions |e|. Simple expressions are constructor applications, selector functions, or variables. Regular expressions are let-expressions with a function application, case-expressions, or simple expressions.
+
+Function application can only happen inside a let-definition and only with simple expressions as arguments. Case-expressions can only match on constructors, the program has to use explicit selector functions to project out the arguments.
+
+\begin{figure}[h]
+\centering
 \begin{code}
 s ::=  K s1 ... sn
     |  sel s
     |  x
 
-e ::=  let x = f s1 ... sn in e
+e ::=  s
     |  case s of
          K1 -> e1
          ...
          Kn -> en
-    |  s
+    |  let x = f s1 ... sn in e
+
+d ::= f x1 ... xn = e
 \end{code}
-Function application can only happen inside a let-definition and only with simple expressions as arguments. Case-expressions can only match on constructors, the program has to use explicit selector functions to project out the arguments.
+\caption{The restricted intermediate language.\label{fig:lang}}
+\end{figure}
+
 
 As an example, consider the definition of the standard Haskell function |(++)|:
 \begin{code}
@@ -539,46 +611,59 @@ As an example, consider the definition of the standard Haskell function |(++)|:
 \end{code}
 In our restricted language, this function definition looks like:
 \begin{code}
-xs ++ ys = case xs of
-             Nil   ->  ys
-             Cons  ->  let vs = sel2 xs ++ ys
-                       in Cons (sel1 xs) vs
+xs ++ ys =  case xs of
+              Nil   ->  ys
+              Cons  ->  let vs = sel2 xs ++ ys
+                        in Cons (sel1 xs) vs
 \end{code}
 
 \subsection{Basic translation}
 
-%format (transr (e)) = "\llbracket" e "\rrbracket\!\!\!\Rightarrow\!\!\!"
-%format (trans (e))  = "\llbracket" e "\rrbracket"
+%format SIMP = "\textsc{Simp}"
+%format CASE = "\textsc{Case}"
+%format LET  = "\textsc{Let}"
+%format DEF  = "\textsc{Def}"
+%format DEFMEMO  = "\textsc{Def-Memo}"
+
 The translation revolves around the basic translation for expressions, denoted |transr e r|, where |e| is a (simple or regular) expression, and |r| is a variable. We write |transr e r| for the monadic computation that generate constraints that copy the symbolic value of the expression |e| into the symbolic value |r|.
 
-Given the translation for expressions, the translation for function definitions is:
-\begin{code}
-trans (f x1 ... xn = e) /// = /// f x1 ... xn = do  y <- new
-                                                    transr e y
-                                                    return y
-\end{code}
-To translate a function definition, we generate code that creates a new symbolic value |y|, translates |e| into |y|, and returns |y|.
+We present the translation rules in Figure~\ref{fig:trans}.
+Rule |SIMP| translations simple expressions. This is simple, because no monadic code needs to be generated; we have pure functions for concrete data constructors and pure functions for selectors. Thus we can
+simply copy the value of the simple expression into |r|.
+Rule |CASE| translates case-expressions. We use |wait| to wait for the result to become defined, and then generate code for all branches. This code, and the constraints it generates, will only be run when the result is defined.
+Rule |LET|: to translate let-expressions, we use the standard monadic transformation.
+The translated function is called.
+And to translate functions, rule |DEF| is used: it creates a new symbolic value |y| for the result, translates |e| into |y|, and returns |y|.
 
-The translation for simple expressions is simple, because no monadic code needs to be generated; we have pure functions for concrete data constructors and pure functions for selectors.
+\begin{figure}[h]
+\centering
+\fbox{|transr(e) r|}
 \begin{code}
-transr s r /// = /// s >>> r
-\end{code}
-We simply copy the value of the simple expression into |r|.
+(SIMP)  ///  transr s r                ///  =  /// s >>> r
 
-To translate let-expressions, we use the standard monadic transformation:
-\begin{code}
-transr (let f s1 ... sn in e//) r /// = /// do  x <- f s1 ... sn
-                                                transr e r
+(CASE)  ///  transr (case s of         ///  =  ///  wait s § \cs ->
+        ///            K1 -> e1        ///  ¤  ///  ///   do  when (isK1 cs)  ((transr e1 r))
+        ///            ...             ///  ¤  ///            ...
+        ///            Kn -> en //) r  ///  ¤  ///            when (isKn cs)  ((transr en r))
+
+(LET)   ///  transr (let x = f s1 ... sn in e//) r /// = /// do  x <- sym f s1 ... sn
+                                                                 transr e r
+
 \end{code}
-To translate case-expressions, we use |wait| to wait for the result to become defined, and then generate code for all branches.
-%format isK1 = "\mathit{isK}_1"
-%format isKn = "\mathit{isK}_n"
+
+\fbox{|trans(d)|}
 \begin{code}
-transr (case s of         ///  =  ///  wait s § \cs ->
-          K1 -> e1        ///  ¤  ///  ///   do  when (isK1 cs)  §  transr e1 r
-          ...             ///  ¤  ///            ...
-          Kn -> en //) r  ///  ¤  ///            when (isKn cs)  §  transr en r
+
+(DEF)  ///   trans (f x1 ... xn = e) /// = /// sym f x1 ... xn = do  y <- new
+                                                                     transr e y
+                                                                     return y
 \end{code}
+\caption{Translation rules to a constraint-generating program.\label{fig:trans}}
+\end{figure}
+
+
+
+
 
 \subsection{A translated example}
 
@@ -595,15 +680,17 @@ xs ++? ys = do  zs <- new
                     do  vs <- sel2 cxs ++ ys
                         cons (sel1 cxs) vs >>> zs
 \end{code}
-An example property that we may use to find a counter example to may look like this:
+An example property that we may use to find a counter example to may be
+|xs ++ ys == ys ++ xs|. Translated, this will look like this:
 \begin{code}
 appendCommutative xs ys =
-  do  vs <-  xs ++? ys
-      ws <-  ys ++? xs
-      b  <-  vs ==? ws
+  do  vs  <-  xs ++? ys
+      ws  <-  ys ++? xs
+      b   <-  vs ==? ws
       insist (nt b)
 \end{code}
 We use the symbolic version |(==?)| of |(==)| that is generated by our translation. When we run the above computation, constraints will be generated that are going to search for inputs |xs| and |ys| such that |xs++ys == ys++xs| is false.
+\comm{we don't really explain how to translate properties!}
 
 \subsection{Memoization} \label{sec:memo}
 
@@ -615,18 +702,17 @@ First, for translated top-level function calls that return a result, we keep a m
 
 Translating a definition |f x1 ... xn = e| with memoization on thus yields the following result:
 \begin{code}
-f x1 ... xn =
-  do  mcy <- lookMemo_f x1 ... xn
-      case mcy of
-          Nothing     -> do  c <- new
-                             y <- new
-                             storeMemo_f x1 ... xn (c,y)
-                             with c § transr e y
-                             insist c
-                             return y
-
-          Just (c,y)  -> do  insist c
-                             return y
+(DEFMEMO)  quad  (sym (f)) x1 ... xn =
+                   do  mcy <- lookMemo_f x1 ... xn
+                       case mcy of
+                            Nothing     -> do  c <- new
+                                               y <- new
+                                               storeMemo_f x1 ... xn (c,y)
+                                               with c § transr e y
+                                               insist c
+                                               return y
+                            Just (c,y)  -> do  insist c
+                                               return y
 \end{code}
 The functions |lookMemo_f| and |storeMemo_f| perform lookup and storage in |f|'s memo table, respectively. The function |with| locally sets the context for its second argument.
 
@@ -839,6 +925,7 @@ Thus, we use |postpone| on any function which is not structurally recursive {\em
 
 % ------------------------------------------------------------------------------
 
+%\begin{comment}
 \section{Examples and Experiments}
 \label{examples}
 
@@ -1509,6 +1596,71 @@ unrollings are needed.
 
 % ------------------------------------------------------------------------------
 
+%\end{comment}
+
+\section{Experiments and Evaluation}
+
+We evaluated our tool against Lazy SmallCheck \cite{lazysc}, Feat \cite{feat} and
+the finite model finder mode of CVC4 \cite{cvc4models} on a new
+set of 1750 benchmarks, both new and derived from our inductive benchmarks\cite{tip_problems}.
+Some more text about the different kinds of benchmarks.
+A graph of how many problems were solved cumulative within a time limit can be
+viewed in Figure~\ref{cumuplot}. For feat and Lazy SmallCheck, we generated
+one Haskell file per problem and compiled it with ghc. This time is not included
+in the runtime, but compilation was roughly half a second per file.
+We see that within some seconds, hbmc can solve most of the problems, so there
+is some constant factor overhead. Possibly hbmc can be optimised more.
+Looking more carefully at the different kinds of benchmarks (omitted here,
+but the results can be viewed online at \comm{insert link}),
+we can see that:
+\begin{itemize}
+\item Lazy SmallCheck performs very well on sorting examples where
+      the structure of the sorted lists can be determined lazily
+      without looking at the elements.
+      On the other hand, hbmc performs better on
+      stricter sorts like insertion sort, bubble sort
+      or merge sort which first identifies sublists which are ascending
+      and descending.
+      The problems about sorting come in two flavors, one
+      where it is given that |length xs = n && length ys = n|,
+      and one when only |length xs = n| is given, and hbmc
+      performs well even when only one of them is given.
+\item Problems with very small counter-examples are quickly found
+      by both Lazy SmallCheck and feat: the overhead of symbolic
+      execution can sometimes be high here even though the
+      counterexample is small. Some examples of these is finding
+      small regular expressions of some property: evaulating
+      the regular expression reckogniser symbolically is quite expensive.
+\item hbmc shines when a lot of the search space can be carved
+      away, (but not necessarily by a lazy predicate), and
+      the counterexample is at a certain depth.
+      Some of the examples in the bench mark suite that hbmc
+      can only do are:
+      \begin{itemize}
+        \item synthesise lambda expressions in normal form by inverting a type checker
+              (however, these are not so big so feat can find the smaller ones, too)
+              (inferring the types of these is easy for LazySC, but feat does not
+              always make it. hbmc is good at inferring)
+        \item find a fixed point combinator in combinatory calculus
+              (all but one of these are too big even for feat)
+        \item find a turing machine with certain properties
+        \item find propositional formula with certain properties
+        \item find balanced search trees
+      \end{itemize}
+      % pr -m -t hbmc_-q_ _lazysc_ | grep ,[^-].*,-
+\end{itemize}
+
+\begin{figure}
+%\input{cumuplot}
+\caption{Evaluation of the benchmark suite on the different tools.
+\label{cumuplot}
+}
+\end{figure}
+
+We also evaluated HBMC against itself, with and without
+memoisation and with and without function call merging.
+\comm{add data}
+
 \section{Related Work}
 
 One source of inspiration for this work is Leon\cite{leon},
@@ -1519,6 +1671,26 @@ rather than finding counterexamples, which they see as a beneficial side effect.
 Using uninterpreted
 functions in a SMT solver helps to derive equivalences between values
 that have not yet been fully expanded.
+
+Another similar tool to both Leon and ours is Smten\cite{smten}.
+They also compile Haskell to a SAT/SMT-based query, given
+functions that explain how the search space looks like.
+One of their goals is, just like us, to enable SAT-based (and SMT-based)
+search for users with little experience in the area.
+They interpret the by syntactic transformations and simplifications
+on the search space and the program together. This constructs a query
+for the SMT solver. This enables them to do
+symbolic if-then-else on programs.
+They heuristically determine when computation does not seem to terminate: in this case they
+can approximate the formula with a guard. This is a bit similar to
+how we deal with incrementality.
+By putting the design of the search space to the end
+user, it is possible to get the same collapsing of
+datatypes effect that we use.
+This is the default in our work, as well as
+collapsing function calls.
+We also use the conflict clause to determine where to
+expand the program.
 
 QuickCheck\cite{quickcheck} is an embedded DSL for finding
 counterexamples for Haskell by using randomized testing.
@@ -1549,6 +1721,36 @@ modes, limiting the search space by predetermined
 depth either of the input values or the function call recursion.
 LazySmallCheck combines the ideas from SmallCheck and Reach to do lazy narrowing
 on the depth of the values as a DSL in Haskell.
+
+Methods for finding models for SMT with quantified uninterpreted functions
+exist \cite{GeMoura,ReyEtAl-CADE-13}.
+When knowing what axioms are (recursive) function definitions
+(as we assume), it is possible to unroll these incrementally to use the
+techniques above \cite{cvc4models}
+(assuming they are well-founded).
+
+Finding models to uninterpreted functions in SMT-LIB
+Looking at the problem as finding a model to recursive function
+definitions in the presence of an assertion has been done \cite{cvc4models}.
+
+The tool Target \cite{TypeTargetedTesting} uses an SMT solver
+to exhaustively search for counterexamples written as
+refinement types. This is a restricted format, but shows
+that an SMT solver can prune off big parts of the search space.
+One very interesting aspect of this work is that they use
+an SMT solver to find data that satisfies the preconditions,
+but then evaluate the program to see if the postconditions were met.
+If not, we have a counterexample, if not, an axiom is laid down
+to prevent the SMT solver to suggest the data again. And then the
+process is repeated. So in a sense it is a hybrid approach.
+Our approach is to do the evaluation of the program symbolically as well.
+This can be benificial when the postcondition also constrains what
+parts of the program can be expanded.
+
+Finally, it should be noted that there are several libraries
+to access SAT and SMT solvers in functional languages. Perhaps the most
+well-known for Haskell is SBV\cite{sbv}.
+However, they don't allow symbolic evaluation of functional programs.
 
 %Liquid types. (and other contracts checkers)
 
