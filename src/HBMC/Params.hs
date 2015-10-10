@@ -6,7 +6,7 @@ import System.Console.CmdArgs
 data Params =
   Params
     { file                 :: String
-    , compile              :: Bool
+    , depth                :: Maybe Int
     , merge                :: Bool
     , memo                 :: Bool
     , quiet                :: Bool
@@ -22,14 +22,14 @@ defParams :: Params
 defParams =
   Params
     { file                 = ""      &= argPos 0 &= typFile
-    , compile              = False   &= name "g" &= help "Compile and run"
-    , merge                = True    &= name "f" &= help "Merge function calls          (on)"
-    , memo                 = True    &= name "m" &= help "Memoise recursive functions   (on)"
-    , quiet                = False   &= name "q" &= help "Be quiet"
-    , debug                = False   &= name "d" &= help "Print debug info"
-    , conflict_minimzation = False   &= name "c" &= help "Minimize conflicts"
-    , delay_all_datatypes  = False   &= name "l" &= help "Delay all datatypes"
-    , insist_isnt          = False   &= name "i" &= help "Insist isn't when possible"
+    , depth                = Nothing &= name "d"   &= help "Maximum depth of counterexamples (unlimited)"
+    , merge                = True    &= name "f"   &= help "Merge function calls             (on)"
+    , memo                 = True    &= name "m"   &= help "Memoise recursive functions      (on)"
+    , quiet                = False   &= name "q"   &= help "Be quiet"
+    , debug                = False   &= name "dbg" &= help "Print debug info"
+    , conflict_minimzation = False   &= name "c"   &= help "Minimize conflicts"
+    , delay_all_datatypes  = False   &= name "l"   &= help "Delay all datatypes"
+    , insist_isnt          = False   &= name "i"   &= help "Insist isn't when possible"
     , prop_names           = Nothing &= name "prop" &= help "Property to consider (default: first)"
     }
   &= program "hbmc" &= summary logo

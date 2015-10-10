@@ -15,6 +15,7 @@ data Static a =
   Static
     { lkup_desc :: a -> LiveDesc a
     , lkup_func :: a -> [LiveData a] -> H (LiveData a)
+    , params    :: Params
     }
 
 data Dynamic a =
@@ -41,18 +42,18 @@ liveProp p st (Prop vs m) =
              (quiet p) (not (quiet p))
              (Tagged [ (varStr v,var_map dyn ! v) | v <- vs ])
 
-liveFuncs :: (Show a,PrettyVar a,Ord a) => (a -> LiveDesc a) -> [Func a] -> Static a
-liveFuncs lkup_desc funcs = st
+liveFuncs :: (Show a,PrettyVar a,Ord a) => Params -> (a -> LiveDesc a) -> [Func a] -> Static a
+liveFuncs p lkup_desc funcs = st
   where
   tbl         = [ (name,liveFunc st f) | f@(Func name _ _ _ _ _ _) <- funcs ]
-  st          = Static lkup_desc lkup_func
+  st          = Static lkup_desc lkup_func p
   lkup_func x = case lookup x tbl of Just func -> func
                                      Nothing   -> error $ "Function not found:" ++ varStr x
 
 liveFunc :: (Show a,PrettyVar a,Ord a) => Static a -> Func a -> [LiveData a] -> H (LiveData a)
 liveFunc st (Func fname as_vars r_var r_ty mem chk m) =
   (if mem then memoWith else nomemoWith)
-    (newData False (lkup_desc st r_ty))
+    (newData Nothing False (lkup_desc st r_ty))
     (varStr fname) $
       \ as r ->
          (if chk then check else id)
@@ -98,7 +99,7 @@ liveMon env (act:acts) =
      case act of
        v :<-: rhs ->
          do x <- case rhs of
-                New i tc  -> newData i (lkup_desc tc)
+                New i tc  -> newData (if i then depth params else Nothing) i (lkup_desc tc)
                 Call f ss -> lkup_func f (map (liveSimp env) ss)
             rec_with (dynamic { var_map = M.insert v x var_map }) acts
 

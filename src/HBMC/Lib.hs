@@ -10,6 +10,7 @@ import Data.Unique
 import qualified MiniSat as M
 import MiniSat ( Solver, Lit )
 import System.IO.Unsafe
+import Data.Function (on)
 
 import Debug.Trace
 
@@ -536,22 +537,23 @@ solveBit s xs =
 
 --------------------------------------------------------------------------------
 
-data Thunk a = This a | Delay Bool Unique (IORef (Either (H ()) a))
+data Thunk a = This a | Delay Bool Unique (IORef (Either (H ()) a)) | Inaccessible
+
+compareView :: Thunk a -> Maybe (Either a Unique)
+compareView (This x)       = Just (Left x)
+compareView (Delay _ u _)  = Just (Right u)
+compareView (Inaccessible) = Nothing
 
 instance Show a => Show (Thunk a) where
-  show (This x) = "This " ++ show x
+  show (This x)      = "This " ++ show x
   show (Delay b u r) = "Delay"
+  show Inaccessible  = "Inaccessible"
 
 instance Eq a => Eq (Thunk a) where
-  This x      == This y      = x == y
-  Delay _ p _ == Delay _ q _ = p == q
-  _           == _           = False
+  (==) = (==) `on` compareView
 
 instance Ord a => Ord (Thunk a) where
-  This x      `compare` This y      = x `compare` y
-  Delay _ p _ `compare` Delay _ q _ = p `compare` q
-  This _      `compare` _           = LT
-  _           `compare` This _      = GT
+  compare = compare `on` compareView
 
 this :: a -> Thunk a
 this x = This x
@@ -564,8 +566,12 @@ delay inp (H m) =
      unq <- io $ newUnique
      return (Delay inp unq ref)
 
+inaccessible :: Thunk a
+inaccessible = Inaccessible
+
 poke :: Thunk a -> H ()
 poke (This _)        = do return ()
+poke Inaccessible    = addClauseHere []
 poke (Delay _ _ ref) =
   do ema <- io $ readIORef ref
      case ema of
@@ -574,6 +580,7 @@ poke (Delay _ _ ref) =
 
 peek :: Thunk a -> H (Maybe a)
 peek (This x)        = return (Just x)
+peek Inaccessible    = return Nothing
 peek (Delay _ _ ref) =
   do ema <- io $ readIORef ref
      return $ case ema of
@@ -583,7 +590,7 @@ peek (Delay _ _ ref) =
 force :: Thunk a -> H a
 force th =
   do poke th
-     Just x <- peek th
+     ~(Just x) <- peek th
      return x
 
 doForce :: Thunk a -> (a -> H ()) -> H ()
@@ -591,6 +598,7 @@ doForce t h = force t >>= h
 
 ifForce :: Thunk a -> (a -> H ()) -> H ()
 ifForce (This x)               h = h x
+ifForce Inaccessible           h = addClauseHere []
 ifForce th@(Delay inp unq ref) h =
   do ema <- io $ readIORef ref
      case ema of
@@ -785,13 +793,16 @@ data LiveData c
   | LiveThunk (Thunk (LiveData c))
   deriving (Eq,Ord,Show)
 
-newData :: (Show c,Ord c) => Bool -> LiveDesc c -> H (LiveData c)
-newData i (ThunkDesc d) =
-  do LiveThunk <$> delay i (newData i d)
+newData :: (Show c,Ord c) => Maybe Int -> Bool -> LiveDesc c -> H (LiveData c)
+newData (Just k) i (ThunkDesc d)
+  | k < 0 = return (LiveThunk inaccessible)
 
-newData i desc@(DataDesc tc cons args) =
+newData mk i (ThunkDesc d) =
+  do LiveThunk <$> delay i (newData mk i d)
+
+newData mk i desc@(DataDesc tc cons args) =
   do c <- newVal cons
-     as <- sequence [ do d <- newData i desc
+     as <- sequence [ do d <- newData (fmap (subtract 1) mk) i desc
                          return (cs,Just d)
                     | (cs,desc) <- args
                     ]

@@ -6,13 +6,11 @@ import HBMC.Params (Params,getParams)
 
 import Tip.Pretty
 import Tip.Pretty.SMT ()
-import Tip.Pretty.Haskell
 
 import qualified Tip.HaskellFrontend as Tip
 import Tip.HaskellFrontend hiding (Params)
 import Tip.Haskell.Rename
 import Tip.Haskell.Translate (addImports,HsId)
-import Tip.Haskell.Repr as H
 
 import Tip.Core
 import Tip.Utils
@@ -25,11 +23,9 @@ import Tip.Scope
 
 import HBMC.Merge
 import HBMC.Identifiers
-import HBMC.Haskell
 
 import HBMC.Data
 import HBMC.Projections
-import HBMC.Bool
 
 import HBMC.Monadic hiding (Var)
 
@@ -38,6 +34,7 @@ import HBMC.ToSimple
 import HBMC.Live
 
 import Tip.Passes
+import Tip.Pass.Booleans
 
 import System.Environment
 
@@ -59,7 +56,7 @@ type Translated = ([Datatype Var],[Func Var],[Prop Var])
 translate :: Params -> Theory Var -> WriterT [String] Fresh Translated
 translate params thy0 =
   do [thy1] <-
-        map (skolemTypesToNat . addBoolToTheory) <$> lift
+        map (skolemTypesToNat . removeBuiltinBoolWith boolNames) <$> lift
             (runPasses
               [ SimplifyAggressively
               , RemoveNewtype
@@ -125,31 +122,9 @@ runLive p (ds,fs,prop:_) = liveProp p static (fmap pp_var prop)
   pp_var = PPVar
 
   lkup_data = dataDescs (Params.delay_all_datatypes p) (map (fmap pp_var) ds)
-  static    = liveFuncs lkup_data (map (fmap pp_var) fs)
-
-compile :: Params -> Translated -> Fresh String
-compile p (ds,fs,props) =
- do let main_decls =
-           [ H.funDecl (Var "main") [] (trProp p prop) | prop <- props ]
-
-    let fn_decls = [ trFunc f | f <- fs ]
-
-    let rec_dts = recursiveDatatypes ds
-
-    dt_decls <- mapM (trDatatype rec_dts (Params.delay_all_datatypes p)) ds
-
-    let decls = concat dt_decls ++ fn_decls ++ take 1 main_decls
-
-    let Decls ds = addImports $ fst $ renameDecls $ fmap toHsId (Decls decls)
-
-    let langs = map LANGUAGE ["ScopedTypeVariables", "TypeFamilies", "FlexibleInstances",
-                              "MultiParamTypeClasses", "GeneralizedNewtypeDeriving"]
-
-    return (ppRender (Decls (langs ++ Module "Main" : ds)))
+  static    = liveFuncs p lkup_data (map (fmap pp_var) fs)
 
 ren = renameWith (disambig varStr)
-
-data Target = Live | Compile
 
 main :: IO ()
 main = do
@@ -159,17 +134,7 @@ main = do
         (Params.file params)
         Tip.defaultParams{ Tip.prop_names = Params.prop_names params }
 
-    let h :: Translated -> Fresh (IO ())
-        h tr = case Params.compile params of
-                 False -> return (runLive params tr)
-                 True  -> do c <- compile params tr
-                             return $
-                               do writeFile "Tmp.hs" c
-                                  rawSystem "ghc" ["Tmp.hs"]
-                                  rawSystem "./Tmp" []
-                                  return ()
-
-    let (m,dbg) = freshPass (runWriterT . (lift . h <=< translate params)) thy0
+    let (m,dbg) = freshPass (runWriterT . (lift . return . runLive params <=< translate params)) thy0
 
     when (Params.debug params) (putStrLn (unlines dbg))
 

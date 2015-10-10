@@ -12,9 +12,9 @@ import Tip.Utils
 import HBMC.Identifiers hiding (Con,Proj,Var)
 import HBMC.Identifiers (Var())
 
-import HBMC.Bool
 import HBMC.Params
 import Tip.Passes
+import Tip.Pass.Booleans
 
 import Data.Generics.Geniplate
 
@@ -184,11 +184,11 @@ trToTrue ci e0 =
   case e0 of
     Builtin Equal    :@: ~[e1,e2] -> tr True  e1 e2
     Builtin Distinct :@: ~[e1,e2] -> tr False e1 e2
-    _                             -> tr True  e0 (booly True)
+    _                             -> tr True  e0 (boolExpr boolNames True)
   where
   tr pol e1 e2 =
-    do (lets1,s1) <- collectLets <$> toExprSimpleEnd (addBool (boolOpToIf e1))
-       (lets2,s2) <- collectLets <$> toExprSimpleEnd (addBool (boolOpToIf e2))
+    do (lets1,s1) <- collectLets <$> toExprSimpleEnd (removeBuiltinBoolFrom boolNames (boolOpToIf e1))
+       (lets2,s2) <- collectLets <$> toExprSimpleEnd (removeBuiltinBoolFrom boolNames (boolOpToIf e2))
        let equal_fn = blankGlobal
                         (api (if pol then "equalHere" else "notEqualHere"))
                         (error "trToTrue global type")
