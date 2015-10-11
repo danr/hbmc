@@ -1,0 +1,89 @@
+module Main where
+
+import System.Directory
+import System.FilePath
+import Control.Applicative
+
+import System.Environment
+import System.Process
+import System.Exit
+
+import Data.Time.Clock
+import Numeric
+import Text.Printf
+
+import Data.Char
+import Data.List
+import Data.Ord
+import Data.Function
+import System.Timeout
+
+import System.Directory
+import System.FilePath.Find as F
+
+timeIt :: IO a -> IO (Double,a)
+timeIt m =
+  do t0 <- getCurrentTime
+     r <- m
+     t1 <- getCurrentTime
+     let t :: Double
+         t = fromRat (toRational (diffUTCTime t1 t0))
+     return (t,r)
+
+depths :: [Int]
+depths = [3,4,5,6,7,8,9,10,15,20,30,50,100,200,1000]
+
+main = do
+  all_args@(bad:dir:timelimit:cmd:args) <- getArgs
+  files <- F.find always (fileName ~~? "*.smt2" ||? fileName ~~? "*.bin") dir
+
+  let is_ok = case bad of
+        "-" -> const True
+        _   -> not . (bad `isInfixOf`)
+
+      log_filename d = (concatMap (++ "_") (cmd:args)) ++ "_" ++ show d
+
+      log :: Int -> FilePath -> Maybe Double -> IO ()
+      log d f maybe_time =
+        do let time_str = case maybe_time of
+                            Just t  -> printf "%0.5f" t
+                            Nothing -> "-"
+           appendFile (log_filename d) (f ++ "," ++ time_str ++ "\n")
+
+  -- putStrLn log_filename
+  print all_args
+
+  logs <-
+    sequence
+      [ do b <- doesFileExist (log_filename d)
+           if b then do s <- readFile (log_filename d)
+                        return (d,[ f | l <- lines s, let (f,',':_) = break (== ',') l ])
+                else return (d,[])
+      | d <- depths
+      ]
+
+  let exists f d =
+        case lookup d logs of
+          Just files -> f `elem` files
+          Nothing    -> False
+
+  let process []     _ = return ()
+      process (d:ds) f | exists f d = process ds f
+      process (d:ds) f =
+        do putStrLn $ show d ++ " " ++ f
+           let args' = args ++ [show d]
+           let full_cmd = case cmd of
+                 '_':_ -> (timelimit:f:args')
+                 _     -> (timelimit:cmd:f:args')
+           (t,(exc,out,err)) <- timeIt (readProcessWithExitCode "timeout" full_cmd "")
+           putStrLn (printf "%0.5fs" t ++ ", " ++ show exc)
+           putStrLn out
+           putStrLn err
+           case exc of
+             ExitSuccess | is_ok out
+               -> do log d f (Just t)
+                     process ds f
+             _ -> do sequence_ [ log d' f Nothing | d' <- d:ds ]
+
+  mapM_ (process depths) files
+
