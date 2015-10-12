@@ -1,0 +1,6 @@
+#!/bin/bash
+for i in $(seq 0 1000); do
+  echo $i
+  ($@ $i | tee /dev/stderr | grep Just) && exit 0
+done
+exit -1

@@ -21,6 +21,9 @@ import System.Timeout
 import System.Directory
 import System.FilePath.Find as F
 
+import qualified Control.Exception as C
+import Control.DeepSeq (rnf)
+
 timeIt :: IO a -> IO (Double,a)
 timeIt m =
   do t0 <- getCurrentTime
@@ -31,17 +34,19 @@ timeIt m =
      return (t,r)
 
 depths :: [Int]
-depths = [3,4,5,6,7,8,9,10,15,20,30,50,100,200,1000]
+depths = [1..20] ++ [30,40..100] ++ [200,300..1000]
 
 main = do
-  all_args@(bad:dir:timelimit:cmd:args) <- getArgs
+  all_args@(use_depths0:bad:dir:timelimit:cmd:args) <- getArgs
   files <- F.find always (fileName ~~? "*.smt2" ||? fileName ~~? "*.bin") dir
+
+  let use_depths = read use_depths0
 
   let is_ok = case bad of
         "-" -> const True
         _   -> not . (bad `isInfixOf`)
 
-      log_filename d = (concatMap (++ "_") (cmd:args)) ++ "_" ++ show d
+      log_filename d = (concatMap (++ "_") (cmd:args)) ++ (if use_depths then "_" ++ show d else "")
 
       log :: Int -> FilePath -> Maybe Double -> IO ()
       log d f maybe_time =
@@ -54,13 +59,15 @@ main = do
   print all_args
 
   logs <-
-    sequence
+        sequence
       [ do b <- doesFileExist (log_filename d)
            if b then do s <- readFile (log_filename d)
                         return (d,[ f | l <- lines s, let (f,',':_) = break (== ',') l ])
                 else return (d,[])
-      | d <- depths
+      | d <- if use_depths then depths else [0]
       ]
+
+  C.evaluate (rnf logs)
 
   let exists f d =
         case lookup d logs of
@@ -71,7 +78,8 @@ main = do
       process (d:ds) f | exists f d = process ds f
       process (d:ds) f =
         do putStrLn $ show d ++ " " ++ f
-           let args' = args ++ [show d]
+           let args' | use_depths = args ++ [show d]
+                     | otherwise  = args
            let full_cmd = case cmd of
                  '_':_ -> (timelimit:f:args')
                  _     -> (timelimit:cmd:f:args')
@@ -85,5 +93,5 @@ main = do
                      process ds f
              _ -> do sequence_ [ log d' f Nothing | d' <- d:ds ]
 
-  mapM_ (process depths) files
+  mapM_ (process (if use_depths then depths else [0])) files
 

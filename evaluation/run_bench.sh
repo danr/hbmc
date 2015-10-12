@@ -1,8 +1,17 @@
 ulimit -Sv 7000000
-TIMEOUT=1
 ghc --make Incremental.hs -o Incremental || exit
-./Incremental - benchmarks-lazysc $TIMEOUT _lazysc
-./Incremental - benchmarks $TIMEOUT hbmc -q -d
+
+TIMEOUT=60
+./Incremental False - benchmarks-smten/sat $TIMEOUT ./smten-runner
+./Incremental False - benchmarks-feat/sat $TIMEOUT _feat
+./Incremental False unknown benchmarks-cvc4/sat $TIMEOUT cvc4-2015-10-10-x86_64-linux-opt --fmf-fun --dump-models
+./Incremental False - benchmarks/sat $TIMEOUT hbmc -q
+./Incremental False - benchmarks-lazysc/sat $TIMEOUT _lazysc
+
+# ./Incremental True - benchmarks/unsat $TIMEOUT hbmc -q -d
+# ./Incremental True - benchmarks-smten/unsat $TIMEOUT _smten
+# ./Incremental True - benchmarks-lazysc/unsat $TIMEOUT _lazysc
+
 # ./Incremental Done. benchmarks-feat/sat $TIMEOUT _feat
 # ./Incremental - benchmarks-lazysc/sat $TIMEOUT _lazysc
 # ./Incremental - benchmarks/sat $TIMEOUT hbmc -q
