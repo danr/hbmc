@@ -142,7 +142,7 @@ trFunction p ci fn_comps Function{..} =
                            Just (Rec xs) -> (True,length xs > 1)
                            _             -> (False,False)
      let args = map lcl_name func_args
-     let chk = not (terminates func_name args func_body) || mut_rec
+     let chk = (not (terminates func_name args func_body) || mut_rec) && postpone p
      let mem = memo p && rec
      body <- trExpr ci func_body (Just r)
      return (Func func_name args r (tyConOf func_res) mem chk (simpMon body))
