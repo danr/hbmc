@@ -249,36 +249,64 @@ when c h = whens [c] h
 --
 --   unless [c =? K1, c =? K2] $ [[ e ]]
 unless :: [Bit] -> H () -> H ()
-unless cs h
-  | null cs'  = h
-  | otherwise =
-      do c0 <- context
-         c1 <- new
-         -- [a1,a2, .. ,aN] = cs'
-         -- ~a1 & ~a2 ... & ~aN => c1
-         -- a1 | a2 | .. | aN | c1
-         addClauseHere (c1:cs)
-         inContext c1 $
-           do addClauseHere [c0]
-              -- in this context, all of a1...aN are false
-              sequence_ [ addClauseHere [nt c] | c <- cs' ]
-              h
+unless cs h =
+  do cs' <-
+       filter (/= ff) <$>
+       sequence
+         [ case c of
+             Bool b -> return c
+             Lit l  ->
+               do v <- withSolver (\ s -> M.value s l)
+                  case v of
+                    Nothing -> return c
+                    Just b  -> do -- io (putStrLn "Knew an unless value!")
+                                  return (if b then tt else ff)
+         | c <- cs
+         ]
+     if null cs' then h
+       else if tt `elem` cs' then do -- io (putStrLn "Knew it was false!")
+                                     return ()
+       else do c0 <- context
+               c1 <- new
+               -- [a1,a2, .. ,aN] = cs'
+               -- ~a1 & ~a2 ... & ~aN => c1
+               -- a1 | a2 | .. | aN | c1
+               addClauseHere (c1:cs')
+               inContext c1 $
+                 do addClauseHere [c0]
+                    -- in this context, all of a1...aN are false
+                    sequence_ [ addClauseHere [nt c] | c <- cs' ]
+                    h
  where
   cs' = filter (/=ff) cs
 
 -- happens when one of them is true
 whens :: [Bit] -> H () -> H ()
-whens cs h
-  | null cs'  = return ()
-  | otherwise =
-    do c0 <- context
-       c1 <- new
-       sequence_ [ addClauseHere [nt c, c1] | c <- cs' ]
-                               -- c => c1
-       inContext c1 $
-         do addClauseHere [c0]
-            addClauseHere cs'
-            h
+whens cs h =
+  do cs' <-
+       filter (/= ff) <$>
+       sequence
+         [ case c of
+             Bool b -> return c
+             Lit l  ->
+               do v <- withSolver (\ s -> M.value s l)
+                  case v of
+                    Nothing -> return c
+                    Just b  -> do -- io (putStrLn "Knew a value!")
+                                  return (if b then tt else ff)
+         | c <- cs
+         ]
+     if null cs' then return ()
+       else if tt `elem` cs' then do -- io (putStrLn "Knew it was true!")
+                                     h
+       else do c0 <- context
+               c1 <- new
+               sequence_ [ addClauseHere [nt c, c1] | c <- cs' ]
+                                       -- c => c1
+               inContext c1 $
+                 do addClauseHere [c0]
+                    addClauseHere cs'
+                    h
  where
   cs' = filter (/=ff) cs
 
