@@ -855,16 +855,17 @@ data LiveData c
   | LiveThunk (Thunk (LiveData c))
   deriving (Eq,Ord,Show)
 
-newData :: (Show c,Ord c) => Maybe Int -> Bool -> LiveDesc c -> H (LiveData c)
-newData (Just k) i (ThunkDesc d)
+newData :: (Show c,Ord c) => Maybe Int -> Bool -> Bool -> LiveDesc c -> H (LiveData c)
+newData (Just k) s i (ThunkDesc d)
   | k < 0 = return (LiveThunk inaccessible)
 
-newData mk i (ThunkDesc d) =
-  do LiveThunk <$> delay i (newData mk i d)
+newData mk s i (ThunkDesc d)
+  | s         = do (LiveThunk . this) <$> newData mk s i d
+  | otherwise = do LiveThunk <$> delay i (newData mk s i d)
 
-newData mk i desc@(DataDesc tc cons args) =
+newData mk s i desc@(DataDesc tc cons args) =
   do c <- newVal cons
-     as <- sequence [ do d <- newData (fmap (subtract 1) mk) i desc
+     as <- sequence [ do d <- newData (fmap (subtract 1) mk) s i desc
                          return (cs,Just d)
                     | (cs,desc) <- args
                     ]

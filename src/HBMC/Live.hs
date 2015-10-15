@@ -8,6 +8,7 @@ import HBMC.Monadic
 
 import Tip.Pretty
 
+import Data.Maybe (isJust)
 import Data.Map (Map)
 import qualified Data.Map as M
 
@@ -53,7 +54,7 @@ liveFuncs p lkup_desc funcs = st
 liveFunc :: (Show a,PrettyVar a,Ord a) => Static a -> Func a -> [LiveData a] -> H (LiveData a)
 liveFunc st (Func fname as_vars r_var r_ty mem chk m) =
   (if mem then memoWith else nomemoWith)
-    (newData Nothing False (lkup_desc st r_ty))
+    (newData Nothing False False (lkup_desc st r_ty))
     (varStr fname) $
       \ as r ->
          (if chk then check else id)

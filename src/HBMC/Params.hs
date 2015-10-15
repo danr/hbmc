@@ -7,6 +7,7 @@ data Params =
   Params
     { file                 :: String
     , depth                :: Maybe Int
+    , upfront              :: Bool
     , merge                :: Bool
     , memo                 :: Bool
     , quiet                :: Bool
@@ -24,6 +25,7 @@ defParams =
   Params
     { file                 = ""      &= argPos 0 &= typFile
     , depth                = Nothing &= name "d"   &= help "Maximum depth of counterexamples (unlimited)"
+    , upfront              = False   &= name "u"   &= help "Generate input data upfront (only applies with depth)"
     , merge                = True    &= name "f"   &= help "Merge function calls             (on)"
     , memo                 = True    &= name "m"   &= help "Memoise recursive functions      (on)"
     , quiet                = False   &= name "q"   &= help "Be quiet"
