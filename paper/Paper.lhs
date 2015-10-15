@@ -22,9 +22,11 @@
 \usepackage[final]{microtype}
 \usepackage{url}
 
+\newcommand{\hbmc}[0]{\textsc{hbmc}}
 \newcommand{\comm}[1]{\marginpar{\footnotesize #1}}
 \newcommand{\ifthenelse}{|if|-|then|-|else|}
 %format § = $
+%format noot = "not"
 
 \begin{document}
 
@@ -76,7 +78,7 @@ bounded model checking, SAT, symbolic evaluation
 \section{Introduction}
 
 At the end of the 1990s, SAT-based Bounded Model Checking (BMC \cite{bmc}) was
-introduced as an alternative to BDD-based hardware model checking. BMC
+introduced as an alternative to BDD-based (Binary Decision Diagrams) hardware model checking. BMC
 revolutionized the field; SAT-solvers by means of BMC provided a scalable and
 efficient search method for finding bugs. A BMC tool enumerates a depth
 bound~$d$, starting from 0 upwards, and tries to find a counter example of
@@ -89,19 +91,41 @@ higher-level features (pointers, recursive datastructures).
 
 Our aim in this paper is to take the first step towards bringing the power of
 SAT-based BMC to a high-level functional programming language, with algebraic
-datatypes and recursion. The goal is to provide a tool that can find inputs to
-programs that result in outputs with certain properties. Applications include
-property testing, finding solutions to search problems which are expressed as a
-predicate in a functional language, inverting functions in a program, finding
-test data that satisfies certain constraints, etc.
+datatypes and recursion. We built a tool dubbed \hbmc{}, for the Haskell Bounded Model Checker,
+which \hbmc{} works by taking an
+existentially quantified formula, and it tries to prove
+it by finding an assignment of concrete values that makes it hold.
+This makes it possible to use \hbmc{} for synthesis of desired
+values, such as finding solutions to search problems, inverses
+to functions, solutions to puzzles and finding test data
+that satisfies certain constraints.
+Naturally, this can also be used for property testing:
+trying to falsify a universally quantified conjecture.
+An assigment is then a counterexample
+to why the property does not hold. Applications of this is
+to find errors in programs (or in the specifications!).
 
-We built this on top of only a SAT solver. \comm{comment on why only sat}
+We built \hbmc{} on top of only a SAT solver. \comm{comment on why only sat}
 No SMT-techniques, such as uninterpreted functions or data
 types, were used. However, it is easy to change the SAT solver that is used
 in this article to leverage other useful theories from SMT such as
-integer linear arithmetic or bit vectors.
+integer linear arithmetic or bit vectors. In this work we focus solely
+on how to represent algebraic datatypes, and we encode them propositionally.
 
-There exist alternatives to using a SAT-solver for these problems. For example,
+From a high-level perspective, \hbmc{} evaluates the program symbolically,
+and the symbolic constraints are encoded into a propositional formula
+that is sent to a SAT-solver. By representing expandable input data,
+\hbmc{} first starts out by assuming that none of the input is going to
+be used. Unless the property is trivial, the solver will report that there
+is no counter-example, but by examining the conflict clause (also known
+as the unsatisfiable core), it will give a suggestion on which part of
+the input that needs to be expanded. Now, we will search for an assigment
+in this larger search space, and the process continues until we find
+a counterexample, or in some cases that we highlight later, the unsatisfiable
+core will be empty and thus no counterexample exists.
+
+There exist alternatives to using a SAT-solver to find assigments and
+counterexample. For example,
 QuickCheck \cite{quickcheck} is a tool for random property-based testing that
 has been shown to be quite effective at finding bugs in programs. However, to
 find intricate bugs, often a lot of work has to be spent on test data
@@ -111,51 +135,89 @@ for finding solutions to search problems, or inverting a function.
 
 %format ==> = "\Longrightarrow"
 
-As an example, imagine we have made a large recursive datatype |T| and have
-just written a |show| function for it:
-\begin{code}
-show :: T -> String
-\end{code}
-We would like to find out whether this |show| function is ambiguous, i.e.\ are there different elements in |T| that map to the same string? A property in QuickCheck-style would look something like this:
-\begin{code}
-prop_Unambiguous :: T -> T -> Property
-prop_Unambiguous x y = x /= y ==> show x /= show y
-\end{code}
-Even if two such elements |x| and |y| exist, it is very unlikely that we would find them using random testing. Instead, one either has to write a dedicated generator for pairs of elements |(x,y)| that are likely to map to the same string (requiring deep insights about the |show| function and where the bug may be), or implement the inverse of the |show| function, a {\em parser}, to be able to say something like this:
-\begin{code}
-prop_Unambiguous' :: T -> Property
-prop_Unambiguous' x = parse (show x) == [x]
-\end{code}
-Implementing a parser is much harder than a |show| function, which makes this
-an even less attractive option.
+%format :-> = ":\rightarrow"
 
-The tool we present in this paper can easily find pairs of such elements on the
-original property |prop_Unambiguous|, even for quite large sets of mutually
-recursive datatypes.\comm{Add the concrete example... If then else?}
+To make things more concrete, we will look at a small example,
+namely a type-checker for simply typed lambda calculus.
+The function |tc| takes an environment |env|, an expression |e| where
+variables refer to types in the environment by de Bruijn-indicies
+and where the application constructor has the cut type explicitly specified,
+and a type |t|, and returns whether or not |e| has the type |e| in the |env|:
+
+> tc :: [Type] -> Expr -> Type -> Bool
+> tc  env  (App f x tx)  t           = tc env f (tx :-> t) && tc env x tx
+> tc  env  (Lam e)       (tx :-> t)  = tc (tx:env) e t
+> tc  env  (Lam e)       _           = False
+> tc  env  (Var x)       t           =  case env `atIndex` x of
+>                                         Just tx  -> tx == t
+>                                         Nothing  -> False
+
+As an example of \hbmc{} finding an assignment, we write a top level declaration,
+|compose|, which asks for an expression |e| that has the type of function composition
+in the empty environment:
+
+> compose e = question (tc [] e ((B :-> C) :-> (A :-> B) :-> (A :-> C)))
+
+(the datatype for types contains the three base types |A|, |B| and |C|).
+Now, we can run \hbmc{} on this, which in half a second reports:
+
+\begin{verbatim}
+e: Lam (Lam (Lam (App (Var (S (S Z))) (App (Var (S Z)) (Var Z) A) B)))
+\end{verbatim}
+
+Which is the representation of |(\ f g x -> f (g x))|, as expected.
+The same property can be written as a QuickCheck, by replacing
+|question| with |noot|: saying that for all expressions |e|, they do not
+have the type of function composition.
+But it would be very hard to find this value by random testing.
+The situation could be improved upon by writing a custom generator that always
+generates well-typed data, but this is not such an attractive option
+as it is a difficult problem in itself \cite{PalkaLambdaTerms2011}.
 
 There already exist dedicated search procedures for inputs that lead to certain
+\comm{Should we refer to smten here too?}
 outputs. Most notably, there are a number of tools (such as Reach \cite{reach},
 Lazy SmallCheck \cite{lazysc}, and Agsy \cite{agsy}) that employ a backtracking
 technique called {\em lazy narrowing} to search for inputs. These tools are
-much better than random testing at finding intricate inputs, but they have one
+much better than random testing at finding intricate inputs, but they rely
+on laziness to be able to abort unfruitful computations early.
+but they have one
 big shortcoming: they employ a depth-limitation on the input. In order to use
 these tools, a maximum search depth has to be specified (or the tool itself can
 enumerate larger and larger depths). Increasing the maximum depth of a set of
 terms affects the size of the search space exponentially. For example, Lazy
-SmallCheck times out for instances of |prop_Unambiguous| when the depth gets
-larger than ~4, because there are just too many cases to check.
-
-To overcome this depth problem, we do not limit the search by depth. Rather, we
-provide a different way of bounding the input, namely by letting the solver
-carefully expand the input one (symbolic) constructor at a time, carving out an
-input shape rather than an maximal input depth. We also hope that the
-sophisticated search strategies in a SAT-solver are able to beat a backtracking
-search, as long as the encoding of the search problem in SAT is natural enough
-for the solver to work with.
+SmallCheck times out for instances of the type-checking example |compose| when the depth gets
+larger than 5, because there are just too many cases to check.
+The |tc| predicate is just too strict
+(even when as many parallell connectives as possible are used), and the
+counterexample is at a too big depth to be able to be found by this techinque.
 
 This paper contains the following contributions:
 
 \begin{itemize}
+\item We show how to express values of arbitrary datatypes symbolically in a SAT-solver.
+      (Section X)
+
+\item Furthermore, these datatypes are ``expandable'', allowing the system to be run
+      without a depth or size restriction (Section X)
+
+\item We show how to use the conflict clause of the SAT-solver to choose an unevaluated
+      point in the program to expand (Section X)
+
+\item We describe how we can handle non-terminating programs (Section X)
+
+\item We present how memoization helps in this setting and how it can be used
+      to do ``non-local'' reasoning (Section X)
+
+\item We show a new techinque how to merge function calls to remove
+      exponential blowup that can happen in symbolic evaluation (Section X)
+
+\item We present a thorough evaluation with other techniques.
+      This also includes a new tool that instruments a program with
+      parallell boolean connectives to be used with LazySmallCheck (Section X)
+
+\item \textbf{Old list of contributions:}
+
 \item We present a monadic DSL for constraint generation that can be used
 to program with a SAT-solver. (Section 3)
 
@@ -168,6 +230,11 @@ to program with a SAT-solver. (Section 3)
 \item We show to perform bounded model checking {\em incrementally} for growing input sizes, by making use of feedback from the SAT-solver. (Section 5)
 \end{itemize}
 We also show a number of different examples, and experimental evaluations on these examples (Section \ref{examples}).
+\comm{We could also expand the introduction and have examples here, and then refer back to them
+in the evaluation section}
+
+The tool is available at \url{http://github.com/danr/hbmc},
+and available on hackage and thus installable with \verb!cabal install hbmc!.
 
 % ------------------------------------------------------------------------------
 
@@ -175,13 +242,14 @@ We also show a number of different examples, and experimental evaluations on the
 \section{Symbolic datatypes}
 \label{ite}
 
-This section gives a some background and motivation to the techniques we use later in the paper.
+This section gives some background and motivation to the techniques we use later in the paper,
+by introducing symbolic values and approaches how to do if-then-else on them.
 
-The programming language FL, part of the formal verification system Forte \cite{forte} is an ML-like language with one particular distinguishing feature: symbolic booleans. FL has a primitive function with the following type\footnote{Throughout the paper, we use Haskell notation for our examples, even though the examples may not actually be written in the Haskell language.}:
+The programming language FL, part of the formal verification system Forte \cite{forte} is an ML-like language with one particular distinguishing feature: symbolic booleans. FL has a primitive function with the following type%\footnote{Throughout the paper, we use Haskell notation for our examples, even though the examples may not actually be written in the Haskell language.}:
 \begin{code}
 var :: String -> Bool
 \end{code}
-The idea behind |var| is that it creates a symbolic boolean value with the given name. It is possible to use the normal boolean operators (|(/\)|, |(\/)|, |(not)|, |(==)|, etc.) on these symbolic booleans, and the result is then computed as a normalized boolean formula in terms of the variables created by |var|. The implementation of FL uses BDDs \cite{bdd} for this.
+The idea behind |var| is that it creates a symbolic boolean value with the given name. It is possible to use the normal boolean operators (|(&&)|, |(not)|, |(==)|, etc.) on these symbolic booleans, and the result is then computed as a normalized boolean formula in terms of the variables created by |var|. The implementation of FL uses BDDs \cite{bdd} for this.
 
 %format BoolSym = "\mathit{Bool}^\dagger"
 What happens when we use \ifthenelse{} with these symbolic booleans to choose between, for example, two given lists? This is unfortunately disallowed in FL, and leads to a run-time error. The Haskell library Duck Logic \cite{duck-logic} provided a similar feature to FL, but used the type system to avoid mixing symbolic booleans with regular Haskell values, by making symbolic booleans |BoolSym| a different type from regular |Bool|.
@@ -256,6 +324,11 @@ For these reasons, we move from an {\em expression-based} view (using \ifthenels
 \label{dsl}
 
 In this section, we present a small DSL, the constraint monad, that we will use later for generating constraints to a SAT-solver. We also show, by means of examples, how it can be used to encode algebraic datatypes symbolically.
+\comm{
+Reviewer:
+The notion of the constraint monad appears inside both (and also in Kuncak
+et. al's Comfusys, a precursor to the LEON work).
+}
 
 \subsection{The Constraint monad}
 
@@ -326,6 +399,7 @@ The function |newFin| creates a suitable number of new variables, uses a proposi
 
 \subsection{Incrementality}
 
+\comm{Really need to show the solve-loop, too!!}
 Before we show the symbolic encoding of datatypes in the constraint generation setting, we need to introduce one more auxiliary type. Since we are going to create symbolic inputs to programs {\em incrementally}, i.e.\ without knowing on beforehand how large they should be, we introduce the type |Delay|\footnote{As we shall see in Section \ref{sec:solving}, the story is slightly more complicated than this, but we present a simplified version here for presentation purposes.}.
 \begin{code}
 type Delay a
@@ -405,7 +479,7 @@ neg a    = done (Expr (one Neg) X       (An a)  X)
 %format TypeSym = "\mathit{Type}^\dagger"
 In general, to make a symbolic version of an algebraic datatype |Type|, we create three new types: |TypeL|, which enumerates all constructor functions from |Type|; |TypeC|, which has one argument of type |Fin TypeL| and moreover the union of all constructor arguments tagged with |Arg|, and |TypeSym|, which is just |Delay TypeC|. Note that this construction also works for mutally recursive datatypes.
 
-We have seen how to construct concrete values in these symbolic datatypes. What is left is to show how to do case analysis on symbolic datatypes, how to construct symbolic values, and how to state equality between . This is presented in the next two subsections.
+We have seen how to construct concrete values in these symbolic datatypes. What is left is to show how to do case analysis on symbolic datatypes, how to construct symbolic values, and how to state equality between them. This is presented in the next two subsections.
 
 \subsection{Case expressions on symbolic datatypes}
 
@@ -578,7 +652,7 @@ For now, we assume that the datatypes and programs we deal with are first-order.
 We start by presenting the syntax of the language we translate. This language is very restricted syntactically, but it is easy to see that more expressive languages can be translated into this language.
 
 The language is presented in Figure~\ref{fig:lang}.
-Function definitions |d| and recursion can only happen on top-level. A program is a sequence of definitions |d|.
+Function definitions |d| and recursion can only happen on top-level ({\em local} recursive function definitions are not allowed). A program is a sequence of definitions |d|.
 Expressions are separated into two categories: {\em simple} expressions |s|, and regular expressions |e|. Simple expressions are constructor applications, selector functions, or variables. Regular expressions are let-expressions with a function application, case-expressions, or simple expressions.
 
 Function application can only happen inside a let-definition and only with simple expressions as arguments. Case-expressions can only match on constructors, the program has to use explicit selector functions to project out the arguments.
@@ -623,7 +697,7 @@ xs ++ ys =  case xs of
 %format CASE = "\textsc{Case}"
 %format LET  = "\textsc{Let}"
 %format DEF  = "\textsc{Def}"
-%format DEFMEMO  = "\textsc{Def-Memo}"
+%format MEMODEF  = "\textsc{Memo-Def}"
 
 The translation revolves around the basic translation for expressions, denoted |transr e r|, where |e| is a (simple or regular) expression, and |r| is a variable. We write |transr e r| for the monadic computation that generate constraints that copy the symbolic value of the expression |e| into the symbolic value |r|.
 
@@ -690,9 +764,16 @@ appendCommutative xs ys =
       insist (nt b)
 \end{code}
 We use the symbolic version |(==?)| of |(==)| that is generated by our translation. When we run the above computation, constraints will be generated that are going to search for inputs |xs| and |ys| such that |xs++ys == ys++xs| is false.
+\comm{Polymorphism?}
 \comm{we don't really explain how to translate properties!}
 
 \subsection{Memoization} \label{sec:memo}
+
+\comm{
+Furthermore,
+the notion of memoizing is quite classical; solvers go to great lengths to use
+it to share sub-terms (c.f. hash-consing in Greg Nelson's thesis).
+}
 
 When performing symbolic evaluation, it is very common that functions get applied to the same arguments more than once. This is much more so compared to running a program on concrete values. A reason for this is that in symbolic evaluation, {\em all} branches of every case expression are potentially executed. If two or more branches contain a function application with the same arguments (something that is even more likely to happen when using selector functions), a concrete run will only execute one of them, but a symbolic run will execute all of them. A concrete example of this happens in datatype instances of the function |(>>>)| (see Section \ref{sec:copy}).
 
@@ -700,15 +781,15 @@ An easy solution to this problem is to use memoization. We apply memoization in 
 
 First, for translated top-level function calls that return a result, we keep a memo table that remembers to which symbolic arguments a function has been applied. If the given arguments has not been seen yet, a fresh symbolic result value |r| is created using |new|, and the function body |e| is run {\em in a fresh context} |c|. The reason we run |e| in a fresh context is that we may reuse the result |r| from many different future contexts. In order to use the result |r| from any context, we need to make the context |c| true first (by using |insist|). After storing |c| and |r| in |f|'s memo table, we return |r|. If we have already seen the arguments, we simply return the previously computed result, after making sure to imply the context in which it was created.
 
-Translating a definition |f x1 ... xn = e| with memoization on thus yields the following result:
+We transle a definition |f x1 ... xn = e| with memoization enabled in this way:
 \begin{code}
-(DEFMEMO)  quad  (sym (f)) x1 ... xn =
+(MEMODEF)  quad  (sym (f)) x1 ... xn =
                    do  mcy <- lookMemo_f x1 ... xn
                        case mcy of
                             Nothing     -> do  c <- new
                                                y <- new
                                                storeMemo_f x1 ... xn (c,y)
-                                               with c § transr e y
+                                               with c ((transr e y))
                                                insist c
                                                return y
                             Just (c,y)  -> do  insist c
@@ -719,9 +800,23 @@ The functions |lookMemo_f| and |storeMemo_f| perform lookup and storage in |f|'s
 Second, we also memoize the copy function |(>>>)|. This function is not a function that returns a result, but it generates constraints instead. However, we treat |(>>>)| as if it were a top-level function returning |()|, and memoize it in the same way.
 
 Memoization can have big consequences for the performance of constraint generation and solving, as shown in the experimental evaluation.
-We allow memoization to be turned on and off manually for each top-level function. We always memoize |(>>>)| on |Delay|.
+%We allow memoization to be turned on and off manually for each top-level function.
+Memoization is enabled by default on all recursive functions.
+We always memoize |(>>>)| on |Delay|.
 
 \subsection{Symbolic merging of function calls}
+
+\comm{
+Reviewer:
+ The function call merging optimization, while effective, is known in
+  the first-order symbolic execution world.  See for example the
+  description of encoding paths in "Enhancing symbolic execution with
+  Veritesting", section	2.3.  That paper cites "Avoiding exponential
+  explosion: Generating compact verification conditions" by Flanagan
+  and Saxe and "Efficient weakest preconditions" by Leino.  The	paper
+  should probably weaken the claims of novelty and compare it to
+  existing approaches.
+  }
 
 Consider the following program:
 \begin{code}
@@ -750,6 +845,9 @@ f e =  let y = f (  case e of
 This program behaves the same as the original program (at least in a lazy semantics), but now it only makes one recursive call, {\em even when we symbolically evaluate it}. The trick is to share one generalized call to |f| between all 3 places that need to call |f|. We can do this, because those 3 places never really need to call |f| at the same time; for any concrete input, we can only be in one branch at a time. Thus, we have {\em merged} three calls to |f| into one call.
 
 Our translator can generate constraint producing code that applies the same idea as the above program transformation, but directly expressed in constraint generation code. In order for this to happen, the user has to manually annotate calls to |f| with a special labelling construct |@|:
+\comm{Update this and remove the labelling construct
+Describe that we can have lets binding case-constructs
+}
 \begin{code}
 f e =  case e of
          Var v    -> v
@@ -790,6 +888,7 @@ We perform a few other optimizations in our translation. Two of them are describ
 Not all algebraic datatypes need to use |Delay|. In principle, for any finite type we do not need to use |Delay| because we know the (maximum) size of the elements on beforehand. In our translator, we decided to not use |Delay| for enumeration types (e.g.\ |BoolSym|).
 
 For definitions that consist of a simple expression |s|, we can translate as follows:
+\comm{this is actually not on}
 \begin{code}
 trans (f x1 ... xn = s) /// = /// f x1 ... xn = do  return s
 \end{code}
@@ -881,8 +980,10 @@ When a |C| computation terminates and has generated constraints, we can look at 
 
 \subsection{Solving and expanding}
 
+\comm{Make this clearer}
 The main loop we use in our solving algorithm works as follows. We start by creating a SAT-solver, and
 running the main |C|-computation. This will produce a number of constraints in the SAT-solver. It will also produce a queue $Q$ of pairs of contexts and unexpanded input delays.
+\comm{Compare this by only using a queue, and expanding even when it is not strictly required}
 
 We then enter our main loop.
 
@@ -913,9 +1014,9 @@ This function takes a constraint generator as an argument, and postpones it for 
 
 For possibly non-terminating functions |f|, |postpone| is used in the following way:
 \begin{code}
-trans (f x1 ... xn = e) /// = /// f x1 ... xn = do  y <- new
-                                                    postpone § transr e y
-                                                    return y
+trans (f x1 ... xn = e) /// = /// sym(f) x1 ... xn = do  y <- new
+                                                         postpone ((transr e y))
+                                                         return y
 \end{code}
 The generation of constraints for the body |e| of |f| is postponed until a later time.
 
@@ -923,9 +1024,308 @@ It is good that we have postpone; sometimes, even though our input program clear
 
 Thus, we use |postpone| on any function which is not structurally recursive {\em after} transformation into a symbolic program.
 
+\comm{New text}
+The true story is this:
+If we assume that the input program is terminating for all inputs,
+we can guarantee that we will find the counter-example (given sufficient memory and time).
+This is the same assumption that CVC4 does, and it is a totally reasonable assumption.
+So our program is well-behaved on terminating programs.
+
+However, if the input program is not terminating, then the function axioms can still
+be consistent, and our tool can still be used beneficially.
+An example is |f x = f x|, which is not a contradiction. Our tool will just
+enqueue f ocassionally but be able to say anything about what |f x| is.
+If the axioms are inconsistent due to non-termination, as in |f x = not (f x)|, then
+we cannot make any guarantees that we will find this inconsistency. In the function above,
+with memozation enabled (which it will be by default, since |f| is a recursive function)
+we will get some value |y| that is equal to |not y|, a contradiction! However, if
+memoization is turned off, or if memoization does not apply, then our tool won't be able
+to see that there is a contradiction and instead search for (and maybe report) a counterexample
+in another part of the program.
+
+Comment:
+It can be beneficial to have |postpone|s even on functions that are obviously terminating.
+The reason is that it can sometimes be seen that expanding a function further won't lead
+to a counterexample. And the less functions are expanded, the fewer constraints are produced.
+
 % ------------------------------------------------------------------------------
 
-%\begin{comment}
+\section{Experimental Evaluation}
+\label{examples}
+
+In this section, we compare different settings of our tool
+and with other similar tools, to be able to show the claims
+made in the introduction.
+
+We do three different experiments:
+\begin{enumerate}
+\item as a quantitative analysis we compare the runtimes to
+show that there are no counterexamples up to some depth |d| to true properties
+with LazySmallCheck\cite{lazysc} and with smten\cite{smten}.
+We also compare running our tool by generating symbolic data up-front up to some depth,
+or to incrementally expand it until it reaches some depth.
+
+\item a qualitative evaluation of challenge benchmarks that have
+counterexamples, also against some other tools (CVC4 \cite{cvc4models}, and
+Feat \cite{feat}).
+
+\item to show the importance of memoization and function call merging,
+we compare our tool with and without these settings on some programs
+\end{enumerate}
+
+
+
+In this section, we would like to compare our tool to
+\comm{restart}
+similar tools that can also find values with a certain property
+(such as being a counter-example to a conjecture).
+We have identified two approaches to evaluate such tools:
+One way to evaluate such tools are to use a benchmark suite
+with satisfiable properties.
+
+This approach has some drawbacks, in particular: (1) tools can get ``lucky'',
+and find an assignment quickly (this especially applies to randomised testing),
+(2) there is an unsettling arbitrariness of what benchmarks to use
+(introduce random mutations to make buggy programs,
+introduce artificial limits like that the input must have some certain size,
+try to excavate buggy programs from version controlled code)
+
+Another approach is to use conjectures that are true,
+which have no counterexample, and see how long time it takes for
+the tools to report that there is no conterexample.
+Since we use recursive data types, the search space is infinite,
+so there will have to be a bound, for instance depth or size.
+(Otherwise a tools like our will forever (except in favourable cases)!)
+We modified our tool to be able to make such an evaluation:
+there is a flag for specifying the maximum depth of the input data.
+The implementation is simple: when the symbolic data has reached
+the specified depth, a delayed value is not used, but rather an
+inaccessible delay that cannot be expanded. This will eventually
+make the queue of points to expand empty, and then it can be concluded
+that no counterexample exist within the depth.
+
+Of course, this is using the tools for the wrong purpose.
+The right tool is to use an inductive prover that could prove
+that there are no counterexamples, regardless of length.
+So we emphasize that this is just a way to be able to evaluate
+how well it would work when there actually are counterexamples to find.
+
+With this in place, we can easily compare our tool with
+the most similar tools, namely LazySmallCheck\cite{lazysc},
+which operates by depth by default, and with smten\cite{smten},
+which allows the user specify search spaces in a DSL. We simply
+generate the code that makes a search space up to some depth.
+\comm{smten could get merged spaces}
+Care was taken so that LazySmallCheck uses as many parallel connectives as possible.
+
+\paragraph{Experimental set-up} The experiments were run on a 2013 laptop computer
+with an Intel Xeon E3-1200 v2 processor and the processes were allowed 7 GB of RAM.
+We used the latest versions of the tools: smten 4.1.0.0, LazySmallCheck 0.6,
+\verb!cvc4-2015-08-18-x86_64-linux-opt!.
+
+\subsection{Exhausting a search space up to some depth}
+We use the TIP benchmarks\cite{tip_problems},
+some of the benchmarks sort integer lists, and some of them
+have a polymorphic quantification of the property.
+For these kind of problems, we make a new versions, where
+we replace the type or the sortable with a unary representation of natural numbers.
+We remove those that use integer {\em arithmetic}, and higher-order-functions\footnote{
+Most of the higher-order constructs are removable by specialization.
+Quantification over functions in the properties only occurs in a few benchmarks.
+We aim to be able to lift this restriction of our tool to the final version of the paper.
+}. This is to only compare data-types, and to get all tools to
+have the same interpretation of depth.
+This yields some ~400 benchmarks.
+We run them on increasing depths.
+Here is a table of the number of solved problems within 60s:
+
+
+Preliminary results with timeout of 1s:
+
+
+
+
+
+\begin{figure}[h]
+
+\centering
+\begin{tabular}{l || r || r || r || r || r || r || r || r || r || r || r || r || r || r  || r}
+tool              & 3  & 4  & 5  & 6  & 7  & 8  & 9  & 10 & 15 & 20 & 30 & 50 & 100 & 200 & 1000 \\
+\hline
+\hline
+hbmc & 328 & 295 & 282 & 249 & 220 & 202 & 194 & 187 & 136 & 119 & 96 & 78 & 49 & 41 & 26 \\
+\hline
+LSC  & 350 & 339 & 316 & 296 & 278 & 199 & 166 & 163 & 151 & 132 & 127 & 109 & 99 & 65 & 50 \\
+\hline
+smten & 282 & 267 & 253 & 235 & 213 & 197 & 188 & 169 & 152 & 127 & 102 & 86 & 54 & 42 & 6 \\
+\end{tabular}
+\caption{
+Number of benchmarks shown to not contain any conterexample up to various depths, within a timeout of 60s.
+\label{tab:depth}
+}
+\end{figure}
+
+10s:
+
+lazysc 398 386 362 342 332 305 296 284 201 167 167 164 162 159 159 159 151 151 150 150 132 129 127 127 127 110 108 105 98 90 72 61 61 61 61 61 61
+
+smten  319 312 288 272 258 244 233 221 203 190 179 171 170 167 163 159 157 156 154 153 127 114 102 101  96  92  86  82 54 48 39 39 39 39 38 38 37
+
+hbmc   394 363 335 316 290 281 264 238 218 204 202 197 194 191 188 181 176 167 164 159 126 106  98  93  87  83  81  80 58 48 45 44 43 41 40 37 32
+
+hbmc u 394 363 337 324 296 287 268 243 227 209 202 199 196 192 191 187 180 175 172 171 141 115  98  86  79  77  75  72 52 48 45 45 44 40 36 35 35
+
+Here are scatter plots:
+
+... plots plots ...
+
+\subsubsection{Interpretation}
+
+
+There are some examples where the intermediate symbolic
+values get too big, for instance the regular expression examples.
+Here, it is just simply faster to exhaustively run the programs
+(a'la SC or LSC).
+Interpreting the program symbolically is slower than
+evaluating the program, so LSC typically performs faster unless
+there is some exponential blowup that our tool can avoid
+symbolically.
+From the results, it can be seen that our tool is able to
+exhaustively search larger search spaces than LSC, so
+one could hypothesise that this tool is better at finding
+big counterexample. (And the next section strengthens this
+hypothesis).
+Another case is when memoisation enables us to see that two values are equal,
+and only needs the result from the computation, but not the actual
+computation.
+(see \verb!isaplanner/prop_75!)
+The property talks about the function |count|, defined as:
+
+> count :: Nat -> [Nat] -> Nat
+> count n []     = Z
+> count n (x:xs) = if n = = x then S (count n xs) else count n xs
+
+The property is:
+
+> plus (count n xs) (count n [m]) = count n (m:xs)
+
+However, our tool can see that there is no counterexample, even without
+expanding the definition of |==|. To see why, memoisation will give names
+to |n == xi| for all |xi| in the list |xs| and in |m|. Then, the SAT solver
+effectively case splits on the result of the comparison, and propagates
+the information symbolically through |count| and |plus|.
+This has the effect that |n| and the elements of the list are not expanded,
+only the list |xs| is.
+
+What is it we cannot see with memoization? Consider this (contrived) fragment of code:
+
+> if x == y then f x ++ f y else []
+
+Here |f x| and |f y| will be equal as |x| and |y| are. But the lookup in the memoization
+table does not know about the current context's equalities. So there is some room
+for improvement here.
+It should be noted that Leon should be able to achieve this through its use of
+uninterpreted functions and SMT congruence reasing.
+
+% (declare-datatypes (a)
+%   ((list (nil) (cons (head a) (tail (list a))))))
+% (declare-datatypes () ((Nat (Z) (S (p Nat)))))
+% (define-fun-rec
+%   plus
+%     ((x Nat) (y Nat)) Nat
+%     (match x
+%       (case Z y)
+%       (case (S z) (S (plus z y)))))
+% (define-fun-rec
+%   equal
+%     ((x Nat) (y Nat)) Bool
+%     (match x
+%       (case Z
+%         (match y
+%           (case Z true)
+%           (case (S z) false)))
+%       (case (S x2)
+%         (match y
+%           (case Z false)
+%           (case (S y2) (equal x2 y2))))))
+% (define-fun-rec
+%   count
+%     ((x Nat) (y (list Nat))) Nat
+%     (match y
+%       (case nil Z)
+%       (case (cons z ys)
+%         (ite (equal x z) (S (count x ys)) (count x ys)))))
+% (assert-not
+%   (forall ((n Nat) (m Nat) (xs (list Nat)))
+%     (= (plus (count n xs) (count n (cons m (as nil (list Nat)))))
+%       (count n (cons m xs)))))
+% (check-sat)
+
+These are some scribbles about the old evaluation:
+\begin{itemize}
+\item Lazy SmallCheck performs very well on sorting examples where
+      the structure of the sorted lists can be determined lazily
+      without looking at the elements.
+      On the other hand, hbmc performs better on
+      stricter sorts like insertion sort, bubble sort
+      or merge sort which first identifies sublists which are ascending
+      and descending.
+      The problems about sorting come in two flavors, one
+      where it is given that |length xs = n && length ys = n|,
+      and one when only |length xs = n| is given, and hbmc
+      performs well even when only one of them is given.
+\item Problems with very small counter-examples are quickly found
+      by both Lazy SmallCheck and feat: the overhead of symbolic
+      execution can sometimes be high here even though the
+      counterexample is small. Some examples of these is finding
+      small regular expressions of some property: evaulating
+      the regular expression reckogniser symbolically is quite expensive.
+\item hbmc shines when a lot of the search space can be carved
+      away, (but not necessarily by a lazy predicate), and
+      the counterexample is at a certain depth.
+      Some of the examples in the bench mark suite that hbmc
+      can only do are:
+      \begin{itemize}
+        \item synthesise lambda expressions in normal form by inverting a type checker
+              (however, these are not so big so feat can find the smaller ones, too)
+              (inferring the types of these is easy for LazySC, but feat does not
+              always make it. hbmc is good at inferring)
+        \item find a fixed point combinator in combinatory calculus
+              (all but one of these are too big even for feat)
+        \item find a turing machine with certain properties
+        \item find propositional formula with certain properties
+        \item find balanced search trees
+      \end{itemize}
+\end{itemize}
+
+\subsection{Satisfiable problems}
+We took some we were interested in, so this section does not
+want to claim as much scientific rigour as the last section.
+
+\begin{itemize}
+\item typechecker for simply typed lambda calculus
+      (with and without products)
+\item combinatory calculus
+\item synthesising turing-machines
+\item grammars
+\item nqueens
+\item edit distance
+\item the ferry problem
+\item wolf, sheep, cabbage
+\item combinators
+\item grammars
+\item sudoku
+\item scale
+\item regexp
+\item tic-tac-toe
+\item group assignments under wishful thinking constraints
+\item the send-more-money puzzle
+\end{itemize}
+
+\subsection{The importance of function call merging}
+We could take some true property, like merge commutative, and increase the depth
+
+\begin{comment}
 \section{Examples and Experiments}
 \label{examples}
 
@@ -1149,9 +1549,6 @@ introduced non-termination by introducing a |postpone|
 as described in Section \ref{postpone}.
 
 \subsection{Expressions from a type checker}
-
-%format :-> = ":\rightarrow"
-%format env = "\rho"
 
 We will here consider a standard type-checker for
 simply typed lambda calculus. It answers whether
@@ -1566,6 +1963,7 @@ to limit the expansion of the program on the number of unrollings
 of recursive functions. Our method with |postpone| does exactly
 this, but there is no need to decide beforehand how many
 unrollings are needed.
+\comm{This dravel about postpone is repeated at too many places!}
 
 
 % ------------------------------------------------------------------------------
@@ -1596,70 +1994,7 @@ unrollings are needed.
 
 % ------------------------------------------------------------------------------
 
-%\end{comment}
-
-\section{Experiments and Evaluation}
-
-We evaluated our tool against Lazy SmallCheck \cite{lazysc}, Feat \cite{feat} and
-the finite model finder mode of CVC4 \cite{cvc4models} on a new
-set of 1750 benchmarks, both new and derived from our inductive benchmarks\cite{tip_problems}.
-Some more text about the different kinds of benchmarks.
-A graph of how many problems were solved cumulative within a time limit can be
-viewed in Figure~\ref{cumuplot}. For feat and Lazy SmallCheck, we generated
-one Haskell file per problem and compiled it with ghc. This time is not included
-in the runtime, but compilation was roughly half a second per file.
-We see that within some seconds, hbmc can solve most of the problems, so there
-is some constant factor overhead. Possibly hbmc can be optimised more.
-Looking more carefully at the different kinds of benchmarks (omitted here,
-but the results can be viewed online at \comm{insert link}),
-we can see that:
-\begin{itemize}
-\item Lazy SmallCheck performs very well on sorting examples where
-      the structure of the sorted lists can be determined lazily
-      without looking at the elements.
-      On the other hand, hbmc performs better on
-      stricter sorts like insertion sort, bubble sort
-      or merge sort which first identifies sublists which are ascending
-      and descending.
-      The problems about sorting come in two flavors, one
-      where it is given that |length xs = n && length ys = n|,
-      and one when only |length xs = n| is given, and hbmc
-      performs well even when only one of them is given.
-\item Problems with very small counter-examples are quickly found
-      by both Lazy SmallCheck and feat: the overhead of symbolic
-      execution can sometimes be high here even though the
-      counterexample is small. Some examples of these is finding
-      small regular expressions of some property: evaulating
-      the regular expression reckogniser symbolically is quite expensive.
-\item hbmc shines when a lot of the search space can be carved
-      away, (but not necessarily by a lazy predicate), and
-      the counterexample is at a certain depth.
-      Some of the examples in the bench mark suite that hbmc
-      can only do are:
-      \begin{itemize}
-        \item synthesise lambda expressions in normal form by inverting a type checker
-              (however, these are not so big so feat can find the smaller ones, too)
-              (inferring the types of these is easy for LazySC, but feat does not
-              always make it. hbmc is good at inferring)
-        \item find a fixed point combinator in combinatory calculus
-              (all but one of these are too big even for feat)
-        \item find a turing machine with certain properties
-        \item find propositional formula with certain properties
-        \item find balanced search trees
-      \end{itemize}
-      % pr -m -t hbmc_-q_ _lazysc_ | grep ,[^-].*,-
-\end{itemize}
-
-\begin{figure}
-%\input{cumuplot}
-\caption{Evaluation of the benchmark suite on the different tools.
-\label{cumuplot}
-}
-\end{figure}
-
-We also evaluated HBMC against itself, with and without
-memoisation and with and without function call merging.
-\comm{add data}
+\end{comment}
 
 \section{Related Work}
 
@@ -1671,6 +2006,12 @@ rather than finding counterexamples, which they see as a beneficial side effect.
 Using uninterpreted
 functions in a SMT solver helps to derive equivalences between values
 that have not yet been fully expanded.
+Leon has the plus that it can do "non-local" reasoning akin to
+what we can sometimes achive through memoization. However,
+they also allow pre- and post-connditions (which allows them to
+prove propetries at the same time). To be able to do this reliably,
+the prover really needs to have {\em names} for each thing, and
+then congruence reasoning on top of that is really elegant.
 
 Another similar tool to both Leon and ours is Smten\cite{smten}.
 They also compile Haskell to a SAT/SMT-based query, given
@@ -1691,6 +2032,12 @@ This is the default in our work, as well as
 collapsing function calls.
 We also use the conflict clause to determine where to
 expand the program.
+They start expanding the program
+and if they heuristically detect that it is long-running (by a timeout?) they
+make some parts opaque, to be filled in later.
+They don't seem to be using a conflict clause.
+In this work, we try to make it very clear how to use the conflict clause
+in a simple way to expand the program incrementally.
 
 QuickCheck\cite{quickcheck} is an embedded DSL for finding
 counterexamples for Haskell by using randomized testing.
@@ -1722,6 +2069,11 @@ depth either of the input values or the function call recursion.
 LazySmallCheck combines the ideas from SmallCheck and Reach to do lazy narrowing
 on the depth of the values as a DSL in Haskell.
 
+The evaluation section shows that LazySmallCheck is very effective:
+and it is perhaps surprising that just laziness can be so powerful
+to satisfy properties. (This relies on maximal use of parallal connectives, though).
+LazySmallCheck is implemented as a library in Haskell, on just a few hundred lines or so.
+
 Methods for finding models for SMT with quantified uninterpreted functions
 exist \cite{GeMoura,ReyEtAl-CADE-13}.
 When knowing what axioms are (recursive) function definitions
@@ -1750,13 +2102,44 @@ parts of the program can be expanded.
 Finally, it should be noted that there are several libraries
 to access SAT and SMT solvers in functional languages. Perhaps the most
 well-known for Haskell is SBV\cite{sbv}.
-However, they don't allow symbolic evaluation of functional programs.
+However their |if-then-else| function |ite| is implemented by calling the
+function |symbolcMerge| in the |Mergeable| typeclass, which throws an exception
+if the constructors do not match up.
 
-%Liquid types. (and other contracts checkers)
+We use the function-call merging optimisation to reduce
+exponential size of the SAT problem to linear in the number of calls.
+This is similar to avoiding exponential blowup in the weakest-precondition
+calculus \cite{Flanagan01avoidingexponential}. In particular, they
+address the problem with sequenced non-deterministic choices, which
+is similar to how |case|-constructs are non-deterministic in the symbolic
+evaluation of our programs.
 
-%EasyCheck (Curry enumeration)
+Another strand of related work is concolic execution: a combination of
+concrete and symbolic execution (hence the name).
+The idea is to evaluate the program on some random concrete value,
+but while logging all the path conditions that led us there.
+If there was no crash or assertion failure from this value,
+a constraint solver - typically an SMT solver - tries to find an
+assignment that makes some other path true. This enables such solvers
+to explore relevant parts of the search space.
+Traditionally, this has mainly been used for imperative programs,
+in toos like PEX \cite{PEX2008}, KLEE \cite{KLEE2008} and SAGE (?).
+This has been applied to functional programming, in particular
+Erlang\cite{ConcTestingFP2015}, but lacks a thorough evaluation.
+\comm{What to write about this?}
 
-%Catch
+\comm{Missing:
+
+HO stuff
+
+Constraint programming
+
+Liquid types. HALO. (and other contracts checkers)
+
+EasyCheck (Curry enumeration)
+
+Catch
+}
 
 % ------------------------------------------------------------------------------
 
@@ -1805,6 +2188,8 @@ We have decided to tackle a hard problem (finding program inputs that lead to ce
 We use the conflict set of the SAT-solver to decide how to expand the input incrementally until a suitable input is found. Our experiments have shown that this actually works rather well, very often just the right constructors are chosen. We also apply memoization and function call merging to battle exponential blow-up, and have experimentally shown that both of these have a positive effect, with function call merging being vital for certain problems to even succeed.
 
 Our method works well for cases where the generation of the SAT-problem does not blow up. It can outperform other methods in cases where one gains something from the extra combinatorial search power. The method does not work well when the input expansion chooses the wrong thing to expand, or when the expansion needs too many steps to reach the correct input shape. We have not encountered any problem that turned out to be too hard for the SAT-solver itself; most SAT calls terminate almost immediately (even for large problems), and very few calls take more than, say, a second.
+
+\paragraph{Acknowledgements} We thank anonymous reviewers for helpful feedback on an earlier version of this article.
 
 % ------------------------------------------------------------------------------
 
