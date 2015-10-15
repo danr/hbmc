@@ -729,6 +729,21 @@ Val ((a,y):xs) =? x
   | otherwise   = Val xs =? x
 valEq = (=?)
 
+valueToBit :: Bit -> H Bit
+valueToBit (Bool b) = return (Bool b)
+valueToBit (Lit b) = do u <- withSolver (\ s -> M.value s b)
+                        case u of
+                          Just b  -> return (if b then tt else ff)
+                          Nothing -> return (Lit b)
+
+(==?) :: Eq a => Val a -> a -> H Bit
+Val []         ==? x  = return ff
+Val ((a,y):xs) ==? x
+  | x == y      = valueToBit a
+  | otherwise   = do a' <- valueToBit a
+                     if a' == tt then return ff else Val xs ==? x
+
+
 domain :: Val a -> [a]
 domain (Val xs) = map snd xs
 
@@ -765,10 +780,29 @@ newVal xs =
    where
     k = n `div` 2
 
+valValue :: Val a -> H (Maybe a)
+valValue (Val xs) = go xs
+  where
+  go [] = return Nothing
+  go ((Bool b,a):xs) = if b then return (Just a) else go xs
+  go ((Lit l,a):xs) =
+    do v <- withSolver (\ s -> M.value s l)
+       case v of
+         Just True -> do -- io (putStrLn "Knew a valValue!")
+                         return (Just a)
+         _         -> go xs
+
 instance Ord a => Equal (Val a) where
   (>>>) = equalHere
 
-  equalHere (Val xs) (Val ys) = eq xs ys
+  equalHere l@(Val xs) r@(Val ys) =
+   do ma <- valValue l
+      mb <- valValue r
+      case (ma,mb) of
+        (Just a ,Just b)  -> addClauseHere [if a == b then tt else ff]
+        (Just a ,Nothing) -> addClauseHere [r =? a]
+        (Nothing,Just b)  -> addClauseHere [l =? b]
+        (Nothing,Nothing) -> eq xs ys
    where
     eq [] ys = sequence_ [ addClauseHere [nt y] | (y,_) <- ys ]
     eq xs [] = sequence_ [ addClauseHere [nt x] | (x,_) <- xs ]
@@ -856,7 +890,14 @@ equalLiveOn k (LiveData tc1 c1 as1) (LiveData tc2 c2 as2) = -- | tc1 == tc2 =
            --         io $ putStrLn (unwords ["UNLESS",show (length bs),show (length cs),show (length dmn)])
            --         unless bs (k x1 x2)
            _ -> do -- io $ putStrLn "WHENS"
-                   whens [ c1 =? c | c <- cs ] (k x1 x2)
+                   ma <- valValue c1
+                   mb <- valValue c2
+                   case (ma,mb) of
+                     (Just a ,Just b)  | a == b && a `elem` cs -> k x1 x2
+                                       | otherwise      -> return ()
+                     (Just a ,Nothing) | a `notElem` cs -> return ()
+                     (Nothing,Just b)  | b `notElem` cs -> return ()
+                     _ -> whens [ c1 =? c | c <- cs ] (k x1 x2)
        | ((cs,Just x1),(_cs,Just x2)) <- as1 `zip` as2
        ]
 

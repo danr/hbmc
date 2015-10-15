@@ -73,7 +73,7 @@ liveMon env (act:acts) =
          do caseData (var_map ! r) $ \ v _ -> addClauseHere [nt (v =? c)]
 
        Guard g ps m ->
-         do let bs = map (livePred env) ps
+         do bs <- mapM (livePred env) ps
             case g of
               Unless -> unless bs (liveMon env m >> return ())
               When   -> whens  bs (liveMon env m >> return ())
@@ -99,14 +99,17 @@ liveMon env (act:acts) =
      case act of
        v :<-: rhs ->
          do x <- case rhs of
-                New i tc  -> newData (if i then depth params else Nothing) i (lkup_desc tc)
+                New i tc  -> newData (if i then depth params else Nothing)
+                                     (i && upfront params && isJust (depth params))
+                                     i
+                                     (lkup_desc tc)
                 Call f ss -> lkup_func f (map (liveSimp env) ss)
             rec_with (dynamic { var_map = M.insert v x var_map }) acts
 
        _ -> liveMon env acts
 
-livePred :: (Show a,Ord a) => LiveEnv a -> Pred a -> Bit
-livePred env (v :=? x) = (pred_map (dynamic env) ! v) =? x
+livePred :: (Show a,Ord a) => LiveEnv a -> Pred a -> H Bit
+livePred env (v :=? x) = (pred_map (dynamic env) ! v) ==? x
 
 liveSimp :: (Show a,Ord a) => LiveEnv a -> Simp a -> LiveData a
 liveSimp env (Con tc k ss) = conData (lkup_desc (static env) tc) k (map (liveSimp env) ss)
