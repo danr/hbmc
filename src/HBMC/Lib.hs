@@ -218,7 +218,8 @@ check h@(H m) = H (\env ->
 -}
 
 check :: H (Delayed a) -> H (Delayed a)
-check = error "check todo"
+check h =
+  do delay True (force =<< h)
 {- ... todo check
 check :: H a -> H (Thunk a)
 check h =
@@ -580,13 +581,13 @@ withoutForce :: a -> (a -> H ()) -> H ()
 withoutForce x h = h x
 
 joinThunks :: Thunk (Thunk a) -> H (Thunk a)
-joinThunks t = delay False (force =<< force t)
+joinThunks t = delay True (force =<< force t)
 
 afterThunk :: Thunk a -> (a -> H b) -> H (Thunk b)
-afterThunk t h = delay False (h =<< force t)
+afterThunk t h = delay True (h =<< force t)
 
 bindThunk :: Thunk a -> (a -> H (Thunk b)) -> H (Thunk b)
-bindThunk t h = delay False (force =<< h =<< force t)
+bindThunk t h = delay True (force =<< h =<< force t)
 
 register :: Thunk a -> Thunk b -> H (Thunk b)
 register ta tb =
@@ -802,17 +803,19 @@ squashTwo desc b1 b2 t1 t2 -- use memo on unique here?
               do io (putStrLn "squashTwoData :)")
                  this <$> squashTwoData b1 b2 x1 x2
          _ -> do io (putStrLn "squashTwoNew  :(")
+              {-
                  x <- newDelayed False desc
                  when b1 (t1 >>> x)
                  when b2 (t2 >>> x)
                  return x
-              {- delay False $ do x1 <- force t1 -- todo: check that we don't force input
-                               x2 <- force t2 -- and do not cause non-termination
-                                              -- backup plan here is to use new+copy
-                                              -- (always works)
-                                              -- (to use new, we need the DataDesc)
-                               squashTwoData b1 b2 x1 x2
               -}
+                 delay True $ do x1 <- force t1 -- todo: check that we don't force input
+                                 x2 <- force t2 -- and do not cause non-termination
+                                                 -- backup plan here is to use new+copy
+                                                 -- (always works)
+                                                 -- (to use new, we need the DataDesc)
+                                 squashTwoData b1 b2 x1 x2
+
 
 squashTwoData :: (Show a,Ord a) => Bit -> Bit -> Data a -> Data a -> H (Data a)
 squashTwoData b1 b2 (Data desc v1 as1) (Data _ v2 as2)

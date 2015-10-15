@@ -247,9 +247,17 @@ trMatch ci e brs | TyCon tc _ <- exprType e =
 
      let ls = Local s (exprType e)
 
-     -- let ctors = [ k | Case (ConPat (Global k _ _) _) _ <- brs ]
+     let others  = foldr1 intersect [ os
+                                    | Tip.Case (ConPat (Global k _ _) _) _ <- brs
+                                    , let Just os = ci k
+                                    ]
 
-     brs' <- concat <$> mapM (trCase ci . replaceProj e ls) brs
+     let brs_wo_def = case brs of
+                        Tip.Case Default b:rest -> [Tip.Case (ConPat (Global k er er) er) b | k <- others ]++rest
+                        _ -> brs
+                      where er = error "brs_wo_def"
+
+     brs' <- concat <$> mapM (trCase ci . replaceProj e ls) brs_wo_def
 
      -- conDelayed e $
      --    [ ...
