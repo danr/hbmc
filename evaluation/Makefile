@@ -36,6 +36,7 @@ benchmarks-feat/%.hs: benchmarks/%.smt2
 	tip $< --haskell-feat > $@
 
 benchmarks-smten/%.hs: benchmarks/%.smt2
+	rm Smten -rf
 	mkdir -p $$(dirname "$@")
 	tip $< --haskell-smten > $@
 
