@@ -11,6 +11,7 @@ import Tip.Utils
 
 import HBMC.Identifiers hiding (Con,Proj,Var)
 import HBMC.Identifiers (Var())
+import HBMC.Merge (rhss)
 
 import HBMC.Params
 import Tip.Passes
@@ -20,6 +21,7 @@ import Data.Generics.Geniplate
 
 import HBMC.ToSimple
 
+import Data.Maybe
 import Data.List
 
 import Control.Monad
@@ -51,6 +53,7 @@ data Guard = When | Unless
 data Rhs a
   = New Bool a
   | Call a [Simp a]
+  | Simple (Simp a)
   deriving (Eq,Ord,Show,Functor,Traversable,Foldable)
 
 data BinPrim = EqualHere | NotEqualHere
@@ -157,16 +160,6 @@ trFunction p ci fn_comps Function{..} =
                `TyArr` (H.TyCon (api "H") [tt func_res]))
        -}
 
-{-
-superSimple :: Expr a -> Bool
-superSimple e =
-  case e of
-    Lcl _   -> True
-    _ :@: _ -> True
-    Let _ (_ :@: _) r -> superSimple r
-    _ -> False
-    -}
-
 trFormula :: ConInfo Var -> Formula Var -> Fresh (Prop Var)
 trFormula ci fm =
   case fm of
@@ -202,16 +195,25 @@ conjuncts e0 =
     Builtin Not :@: [Builtin Implies :@: [e1,e2]] -> concatMap conjuncts [e1,neg e2]
     _                                             -> [e0]
 
+sameSimple :: ConInfo Var -> Expr Var -> Maybe (Expr Var)
+sameSimple ci = same . filter (not . isNoop) . rhss
+  where
+  same (x:xs) | isSimple ci x && all (x ==) xs = Just x
+  same _ = Nothing
+
 -- [[ e ]]=> r
 trExpr :: ConInfo Var -> Expr Var -> Maybe Var -> Fresh (Mon Var)
 trExpr ci e00 mr =
   let (lets,rest) = collectLets e00
-      (matches,fn_calls)  = partition (isMatch . snd) lets
+      (matches,fn_calls)  = partition (\ (_,e) -> isMatch e && isNothing (sameSimple ci e)) lets
   in  ([x :<-: New False (tyConOf t) | (Local x t,_) <- matches ] ++)
          <$> go (makeLets (fn_calls ++ matches) rest)
   where
   go e0 =
     case e0 of
+      Let x se e | Just s <- sameSimple ci se ->
+        (lcl_name x :<-: Simple (trSimple s) :) <$> go e
+
       Let x (Match s brs) e ->
         (++) <$> trMatch ci s brs (Just (lcl_name x)) <*> go e
 
@@ -282,6 +284,14 @@ trSimple s =
     Gbl (Global k _ _) :@: [s] | Just i <- unproj k -> Proj i (let Var x = trSimple s in x)
     Gbl (Global k (PolyType _ _ (TyCon tc _)) _) :@: ss -> Con tc k (map trSimple ss)
     _ -> error $ "trSimple, not simple: " ++ ppRender s
+
+isSimple :: ConInfo Var -> Expr Var -> Bool
+isSimple ci s =
+  case s of
+    Lcl (Local x _) -> True
+    Gbl (Global k _ _) :@: [s] | Just i <- unproj k -> isSimple ci s
+    Gbl (Global k (PolyType _ _ (TyCon tc _)) _) :@: ss | not (null (ci k)) -> all (isSimple ci) ss
+    _ -> False
 
 trCase :: ConInfo Var -> Var -> Maybe Var -> [Var] -> Case Var -> Fresh (Mon Var)
 trCase ci c mr cons (Case pat rhs) =

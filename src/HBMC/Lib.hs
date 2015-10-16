@@ -32,7 +32,7 @@ data Env =
   , waits  :: IORef [(Source,(Bit,Unique,H ()))]
   }
 
-newtype H a = H (Env -> IO a)
+newtype H a = H { unH :: Env -> IO a }
 
 instance Applicative H where
   pure  = return
@@ -567,6 +567,21 @@ solveBit s xs =
 
 data Thunk a = This a | Delay Bool Unique (IORef (Either (H ()) a)) | Inaccessible
 
+mapThunk :: (a -> H (Thunk b)) -> Thunk a -> H (Thunk b)
+mapThunk _ Inaccessible     = return inaccessible
+mapThunk f (This x)         = f x
+mapThunk f th@(Delay b _ _) =
+  do u <- io newUnique
+     ref <- io $ newIORef undefined
+     c <- context
+     io $ writeIORef ref $ Left $ H $ \ env -> do a <- unH (force th) env
+                                                  bt <- unH (f a) env{here = c}
+                                                  b <- unH (force bt) env
+                                                  writeIORef ref (Right b)
+     let d = Delay b u ref
+     ifForce th (\ _ -> force d >> return ())
+     return d
+
 compareView :: Thunk a -> Maybe (Either a Unique)
 compareView (This x)       = Just (Left x)
 compareView (Delay _ u _)  = Just (Right u)
@@ -939,6 +954,10 @@ conData (DataDesc s _ rs) c as =
 caseData :: LiveData c -> (Val c -> [LiveData c] -> H ()) -> H ()
 caseData (LiveThunk th)      k = ifForce th (\ ld -> caseData ld k)
 caseData (LiveData _tc v vs) k = k v (map (\ (_,~(Just v)) -> v) vs)
+
+projData :: LiveData c -> Int -> H (LiveData c)
+projData (LiveThunk th)    i = LiveThunk <$> mapThunk (\ d -> do LiveThunk th <- d `projData` i; return th) th
+projData (LiveData _ _ vs) i = let (_,~(Just v)) = vs !! i in return v
 
 data LiveValue c = ConValue c [LiveValue c] | ThunkValue
 

@@ -27,6 +27,7 @@ import Control.Monad
 
 import Tip.Pretty
 import Tip.Pretty.SMT ()
+import Tip.Pass.Booleans
 
 import Debug.Trace
 
@@ -215,7 +216,7 @@ findCase p brs = listToMaybe [ (l,br,r) | (l,br@(Case p' _),r) <- cursor brs, p 
 --                        B -> case t of
 --                               C -> Nothing
 --                               D -> Just d
---    let x = case arg of Just x  -> f (sel x)
+--    let x = case arg of Just x  -> f (sel arg)
 --                        Nothing -> noop
 --
 -- When all cases are present, no Maybe is introduced:
@@ -226,6 +227,28 @@ findCase p brs = listToMaybe [ (l,br,r) | (l,br@(Case p' _),r) <- cursor brs, p 
 -- => let arg = case s of A -> a
 --                        B -> b
 --    let x = f arg
+--
+--
+--
+-- NEW:
+--
+--    let x = case s of A -> f a
+--                      B -> case t of
+--                             C -> noop
+--                             D -> f d
+--
+-- => let arg = case s of A -> a
+--                        B -> case t of
+--                               C -> noop
+--                               D -> d
+--    let call = case s of A -> LazyTrue
+--                         B -> case t of
+--                                C -> LazyFalse
+--                                D -> LazyTrue
+--    let x = case call of LazyTrue  -> f arg
+--                         LazyFalse -> noop
+--
+-- Note that call is simplified to simply LazyTrue when all rhs are LazyTrue
 
 callMerged :: Expr Var -> Fresh (Expr Var)
 callMerged = transformExprInM top
@@ -234,48 +257,50 @@ callMerged = transformExprInM top
     | rs@((Gbl f :@: as):_) <- rhss m
     , length rs >= 2
     , allSameHeads rs
-    = do let need_maybe = any isNoop (universeBi m)
+    = do args <-
+           sequence
+             [ do arg <- refreshNamed "arg" (lcl_name lhs)
+                  return (Local arg (exprType a)
+                         ,callSkeleton (noopExpr (exprType a))
+                                       (\ es -> es !! i)
+                                       m)
+             | (i,a) <- [0..] `zip` as
+             ]
 
-             (maybe_ty,proj_expr)
-                | need_maybe = ( maybeTy
-                               , \ x -> projExpr 0 (Lcl x)
-                                                 (unMaybeTy (lcl_type x)))
-                | otherwise  = (id     ,Lcl)
+         {-
+         call_var <- freshNamed "call"
+         let call_lcl = Local call_var (exprType (boolExpr boolNames True))
 
-         args <- sequence [ do arg <- refreshNamed "arg" (lcl_name lhs)
-                               return (Local arg (maybe_ty (exprType a))
-                                      ,callSkeleton (exprType a) need_maybe i m)
-                          | (i,a) <- [0..] `zip` as
-                          ]
+         let call_case = callSkeleton (boolExpr boolNames False)
+                                      (\ _ -> boolExpr boolNames True)
+                                      m
 
-         let call = Gbl f :@: [ proj_expr x | (x,_) <- args ]
+         let m' =
+               Match (Lcl call_lcl)
+                [ Case (ConPat (boolGbl boolNames False) [])
+                       (noopExpr (exprType m))
+                , Case (ConPat (boolGbl boolNames True) [])
+                       (Gbl f :@: [ Lcl x | (x,_) <- args ])
+                ]
+         -}
+         let m' =
+               callSkeleton
+                 (noopExpr (exprType m))
+                 (\ _ -> Gbl f :@: [ Lcl x | (x,_) <- args ])
+                 m
 
-         let case_match x e =
-               Match (Lcl x)
-                 [ Case (ConPat (nothingGbl (unMaybeTy (lcl_type x))) [])
-                        (noopExpr (exprType e))
-                 , Case (ConPat (justGbl (unMaybeTy (lcl_type x))) []) e
-                 ]
-
-         let cases
-               | need_maybe = foldr (\ (x,_) e -> case_match x e) call args
-               | otherwise  = call
-
-         return (makeLets (args ++ [(lhs,cases)]) rest)
+         return (makeLets (args -- ++ [(call_lcl,call_case)]
+                                ++ [(lhs,m')]) rest)
 
   top e0 = return e0
 
-callSkeleton :: Type Var -> Bool -> Int -> Expr Var -> Expr Var
-callSkeleton ty need_maybe i = go
+callSkeleton :: Expr Var -> ([Expr Var] -> Expr Var) -> Expr Var -> Expr Var
+callSkeleton empty call = go
   where
   go (Match s brs) = mkMatch s [ Case pat (go rhs) | Case pat rhs <- brs ]
-  go e          | isNoop e                = nothing_expr ty
-  go (_ :@: es) | i >= 0 && i < length es = just_expr (es !! i)
-  go e = error $ "callSkeleton: " ++ ppRender (i,e)
-
-  (nothing_expr,just_expr)
-    | need_maybe = (nothingExpr,justExpr)
-    | otherwise  = (error "callSkeleton: did need Nothing!",id)
+  go e          | isNoop e = empty
+  go (_ :@: es)            = call es
+  go e = error $ "callSkeleton: " ++ ppRender e
 
 
 -- simplify match where all rhs are same

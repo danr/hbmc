@@ -84,6 +84,7 @@ liveMon env (act:acts) =
               \ v as ->
                 do rec_with dynamic{ proj_map = M.insert as_var as proj_map
                                    , pred_map = M.insert v_var v pred_map
+                                   , var_map  = M.insert as_var (liveSimp env s) var_map
                                    }
                             m
                    return ()
@@ -105,6 +106,7 @@ liveMon env (act:acts) =
                                      i
                                      (lkup_desc tc)
                 Call f ss -> lkup_func f (map (liveSimp env) ss)
+                Simple s  -> liveSimpleSimp env s
             rec_with (dynamic { var_map = M.insert v x var_map }) acts
 
        _ -> liveMon env acts
@@ -117,7 +119,12 @@ liveSimp env (Con tc k ss) = conData (lkup_desc (static env) tc) k (map (liveSim
 liveSimp env (Proj i x)    = let v:_ = drop i (proj_map (dynamic env) ! x) in v
 liveSimp env (Var x)       = var_map (dynamic env) ! x
 
+liveSimpleSimp :: (Show a,Ord a) => LiveEnv a -> Simp a -> H (LiveData a)
+liveSimpleSimp env (Con tc k ss) = conData (lkup_desc (static env) tc) k <$> mapM (liveSimpleSimp env) ss
+liveSimpleSimp env (Proj i x)    = projData (var_map (dynamic env) ! x) i
+liveSimpleSimp env (Var x)       = return (var_map (dynamic env) ! x)
+
 (!) :: (Show k,Show v,Ord k) => Map k v -> k -> v
 m ! k = case M.lookup k m of Just v  -> v
-                             Nothing -> error $ "Cannot find: " ++ show k
+                             Nothing -> error $ "Cannot find: " ++ show k ++ " in " ++ show m
 
