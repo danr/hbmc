@@ -6,12 +6,13 @@ import Control.Monad hiding (when,unless)
 import Data.IORef
 import Data.List
 import qualified Data.Map as Mp
-import Data.Unique
+-- import Data.Unique
 import qualified MiniSat as M
 import MiniSat ( Solver, Lit )
 import System.IO.Unsafe
 import Data.Ord ( comparing )
 import Data.Function ( on )
+import Tip.Utils ( usort )
 
 import Debug.Trace
 
@@ -30,7 +31,7 @@ data Env =
   Env
   { sat    :: Solver
   , here   :: Bit
-  , waits  :: IORef [(Source,(Bit,Unique,H ()))]
+  , waits  :: IORef [(Bit,H ())]
   }
 
 newtype H a = H (Env -> IO a)
@@ -89,32 +90,33 @@ miniConflict xs ys =
 trySolve :: Bool -> Bool -> H (Maybe Bool)
 trySolve confl_min quiet = H (\env ->
   do ws <- reverse `fmap` readIORef (waits env)
-     verbose $ "== Try solve with " ++ show (length ws) ++ " waits =="
-     b <- solveBit (sat env) (here env : reverse [ nt p | (_,(p,_,_)) <- ws ])
+     verbose $ "== Try solve with " ++ show (length ws) ++
+               " waits (" ++ show (length (usort (map fst ws))) ++ " distinct delays) =="
+     b <- solveBit (sat env) (here env : reverse [ nt p | (p,_) <- ws ])
      if b then
        do putStrLn "Counterexample!"
           return (Just True)
       else
         let mini =
               do qs' <- M.conflict (sat env)
-                 let qs = [ Lit q | q <- qs' ] ++ [ p | (_,(p,_,_)) <- ws, p == tt ]
-                 if null qs then
-                   do putStrLn "Contradiction!"
-                      return (Just False)
-                  else
-                   let p0:_ = [ p | (_,(p,_,_)) <- ws, p `elem` qs ] in
+                 let qs = [ Lit q | q <- qs' ] ++ [ p | (p,_) <- ws, p == tt ]
+                 case qs of
+                   [] ->
+                     do putStrLn "Contradiction!"
+                        return (Just False)
+                   p0:_ ->
                      do verbose ("Conflict: " ++ show (length qs))
                         -- this can take a lot of time and doesn't necessarily help:
                         b <- if confl_min then
-                               solveBit (sat env) (here env : reverse [ nt p | (_,(p,_,_)) <- ws, p `elem` qs, p /= p0 ])
+                               solveBit (sat env) (here env : usort (reverse [ nt p | (p,_) <- ws, p `elem` qs, p /= p0 ]))
                              else
                                return True
                         if b then
-                          let (source,(p,unq,H h)):_ = [ t | t@(_,(p,_,_)) <- ws, p `elem` qs ] in
-                            do let ws' = [ t | t@(_,(_,unq',_)) <- reverse ws, unq /= unq' ]
+                          let (p,H h):_ = [ t | t@(p,_) <- ws, p `elem` qs ] in
+                            do let ws' = [ t | t@(q,_) <- reverse ws, q /= p ]
                                verbose ("Points: " ++ show (length ws'))
                                writeIORef (waits env) ws'
-                               verbose $ "Expanding " ++ show source ++ "..." ++ show unq
+                               verbose $ "Expanding... " ++ show p
                                h env{ here = p }
                                verbose "Expansion done"
                                return Nothing
@@ -198,14 +200,19 @@ inContext' c (H m) = H (\env -> Just <$> m env{ here = c })
 inContext'' :: Bit -> H a -> H a
 inContext'' c (H m) = H (\env -> m env{ here = c })
 
+type Unique = Bit
+
+{-
 instance Show Unique where
   show = show . hashUnique
+-}
 
-later :: Source -> Unique -> H () -> H ()
-later source unq h = H (\env ->
+later :: Bit -> H () -> H ()
+later unq h = H (\env ->
   do ws <- readIORef (waits env)
      putStrLn $ "later " ++ show unq
-     writeIORef (waits env) ((source, (here env, unq, h)):ws)
+     let H m = nt unq ==> nt (here env) in m env
+     writeIORef (waits env) ((unq, h):ws)
   )
 
 check :: H (Delayed a) -> H (Delayed a)
@@ -221,7 +228,7 @@ must c h =
 addClauseHere :: [Bit] -> H ()
 addClauseHere xs =
   do c <- context
-     [c] ==> xs
+     [c] ===> xs
 
 impossible :: H ()
 impossible = addClauseHere []
@@ -473,8 +480,11 @@ addClause xs
                       withSolver (\s -> M.addClause s [ x | Lit x <- xs ])
                       return ()
 
-(==>) :: [Bit] -> [Bit] -> H ()
-xs ==> ys = addClause (map nt xs ++ ys)
+(==>) :: Bit -> Bit -> H ()
+x ==> y = [x] ===> [y]
+
+(===>) :: [Bit] -> [Bit] -> H ()
+xs ===> ys = addClause (map nt xs ++ ys)
 
 solveBit :: Solver -> [Bit] -> IO Bool
 solveBit s xs | ff `elem` xs =
@@ -486,13 +496,13 @@ solveBit s xs =
 
 --------------------------------------------------------------------------------
 
-data Thunk a = This a | Delay Bool Unique (IORef (Either (H ()) a))
+data Thunk a = This a | Delay Bool Bit (IORef (Either (H ()) a))
 
-compareView :: Thunk a -> Either a Unique
+compareView :: Thunk a -> Either a Bit
 compareView (This x)      = Left x
 compareView (Delay _ u _) = Right u
 
-uniqueView :: Thunk a -> Maybe Unique
+uniqueView :: Thunk a -> Maybe Bit
 uniqueView (This x)       = Nothing
 uniqueView (Delay _ u _ ) = Just u
 
@@ -527,8 +537,10 @@ delay :: Bool -> H a -> H (Thunk a)
 delay inp (H m) =
   do c <- context
      ref <- io $ newIORef undefined
-     unq <- io $ newUnique
-     io $ writeIORef ref $ Left $ H $ \env -> do x <- debugIO (show unq) (m (env{ here = c }))
+     unq <- newBit
+     -- nt unq ==> nt c
+     io $ writeIORef ref $ Left $ H $ \env -> do let H m = addClause [unq] in m env
+                                                 x <- debugIO (show unq) (m (env{ here = c }))
                                                  writeIORef ref (Right x)
      io $ putStrLn $ show unq ++ " created and delayed."
      let d = Delay inp unq ref
@@ -553,11 +565,16 @@ after (React (This a))   k = k a
 after (React ta@(Delay _ tunq _)) k =
   do c <- context
      ref <- io $ newIORef undefined
-     unq <- io newUnique
-     io $ writeIORef ref $ Left $ return ()
+     unq <- newBit
+     io $ writeIORef ref $ Left $ addClause [unq]
+     nt tunq ==> nt unq
+     nt unq ==> nt c
      ifForce ta $
        \ a ->
          do React tb <- debug (show unq ++ " k") (inContext'' c (k a))
+            case uniqueView tb of
+               Just bunq -> nt bunq ==> nt unq
+               Nothing   -> return ()
             debug (show unq ++ " " ++ show (uniqueView tb)) $ ifForce tb $
               \ b ->
                 do Left m <- io (readIORef ref)
@@ -598,7 +615,7 @@ enqueue This{} = return ()
 enqueue th@(Delay inp unq ref) =
   do ema <- io $ readIORef ref
      case ema of
-       Left{} | inp -> later Input unq $ poke th
+       Left{} | inp -> later unq $ poke th
        _            -> return ()
 
 ifForce :: Thunk a -> (a -> H ()) -> H ()
@@ -608,6 +625,7 @@ ifForce th@(Delay inp unq ref) h =
      enqueue th
      case ema of
        Left m  -> do c <- context
+                     -- nt unq ==> nt c
                      io $ writeIORef ref $ Left $
                        do debug (show unq ++ " ifForce") m
                           Just a <- peek th
