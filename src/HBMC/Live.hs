@@ -59,8 +59,8 @@ liveRet :: (Show a,PrettyVar a,Ord a) => LiveEnv a -> Ret a -> H (Delayed a)
 liveRet env ret =
   case ret of
     Simp s    -> return (liveSimp env s)
-    Unit      -> delay False (error "liveRet: Looking at a unit value")
-    Dead      -> delay False (error "liveRet: Looking at a dead value")
+    Unit      -> React <$> delay False (error "liveRet: Looking at a unit value")
+    Dead      -> React <$> delay False (error "liveRet: Looking at a dead value")
     CaseRet c -> liveCase env c
 
 liveCase :: (Show a,PrettyVar a,Ord a) => LiveEnv a -> Case a -> H (Delayed a)
