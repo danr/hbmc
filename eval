@@ -1,0 +1,121 @@
+10s:
+
+       1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18  19  20  30  40  50  60  70  80  90  100 200 300 400 500 600 700 800 900 1000
+lazysc 398 386 362 342 332 305 296 284 201 167 167 164 162 159 159 159 151 151 150 150 132 129 127 127 127 110 108 105 98  90  72  61  61  61  61  61  61
+
+smten  319 312 288 272 258 244 233 221 203 190 179 171 170 167 163 159 157 156 154 153 127 114 102 101  96  92  86  82 54  48  39  39  39  39  38  38  37
+
+hbmc   394 363 335 316 290 281 264 238 218 204 202 197 194 191 188 181 176 167 164 159 126 106  98  93  87  83  81  80 58  48  45  44  43  41  40  37  32
+
+hbmc u 394 363 337 324 296 287 268 243 227 209 202 199 196 192 191 187 180 175 172 171 141 115  98  86  79  77  75  72 52  48  45  45  44  40  36  35  35
+
+nomemo 394 367 337 326 305 296 272 245 227 211 206 200 196 192 192 188 184 182 172 169 124 117 105  94  84  83  80  79 65  59  57  55  55  53  52  50  48
+
+nomrge 394 354 333 319 303 288 266 236 212 206 201 198 192 188 185 181 176 166 161 156 127 112 102  97  90  86  85  83 64  58  55  53  53  51  49  48  43
+
+none   388 341 329 317 296 287 266 232 209 193 189 188 183 178 178 176 174 170 161 158 118 113 102  93  81  80  77  76 63  57  54  53  53  51  50  48  46
+
+
+
+
+
+
+
+
+> count :: Nat -> [Nat] -> Nat
+> count n []     = Z
+> count n (x:xs) = if n = = x then S (count n xs) else count n xs
+
+The property is:
+
+> plus (count n xs) (count n [m]) = count n (m:xs)
+
+However, our tool can see that there is no counterexample, even without
+expanding the definition of |==|. To see why, memoisation will give names
+to |n == xi| for all |xi| in the list |xs| and in |m|. Then, the SAT solver
+effectively case splits on the result of the comparison, and propagates
+the information symbolically through |count| and |plus|.
+This has the effect that |n| and the elements of the list are not expanded,
+only the list |xs| is.
+
+What is it we cannot see with memoization? Consider this (contrived) fragment of code:
+
+> if x == y then f x ++ f y else []
+
+
+
+
+putStrLn $ unlines $ zipWith (\ file res -> (unwords . map p) res ++ drop 15 file) (map (fst . break (== ',')) (lines h)) $ transpose [map (fmap fst . listToMaybe . reads . drop 1 . snd . break (== ',')) (lines file) :: [Maybe Double] | file <- [h,l,s]]
+
+hbmc    lazysc  smten  file
+-       -       -      scale_solution.smt2
+4.9285  -       -      sudoku_blank.smt2
+9.7291  -       -      sudoku_difficult.smt2
+5.9637  -       -      sudoku_example.smt2
+0.4296  -       1.5689 type_synth_compose.smt2
+0.6768  -       31.281 type_synth_flip.smt2
+0.1413  0.0036  0.1127 type_synth_id.smt2
+0.1437  0.0037  0.0396 type_synth_k.smt2
+0.1385  -       1.6323 type_synth_nf_compose.smt2
+0.2185  -       16.701 type_synth_nf_flip.smt2
+0.1593  0.0038  0.1229 type_synth_nf_id.smt2
+0.1629  0.0038  0.0485 type_synth_nf_k.smt2
+0.2247  -       15.214 type_synth_nf_s.smt2
+0.1803  0.1733  0.5170 type_synth_nf_w.smt2
+0.4375  -       28.733 type_synth_s.smt2
+0.1998  -       0.5004 type_synth_w.smt2
+21.905  -       -      typepair_synth_assoc.smt2
+2.7219  -       -      typepair_synth_curry.smt2
+2.5648  -       -      typepair_synth_dist1.smt2
+20.145  -       -      typepair_synth_dist2.smt2
+0.1431  0.0048  0.1141 typepair_synth_dup.smt2
+13.500  -       -      typepair_synth_nf_assoc.smt2
+0.9936  -       -      typepair_synth_nf_curry.smt2
+1.9291  -       -      typepair_synth_nf_dist1.smt2
+-       -       -      typepair_synth_nf_dist2.smt2
+0.2298  0.0021  0.1994 typepair_synth_nf_dup.smt2
+0.9078  0.0037  2.0557 typepair_synth_nf_swap.smt2
+1.8110  -       -      typepair_synth_nf_uncurry.smt2
+-       -       -      typepair_synth_pnf_assoc.smt2
+0.8334  -       -      typepair_synth_pnf_curry.smt2
+1.7350  -       -      typepair_synth_pnf_dist1.smt2
+-       -       -      typepair_synth_pnf_dist2.smt2
+0.2675  0.0035  0.1960 typepair_synth_pnf_dup.smt2
+0.4122  0.0038  1.8445 typepair_synth_pnf_swap.smt2
+1.6079  -       -      typepair_synth_pnf_uncurry.smt2
+0.3630  0.0361  0.6938 typepair_synth_swap.smt2
+2.6310  -       -      typepair_synth_uncurry.smt2
+-       -       -      untyped_bcw_4_why.smt2
+-       -       -      untyped_bcw_5_why.smt2
+16.776  -       -      untyped_bcw_n_why.smt2
+-       -       -      untyped_kbcw_4_why.smt2
+-       -       -      untyped_kbcw_5_why.smt2
+-       -       -      untyped_kbcw_n_why.smt2
+24.458  -       -      untyped_ks_4_why.smt2
+-       -       -      untyped_ks_5_why.smt2
+-       -       -      untyped_ks_n_why.smt2
+9.4944  -       -      untyped_ksb_4_why.smt2
+-       -       -      untyped_ksb_5_why.smt2
+-       -       -      untyped_ksb_n_why.smt2
+9.7746  -       -      untyped_ksbc_4_why.smt2
+-       -       -      untyped_ksbc_5_why.smt2
+-       -       -      untyped_ksbc_n_why.smt2
+24.606  -       -      untyped_ksbcw_4_why.smt2
+-       -       -      untyped_ksbcw_5_why.smt2
+-       -       -      untyped_ksbcw_n_why.smt2
+3.4681  -       -      untyped_sb_4_why.smt2
+-       -       -      untyped_sb_5_why.smt2
+32.908  -       -      untyped_sb_n_why.smt2
+12.149  -       -      untyped_sbcw_4_why.smt2
+38.893  -       -      untyped_sbcw_5_why.smt2
+30.597  -       -      untyped_sbcw_n_why.smt2
+0.5365  0.1017  1.3364 nqueens_4.smt2
+0.6273  0.0590  -      nqueens_5.smt2
+0.7169  0.2881  -      nqueens_6.smt2
+0.8244  1.7977  -      nqueens_7.smt2
+1.0776  15.952  -      nqueens_8.smt2
+1.6765  -       -      nqueens_9.smt2
+9.4617  -       -      nqueens_12.smt2
+9.6592  -       -      nqueens_14.smt2
+40.862  -       -      nqueens_15.smt2
+-       -       -      nqueens_16.smt2
