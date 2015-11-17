@@ -16,6 +16,7 @@ data Params =
     , delay_all_datatypes  :: Bool
     , insist_isnt          :: Bool
     , postpone             :: Bool
+    , strict_data_lazy_fun :: Bool
     , prop_names           :: Maybe [String]
     }
   deriving (Show,Data,Typeable)
@@ -34,6 +35,7 @@ defParams =
     , delay_all_datatypes  = False   &= name "l"   &= help "Delay all datatypes"
     , insist_isnt          = False   &= name "i"   &= help "Insist isn't when possible"
     , postpone             = True                  &= help "Use postpone                     (on)"
+    , strict_data_lazy_fun = False   &= name "s"   &= help "Always use postpone, make case strict"
     , prop_names           = Nothing &= name "prop" &= help "Property to consider (default: first)"
     }
   &= program "hbmc" &= summary logo

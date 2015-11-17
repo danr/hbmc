@@ -1,4 +1,6 @@
 {-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, RankNTypes, FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RecordWildCards #-}
 module HBMC.Lib where
 
 import Control.Applicative
@@ -16,6 +18,8 @@ import Debug.Trace
 
 import Text.Show.Pretty (parseValue,valToStr)
 
+import HBMC.Params hiding (getParams)
+
 --------------------------------------------------------------------------------
 
 data Source = Check | Input
@@ -30,6 +34,7 @@ data Env =
   { sat    :: Solver
   , here   :: Bit
   , waits  :: IORef [(Source,(Bit,Unique,H ()))]
+  , params :: Params
   }
 
 newtype H a = H (Env -> IO a)
@@ -49,11 +54,11 @@ instance Monad H where
 
 --------------------------------------------------------------------------------
 
-run :: H a -> IO a
-run (H m) =
+run :: Params -> H a -> IO a
+run p (H m) =
   M.withNewSolver $ \s ->
     do refw <- newIORef []
-       m (Env s tt refw)
+       m (Env s tt refw p)
 
 {-
 
@@ -85,9 +90,12 @@ miniConflict xs ys =
            xs1 = drop k xs
 -}
 
-trySolve :: Bool -> Bool -> H (Maybe Bool)
-trySolve confl_min quiet = H (\env ->
-  do ws <- reverse `fmap` readIORef (waits env)
+trySolve :: H (Maybe Bool)
+trySolve = H (\env ->
+  do let Params{..} = params env
+     let verbose | quiet     = const (return ())
+                 | otherwise = putStrLn
+     ws <- reverse `fmap` readIORef (waits env)
      verbose $ "== Try solve with " ++ show (length ws) ++ " waits =="
      b <- solveBit (sat env) (here env : reverse [ nt p | (_,(p,_,_)) <- ws ])
      if b then
@@ -103,8 +111,7 @@ trySolve confl_min quiet = H (\env ->
                   else
                    let p0:_ = [ p | (_,(p,_,_)) <- ws, p `elem` qs ] in
                      do verbose ("Conflict: " ++ show (length qs))
-                        -- this can take a lot of time and doesn't necessarily help:
-                        b <- if confl_min then
+                        b <- if conflict_minimzation then
                                solveBit (sat env) (here env : reverse [ nt p | (_,(p,_,_)) <- ws, p `elem` qs, p /= p0 ])
                              else
                                return True
@@ -121,9 +128,6 @@ trySolve confl_min quiet = H (\env ->
                          do mini
          in mini
   )
- where
-  verbose | quiet     = const (return ())
-          | otherwise = putStrLn
 
 {-
        do putStrLn "Finding a contradiction..."
@@ -151,20 +155,27 @@ trySolve confl_min quiet = H (\env ->
                    find (reverse ws)
 -}
 
-solve' :: Bool -> Bool -> H () -> H Bool
-solve' confl_min quiet h =
+solve' :: H () -> H Bool
+solve' h =
   do h
-     mb <- trySolve confl_min quiet
+     mb <- trySolve
      case mb of
-       Nothing -> solve' confl_min quiet h
+       Nothing -> solve' h
        Just b  -> return b
 
 solve :: H Bool
-solve = solve' False False (return ())
+solve = solve' (return ())
 
-solveAndSee :: (Value a,Show (Type a),IncrView a) => Bool -> Bool -> Bool -> a -> H ()
-solveAndSee confl_min quiet incremental_view see =
-  do b <- solve' confl_min quiet (if incremental_view then io . putStrLn =<< incrView see else return ())
+getParams :: H Params
+getParams = H (\env -> return (params env))
+
+queryParam :: (Params -> a) -> H a
+queryParam f = f <$> getParams
+
+solveAndSee :: (Value a,Show (Type a),IncrView a) => a -> H ()
+solveAndSee see =
+  do incremental_view <- queryParam (not . quiet)
+     b <- solve' (if incremental_view then io . putStrLn =<< incrView see else return ())
      if b then
        do get see >>= (io . print)
      else
@@ -648,20 +659,25 @@ instance Constructive a => Constructive (Thunk a) where
   newPoint inp = delay inp $ do -- io (putStrLn ("newThunk " ++ show inp))
                                 newPoint inp
 
+
+equ :: (a -> a -> H ()) -> Thunk a -> Thunk a -> H ()
+equ k t1 t2 =
+  do b <- queryParam strict_data_lazy_fun
+     if b then check $ do a <- force t1
+                          b <- force t2
+                          k a b
+          else ifForce t1 $ \a ->
+               ifForce t2 $ \b ->
+               k a b
+
 instance Equal a => Equal (Thunk a) where
   t1 >>> t2 = equalThunk t1 t2
 
-  equalHere t1 t2 =
-    ifForce t1 $ \a ->
-    ifForce t2 $ \b ->
-      equalHere a b
+  equalHere = equ equalHere
 
-  notEqualHere t1 t2 =
-    ifForce t1 $ \a ->
-    ifForce t2 $ \b ->
-      notEqualHere a b
+  notEqualHere = equ notEqualHere
 
-equalThunk :: Equal a => Thunk a -> Thunk a -> H ()
+equalThunk :: forall a . Equal a => Thunk a -> Thunk a -> H ()
 equalThunk x y = do
   -- io $ putStrLn "equalThunk"
   case (x, y) of
@@ -672,10 +688,11 @@ equalThunk x y = do
 
     _ -> do equalThunk' x y
  where
+  equalThunk' :: Thunk a -> Thunk a -> H ()
   equalThunk' x y =
-    ifForce x $ \a ->
-      do b <- force y
-         a >>> b
+    do ifForce x $ \a ->
+         do b <- force y
+            a >>> b
 
 {-# NOINLINE equalUnique #-}
 equalUnique :: Unique -> Unique -> H () -> H ()
@@ -937,7 +954,10 @@ conData (DataDesc s _ rs) c as =
            as rs))
 
 caseData :: LiveData c -> (Val c -> [LiveData c] -> H ()) -> H ()
-caseData (LiveThunk th)      k = ifForce th (\ ld -> caseData ld k)
+caseData (LiveThunk th)      k = do b <- queryParam strict_data_lazy_fun
+                                    if b then do ld <- force th
+                                                 caseData ld k
+                                         else ifForce th (\ ld -> caseData ld k)
 caseData (LiveData _tc v vs) k = k v (map (\ (_,~(Just v)) -> v) vs)
 
 data LiveValue c = ConValue c [LiveValue c] | ThunkValue
@@ -963,98 +983,6 @@ instance Show c => IncrView (LiveData c) where
   incrView (LiveData tc _ cns) =
     do cns' <- sequence [ incrView mv | (_,mv) <- cns ]
        return ("(" ++ tc ++ concat cns' ++ ")")
-
--------------------------------------
-
-data Data c a = Con (Val c) a
-  deriving ( Eq, Ord )
-
-con :: Ord c => c -> a -> Thunk (Data c a)
-con c a = this (Con (val c) a)
-
-conStrict :: Ord c => c -> a -> Data c a
-conStrict c a = Con (val c) a
-
-
-class (Show c, Ord c) => ConstructiveData c where
-  constrs :: [c]
-
-instance (ConstructiveData c, Constructive a) => Constructive (Data c a) where
-  newPoint inp = do vc <- newVal constrs
-                    a  <- newPoint inp
-                    return (Con vc a)
-
-class ConstructiveData c => EqualData c a where
-  equalData :: (forall x . Equal x => x -> x -> H ()) ->
-               [([c], a -> a -> H ())]
-
-instance Equal a => Equal (Maybe a) where
-  Nothing >>> _       = return ()
-  _       >>> Nothing = error "memcpy to unallocated memory"
-  Just x  >>> Just y  = x >>> y
-
-  equalHere    = error "equalHere on Maybe"
-  notEqualHere = error "notEqualHere on Maybe"
-
-equalOn ::
-  (Equal a,EqualData c a) =>
-  (forall x . Equal x => x -> x -> H ()) ->
-  Data c a -> Data c a -> H ()
-
-equalOn k (Con c1 x1) (Con c2 x2) =
-  do -- io (putStrLn "equalData")
-     equalHere c1 c2
-     c <- context
-     sequence_
-       [ whens [ c1 =? c | c <- cs ] (f x1 x2)
-       | (cs, f) <- equalData k
-       , any (`elem` allcs) cs
-       ]
- where
-  allcs = domain c1 `intersect` domain c2
-
-instance (Equal a,EqualData c a) => Equal (Data c a) where
-  (>>>) = equalOn (>>>)
-
-  {- -- This does not work:
-     -- it copies all the thunks in the same context
-     -- and never stops.
-     -- then counterexamples exist in contexts
-     -- that are unallowed due to thunks
-  Con c a >>> Con c2 a2 =
-    do c >>> c2
-       a >>> a2
-  -}
-
-  equalHere = equalOn equalHere
-
-  notEqualHere (Con c1 x1) (Con c2 x2) =
-    choice
-    [ do notEqualHere c1 c2
-    , do equalHere c1 c2
-         choice
-           [ do addClauseHere [ c1 =? c | c <- cs ]
-                f x1 x2
-           | (cs, f) <- equalData notEqualHere
-           , any (`elem` allcs) cs
-           ]
-     ]
-   where
-    allcs = domain c1 `intersect` domain c2
-
-getData :: (c -> a -> H b) -> b -> Thunk (Data c a) -> H b
-getData f d t =
-  do md <- peek t
-     case md of
-       Nothing -> return d
-       Just (Con c a) ->
-         do x <- get c
-            f x a
-
-getStrictData :: (c -> a -> H b) -> b -> Data c a -> H b
-getStrictData f d (Con c a) =
-         do x <- get c
-            f x a
 
 -----------------------------------------------------------------
 
@@ -1096,12 +1024,6 @@ instance (IncrView a,IncrView b) => IncrView (TagShow a b) where
     xe' <- incrView xe
     r' <- incrView r
     return (x ++ ": " ++ xe' ++ "\n" ++ r')
-
-instance (Show c,IncrView c,IncrView a) => IncrView (Data c a) where
-  incrView (Con v c) =
-    do v' <- incrView v
-       c' <- incrView c
-       return ("(" ++ v' ++ c' ++ ")")
 
 instance (Show a,IncrView a) => IncrView (Val a) where
   incrView (Val bs) =

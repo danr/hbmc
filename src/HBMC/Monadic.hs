@@ -142,7 +142,7 @@ trFunction p ci fn_comps Function{..} =
                            Just (Rec xs) -> (True,length xs > 1)
                            _             -> (False,False)
      let args = map lcl_name func_args
-     let chk = (not (terminates func_name args func_body) || mut_rec) && postpone p
+     let chk = strict_data_lazy_fun p || ((not (terminates func_name args func_body) || mut_rec) && postpone p)
      let mem = memo p && rec
      body <- trExpr ci func_body (Just r)
      return (Func func_name args r (tyConOf func_res) mem chk (simpMon body))
@@ -170,9 +170,9 @@ superSimple e =
 trFormula :: ConInfo Var -> Formula Var -> Fresh (Prop Var)
 trFormula ci fm =
   case fm of
-    Formula r      (_:_) e -> error "trFormula, TODO: translate type variables"
-    Formula Prove  []    e -> trFormula ci (Formula Assert [] (neg e))
-    Formula Assert []    e ->
+    Formula r      _ (_:_) e -> error "trFormula, TODO: translate type variables"
+    Formula Prove  i []    e -> trFormula ci (Formula Assert i [] (neg e))
+    Formula Assert _ []    e ->
       do let (vs,e') = fmap neg (forallView (neg e))
          let cs      = conjuncts (ifToBoolOp e')
          let news    = [ x :<-: New True (tyConOf t) | Local x t <- vs ]

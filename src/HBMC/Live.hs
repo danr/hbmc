@@ -37,11 +37,8 @@ newEnv st vs = LiveEnv st (Dynamic (M.fromList vs) M.empty M.empty)
 
 liveProp :: forall a . (Show a,PrettyVar a,Ord a) => Params -> Static a -> Prop a -> IO ()
 liveProp p st (Prop vs m) =
-  run $ do dyn <- liveMon (newEnv st []) m
-           solveAndSee
-             (conflict_minimzation p)
-             (quiet p) (not (quiet p))
-             (Tagged [ (varStr v,var_map dyn ! v) | v <- vs ])
+  run p $ do dyn <- liveMon (newEnv st []) m
+             solveAndSee (Tagged [ (varStr v,var_map dyn ! v) | v <- vs ])
 
 liveFuncs :: (Show a,PrettyVar a,Ord a) => Params -> (a -> LiveDesc a) -> [Func a] -> Static a
 liveFuncs p lkup_desc funcs = st
