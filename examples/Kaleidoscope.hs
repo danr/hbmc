@@ -46,14 +46,16 @@ linVP (VP_In vp np) = linVP vp ++ [In] ++ linNP Obj np
 
 -- examples --
 
+ex3 s t1 t2 = s === linS t1 ==> s === linS t2 ==> t1 === t2
+
+--
 -- ex1 s = linS s === [I,Saw,The,Butterfly,In,The,Kaleidoscope] ==> True === False
 --
-ex2 t1 t2 =
-        linS t1 === [I,Saw,The,Butterfly,In,The,Kaleidoscope]
-    ==> linS t2 === [I,Saw,The,Butterfly,In,The,Kaleidoscope]
-    ==> t1 === t2
-
--- ex3 s t1 t2 = s === linS t1 ==> linS t1 === linS t2 ==> t1 === t2
+-- ex2 t1 t2 =
+--         linS t1 === [I,Saw,The,Butterfly,In,The,Kaleidoscope]
+--     ==> linS t2 === [I,Saw,The,Butterfly,In,The,Kaleidoscope]
+--     ==> t1 === t2
+--
 
 -- lscex1 s = neg (lift (linS s == [I,Saw,The,Butterfly,In,The,Kaleidoscope]))
 --

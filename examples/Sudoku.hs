@@ -119,9 +119,11 @@ sud1 `isSolutionOf` sud2 =
         , (Just n1,Just n2) <- row1 `zip` row2
         ]
 
--- solveAllBlank s = question (isSudoku s .&&. s `isSolutionOf` allBlankSudoku)
+--solve_blank s   = question (isSudoku s .&&. isOkay s .&&. isSolved s)
 
-solve_example s = question (isSudoku s .&&. s `isSolutionOf` example)
+-- solve_example s = question (isSudoku s .&&. s `isSolutionOf` example)
+
+solve_difficult s = question (isSudoku s .&&. s `isSolutionOf` difficult)
 
 example :: Sudoku
 example =
@@ -135,5 +137,20 @@ example =
     , [Nothing,Nothing,Just C5, Just C3, Nothing,Just C8, Just C9, Nothing,Nothing]
     , [Nothing,Just C8, Just C3, Nothing,Nothing,Nothing,Nothing,Just C6, Nothing]
     , [Nothing,Nothing,Just C7, Just C6, Just C9, Nothing,Nothing,Just C4, Just C3]
+    ]
+
+-- from http://www.telegraph.co.uk/news/science/science-news/9360022/Worlds-hardest-sudoku-the-answer.html
+difficult :: Sudoku
+difficult =
+  Sudoku
+    [ [Just C8,Nothing,Nothing,Nothing,Nothing,Nothing,Nothing,Nothing,Nothing]
+    , [Nothing,Nothing,Just C3,Just C6,Nothing,Nothing,Nothing,Nothing,Nothing]
+    , [Nothing,Just C7,Nothing,Nothing,Just C9,Nothing,Just C2,Nothing,Nothing]
+    , [Nothing,Just C5,Nothing,Nothing,Nothing,Just C7,Nothing,Nothing,Nothing]
+    , [Nothing,Nothing,Nothing,Nothing,Just C4,Just C5,Just C7,Nothing,Nothing]
+    , [Nothing,Nothing,Nothing,Just C1,Nothing,Nothing,Nothing,Just C3,Nothing]
+    , [Nothing,Nothing,Just C1,Nothing,Nothing,Nothing,Nothing,Just C6,Just C8]
+    , [Nothing,Nothing,Just C8,Just C5,Nothing,Nothing,Nothing,Just C1,Nothing]
+    , [Nothing,Just C9,Nothing,Nothing,Nothing,Nothing,Just C4,Nothing,Nothing]
     ]
 
