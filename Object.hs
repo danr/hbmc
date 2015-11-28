@@ -126,8 +126,7 @@ isCons obj@(Dynamic _ ref) c h =
               do return l
               
             _ ->
-              do l <- withSolver newLit
-                 withSolver $ \s -> sequence_ [ addClause s [neg l,neg l'] | (_,l') <- pres ]
+              do l <- newLit' c pres
                  let ts = missingArgs c args
                  as <- sequence [ new | t <- ts ]
                  let args' = args ++ (ts `zip` as)
@@ -137,6 +136,17 @@ isCons obj@(Dynamic _ ref) c h =
                  return l
      addClauseHere [l]
      h (theArgs c args)
+ where
+  newLit' c@(Cons _ _ (Type _ _ alts)) pres
+    | size == 1           = do return true
+    | size == 2 && p == 1 = do return (neg (snd (head pres)))
+    | otherwise           = do l <- withSolver newLit  
+                               withSolver $ \s -> sequence_ [ addClause s [neg l,neg l'] | (_,l') <- pres ]
+                               sequence_ [ withSolver $ \s -> addClause s (l : map snd pres) | size == p+1 ]
+                               return l
+   where
+    size = length alts
+    p    = length pres
 
 (>>>) :: Object -> Object -> M ()
 o1 >>> o2 = do memo ">>>" (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return ()
