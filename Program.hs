@@ -21,7 +21,15 @@ type Program = Map Name ([Name],Expr)
 
 --------------------------------------------------------------------------------------------
 
-eval :: Program -> Map Name ([Object],Object) -> Map Name Object -> Expr -> M Object
+unitT :: Type
+unitT = Type "()" [] [unit]
+
+unit :: Cons
+unit = Cons "()" [] unitT
+
+--------------------------------------------------------------------------------------------
+
+eval :: Program -> Map Name (Object,[Object],Object) -> Map Name Object -> Expr -> M Object
 eval prog apps env (Var x) =
   do return (fromJust (M.lookup x env))
 
@@ -30,16 +38,27 @@ eval prog apps env (Con c as) =
      return (cons c ys)
      
 eval prog apps env (App f as) =
-  do ys <- sequence [ eval prog apps env a | a <- as ]
-     let Just (xs,rhs) = M.lookup f prog
-     eval prog M.empty (M.fromList (xs `zip` ys)) rhs
+  case (M.lookup f apps, M.lookup f prog) of
+    (Just (trig,ys,z), _) ->
+      do isCons trig unit $ \_ ->
+           sequence_ [ evalInto prog apps env a y | (a,y) <- as `zip` ys ]
+         return z
+
+    (_, Just (xs,rhs)) ->
+      do ys <- sequence [ eval prog apps env a | a <- as ]
+         eval prog M.empty (M.fromList (xs `zip` ys)) rhs
 
 eval prog apps env (Let x a b) =
   do y <- eval prog apps env a
      eval prog apps (M.insert x y env) b
 
 eval prog apps env (LetApp f xs a b) =
-  undefined
+  do trig <- new
+     ys   <- sequence [ new | x <- xs ]
+     z    <- new
+     ifCons trig unit $ \_ ->
+       evalInto prog apps (inserts (xs `zip` ys) env) a z
+     eval prog (M.insert f (trig,ys,z) apps) env b
 
 eval prog apps env (Case a alts) =
   do res <- new
@@ -48,7 +67,7 @@ eval prog apps env (Case a alts) =
 
 --------------------------------------------------------------------------------------------
 
-evalInto :: Program -> Map Name ([Object],Object) -> Map Name Object -> Expr -> Object -> M ()
+evalInto :: Program -> Map Name (Object,[Object],Object) -> Map Name Object -> Expr -> Object -> M ()
 evalInto prog apps env (Var x) res =
   do fromJust (M.lookup x env) >>> res
 
@@ -57,25 +76,41 @@ evalInto prog apps env (Con c as) res =
        sequence_ [ evalInto prog apps env a y | (a,y) <- as `zip` ys ]
 
 evalInto prog apps env (App f as) res =
-  do ys <- sequence [ eval prog apps env a | a <- as ]
-     let Just (xs,rhs) = M.lookup f prog
-     evalInto prog M.empty (M.fromList (xs `zip` ys)) rhs res
+  case (M.lookup f apps, M.lookup f prog) of
+    (Just (trig,ys,z), _) ->
+      do isCons trig unit $ \_ ->
+           sequence_ [ evalInto prog apps env a y | (a,y) <- as `zip` ys ]
+         z >>> res
+
+    (_, Just (xs,rhs)) ->
+      do ys <- sequence [ eval prog apps env a | a <- as ]
+         evalInto prog M.empty (M.fromList (xs `zip` ys)) rhs res
 
 evalInto prog apps env (Let x a b) res =
   do y <- eval prog apps env a
      evalInto prog apps (M.insert x y env) b res
 
 evalInto prog apps env (LetApp f xs a b) res =
-  undefined
+  do trig <- new
+     ys   <- sequence [ new | x <- xs ]
+     z    <- new
+     ifCons trig unit $ \_ ->
+       evalInto prog apps (inserts (xs `zip` ys) env) a z
+     evalInto prog (M.insert f (trig,ys,z) apps) env b res
 
 evalInto prog apps env (Case a alts) res =
   do y <- eval prog apps env a
      sequence_
        [ ifCons y c $ \ys ->
-           evalInto prog apps (foldr (\(x,y) -> M.insert x y) env (xs `zip` ys)) rhs res
+           evalInto prog apps (inserts (xs `zip` ys) env) rhs res
        | (c,xs,rhs) <- alts
        ]
   
+--------------------------------------------------------------------------------------------
+
+inserts :: Ord a => [(a,b)] -> Map a b -> Map a b
+inserts xys mp = foldr (\(x,y) -> M.insert x y) mp xys
+
 --------------------------------------------------------------------------------------------
 
 
