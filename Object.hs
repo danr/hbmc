@@ -4,10 +4,11 @@ module Object where
 
 import qualified Data.Map as M
 import Data.Map( Map )
-import Data.List( intersperse )
+import Data.List( intercalate )
 import Data.IORef
 import Data.Unique
 import Control.Applicative
+import Control.Monad( when )
 
 import SAT
 
@@ -38,34 +39,7 @@ instance Ord Type where
 
 instance Show Type where
   show (Type t [] _) = t
-  show (Type t a  _) = t ++ "(" ++ concat (intersperse "," (map show a)) ++ ")"
-
---------------------------------------------------------------------------------------------
-
-data Object
-  = Static Cons [Object]
-  | Dynamic Unique (IORef Contents)
-
-instance Eq Object where
-  o1 == o2 = o1 `compare` o2 == EQ
-
-instance Ord Object where
-  Static c1 a1 `compare` Static c2 a2 = (c1,a1) `compare` (c2,a2)
-  Static _  _  `compare` Dynamic _ _  = LT
-  Dynamic _ _  `compare` Static _ _   = GT
-  Dynamic u1 _ `compare` Dynamic u2 _ = u1 `compare` u2
-
-data Contents
-  = Contents [(Cons,Lit)] [(Cons,M ())] (Cons -> [Object] -> M ()) [(Type,Object)]
-
-cons :: Cons -> [Object] -> Object
-cons c as = Static c as
-
-new :: M Object
-new = liftIO $
-  do ref <- newIORef (Contents [] [] (\_ _ -> return ()) [])
-     unq <- newUnique
-     return (Dynamic unq ref)
+  show (Type t a  _) = t ++ "(" ++ intercalate "," (map show a) ++ ")"
 
 theArgs :: Cons -> [(Type,a)] -> [a]
 theArgs (Cons _ ts _) txs = find ts txs []
@@ -84,58 +58,94 @@ missingArgs (Cons _ ts _) txs = find ts txs []
     | t == t'     = find ts (reverse txs' ++ txs) []
     | otherwise   = find (t:ts) txs ((t',x):txs')
 
-ifAnyCons :: Object -> (Cons -> [Object] -> M ()) -> M ()
-ifAnyCons (Static c xs)   h = h c xs
-ifAnyCons (Dynamic _ ref) h =
-  do Contents pres waits await args <- liftIO $ readIORef ref
-     sequence_ [ withExtraContext l $ h c (theArgs c args) | (c,l) <- pres ]
-     ctx <- here
-     liftIO $ writeIORef ref (Contents pres waits (\c xs -> await c xs >> withNewContext ctx (h c xs)) args)
+--------------------------------------------------------------------------------------------
+
+data Object
+  = Static Cons [Object]
+  | Dynamic Unique Bool (IORef Contents)
+
+instance Eq Object where
+  o1 == o2 = o1 `compare` o2 == EQ
+
+instance Ord Object where
+  Static c1 a1   `compare` Static c2 a2   = (c1,a1) `compare` (c2,a2)
+  Static _  _    `compare` Dynamic _ _ _  = LT
+  Dynamic _ _ _  `compare` Static _ _     = GT
+  Dynamic u1 _ _ `compare` Dynamic u2 _ _ = u1 `compare` u2
+
+data Contents
+  = Contents
+  { alts    :: [(Cons,Lit)]
+  , waits   :: [(Cons,M ())]
+  , newAlt  :: Cons -> [Object] -> M ()
+  , newWait :: Cons -> M ()
+  , args    :: [(Type,Object)]
+  }
+
+cons :: Cons -> [Object] -> Object
+cons c as = Static c as
+
+new' :: Bool -> M Object
+new' inp = liftIO $
+  do ref <- newIORef undefined
+     unq <- newUnique
+     let x = Dynamic unq inp ref
+     writeIORef ref (Contents [] [] (\_ _ -> return ()) (\_ -> return ()) [])
+     return x
+
+new :: M Object
+new = new' False
+
+newInput :: M Object
+newInput = new' True
 
 ifCons :: Object -> Cons -> ([Object] -> M ()) -> M ()
 ifCons (Static c' xs) c h =
   if c' == c then h xs else return ()
 
-ifCons obj@(Dynamic _ ref) c h =
-  do Contents pres waits await args <- liftIO $ readIORef ref
+ifCons obj@(Dynamic _ inp ref) c h =
+  do cnt <- liftIO $ readIORef ref
      ctx <- here
-     case [ l | (c',l) <- pres, c' == c ] of
+     case [ l | (c',l) <- alts cnt, c' == c ] of
        l:_ ->
-         withExtraContext l $ h (theArgs c args)
+         do withExtraContext l $ h (theArgs c (args cnt))
        
        _ ->
-         liftIO $ writeIORef ref (Contents pres ((c,wait):filter ((/=c).fst) waits) await args)
+         do liftIO $ writeIORef ref cnt{ waits = (c,wait) : filter ((/=c).fst) (waits cnt) }
+            when inp $ enqueue obj
+            newWait cnt c
         where
-         newWait =
+         newwait =
            withNewContext ctx $
              do ifCons obj c h
          
          wait =
-           case [ w | (c',w) <- waits, c' == c ] of
-             w:_ -> w >> newWait
-             _   -> newWait
+           case [ w | (c',w) <- waits cnt, c' == c ] of
+             w:_ -> w >> newwait
+             _   -> newwait
 
 isCons :: Object -> Cons -> ([Object] -> M ()) -> M ()
 isCons (Static c' xs) c h =
   if c' == c then h xs else addClauseHere []
 
-isCons obj@(Dynamic _ ref) c h =
-  do Contents pres waits await args <- liftIO $ readIORef ref
-     l <- case [ l | (c',l) <- pres, c' == c ] of
+isCons obj@(Dynamic _ inp ref) c h =
+  do cnt <- liftIO $ readIORef ref
+     l <- case [ l | (c',l) <- alts cnt, c' == c ] of
             l:_ ->
               do return l
               
             _ ->
-              do l <- newLit' c pres
-                 let ts = missingArgs c args
-                 as <- sequence [ new | t <- ts ]
-                 let args' = args ++ (ts `zip` as)
-                 liftIO $ writeIORef ref (Contents ((c,l):pres) (filter ((/=c).fst) waits) await args')
-                 sequence_ [ w | (c',w) <- waits, c' == c ]
-                 await c (theArgs c args')
+              do l <- newLit' c (alts cnt)
+                 let ts = missingArgs c (args cnt)
+                 as <- sequence [ new' inp | t <- ts ]
+                 let args' = args cnt ++ (ts `zip` as)
+                 liftIO $ writeIORef ref cnt{ alts = (c,l) : alts cnt, waits = filter ((/=c).fst) (waits cnt), args = args' }
+                 sequence_ [ w | (c',w) <- waits cnt, c' == c ]
+                 newAlt cnt c (theArgs c args')
                  return l
      addClauseHere [l]
-     h (theArgs c args)
+     cnt <- liftIO $ readIORef ref
+     h (theArgs c (args cnt))
  where
   newLit' c@(Cons _ _ (Type _ _ alts)) pres
     | size == 1           = do return true
@@ -148,13 +158,49 @@ isCons obj@(Dynamic _ ref) c h =
     size = length alts
     p    = length pres
 
+ifAnyCons :: Object -> (Cons -> [Object] -> M ()) -> M ()
+ifAnyCons (Static c xs)     h = h c xs
+ifAnyCons obj@(Dynamic _ inp ref) h =
+  do cnt <- liftIO $ readIORef ref
+     sequence_ [ withExtraContext l $ h c (theArgs c (args cnt)) | (c,l) <- alts cnt ]
+     if null (alts cnt) || length (alts cnt) < length (head [ as | (Cons _ as _,_) <- alts cnt ]) then
+       do ctx <- here
+          liftIO $ writeIORef ref cnt{ newAlt = \c xs -> newAlt cnt c xs >> withNewContext ctx (h c xs) }
+          when inp $ enqueue obj
+      else
+       do liftIO $ writeIORef ref cnt{ waits = [], newAlt = \_ _ -> return (), newWait = \_ -> return () }
+
+ifAnyWait :: Object -> (Cons -> M ()) -> M ()
+ifAnyWait (Static c xs) _ = return ()
+ifAnyWait obj@(Dynamic _ inp ref) h =
+  do cnt <- liftIO $ readIORef ref
+     sequence_ [ h c | (c,_) <- waits cnt ]
+     ctx <- here
+     liftIO $ writeIORef ref cnt{ newWait = \c -> newWait cnt c >> h c }
+
+expand :: Object -> M ()
+expand (Static _ _) = return ()
+expand obj@(Dynamic _ _ ref) =
+  do cnt <- liftIO $ readIORef ref
+     let Cons _ _ (Type _ _ cs) = head (map fst (waits cnt) ++ map fst (alts cnt))
+     ls <- withSolver $ \s ->
+             do ls <- sequence [ newLit s | c <- cs ]
+                addClause s ls
+                return ls
+     sequence_ [ withExtraContext l $ isCons obj c $ \_ -> return () | (l,c) <- ls `zip` cs ]
+
+--------------------------------------------------------------------------------------------
+
 (>>>) :: Object -> Object -> M ()
 o1 >>> o2 = do memo ">>>" (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return ()
  where
   copy o1 o2 =
-    ifAnyCons o1 $ \c xs ->
-      isCons o2 c $ \ys ->
-        sequence_ [ x >>> y | (x,y) <- xs `zip` ys ]
+    do ifAnyCons o1 $ \c xs ->
+         isCons o2 c $ \ys ->
+           sequence_ [ x >>> y | (x,y) <- xs `zip` ys ]
+       ifAnyWait o2 $ \c ->
+         ifCons o1 c $ \_ ->
+           return ()
 
 --------------------------------------------------------------------------------------------
 
@@ -176,11 +222,66 @@ memo name f xs =
 
 --------------------------------------------------------------------------------------------
 
+trySolve :: M (Maybe Bool)
+trySolve = M $ \env ->
+  do lxs <- reverse `fmap` readIORef (queue env)
+     putStrLn ("solving with queue size " ++ show (length lxs) ++ "...")
+     b <- solve (solver env) [ neg l | (l,_) <- lxs ]
+     if b then
+       do putStrLn "+++ SOLUTION"
+          return (Just True)
+     else
+       do cs <- conflict (solver env)
+          if null cs then
+            do putStrLn "*** NO SOLUTION"
+               return (Just False)
+           else
+            do let x    = head [ x | (l,x) <- lxs, l `elem` cs ]
+                   lxs' = reverse [ ly | ly@(_,y) <- lxs, y /= x ]
+               writeIORef (queue env) lxs'
+               putStrLn ("expanding " ++ show (length lxs - length lxs') ++ " points...")
+               let M m = expand x in m env
+               return Nothing
+
+--------------------------------------------------------------------------------------------
+
+data Val = Cn Cons [Val] deriving ( Eq, Ord )
+
+unkT = Type "?" [] [unk]
+unk  = Cons "?" [] unkT
+
+instance Show Val where
+  show (Cn c []) = show c
+  show (Cn c xs) = show c ++ "(" ++ intercalate "," (map show xs) ++ ")"
+
+objectVal :: Object -> M Val
+objectVal (Static c xs) =
+  do as <- sequence [ objectVal x | x <- xs ]
+     return (Cn c as)
+
+objectVal (Dynamic _ _ ref) =
+  do cnt <- liftIO $ readIORef ref
+     let alt [] =
+           do return (Cn unk [])
+         
+         alt ((c,l):cls) =
+           do b <- withSolver $ \s -> modelValue s l
+              if b then
+                do as <- sequence [ objectVal x | x <- theArgs c (args cnt) ]
+                   return (Cn c as)
+               else
+                alt cls
+                
+      in alt (alts cnt)
+
+--------------------------------------------------------------------------------------------
+
 data Env =
   Env{ solver  :: Solver
      , context :: Lit
      , table   :: IORef (Map (Name,[Object]) (Lit,[Object]))
-     } 
+     , queue   :: IORef [(Lit,Object)]
+     }
 
 newtype M a = M (Env -> IO a)
 
@@ -194,6 +295,27 @@ instance Applicative M where
 instance Monad M where
   return x  = M (\_   -> return x)
   M h >>= k = M (\env -> do x <- h env; let M h' = k x in h' env)
+
+-- run function
+
+run :: M () -> IO ()
+run (M m) =
+  withNewSolver $ \s ->
+    do refTable <- newIORef M.empty
+       refQueue <- newIORef []
+       let env = Env{ solver  = s
+                    , context = true
+                    , table   = refTable
+                    , queue   = refQueue
+                    }
+       m env
+
+-- operations
+
+enqueue :: Object -> M ()
+enqueue x = M $ \env ->
+  do lxs <- readIORef (queue env)
+     writeIORef (queue env) ((context env,x):lxs)
 
 getTable :: M (IORef (Map (Name,[Object]) (Lit,[Object])))
 getTable = M (return . table)
