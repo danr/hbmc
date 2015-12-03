@@ -4,11 +4,13 @@ module Object where
 
 import qualified Data.Map as M
 import Data.Map( Map )
+import qualified Data.Set as S
+import Data.Set( Set )
 import Data.List( intercalate )
 import Data.IORef
-import Data.Unique
 import Control.Applicative
 import Control.Monad( when )
+import System.IO( hFlush, stdout )
 
 import SAT
 
@@ -77,7 +79,7 @@ data Contents
   = Contents
   { alts    :: [(Cons,Lit)]
   , waits   :: [(Cons,M ())]
-  , newAlt  :: Cons -> [Object] -> M ()
+  -- , newAlt  :: Cons -> [Object] -> M ()
   , newWait :: Cons -> M ()
   , args    :: [(Type,Object)]
   }
@@ -86,11 +88,11 @@ cons :: Cons -> [Object] -> Object
 cons c as = Static c as
 
 new' :: Bool -> M Object
-new' inp = liftIO $
-  do ref <- newIORef undefined
+new' inp = 
+  do ref <- liftIO $ newIORef undefined
      unq <- newUnique
      let x = Dynamic unq inp ref
-     writeIORef ref (Contents [] [] (\_ _ -> return ()) (\_ -> return ()) [])
+     liftIO $ writeIORef ref (Contents [] [] {- (\_ _ -> return ()) -} (\_ -> return ()) [])
      return x
 
 new :: M Object
@@ -141,7 +143,7 @@ isCons obj@(Dynamic _ inp ref) c h =
                  let args' = args cnt ++ (ts `zip` as)
                  liftIO $ writeIORef ref cnt{ alts = (c,l) : alts cnt, waits = filter ((/=c).fst) (waits cnt), args = args' }
                  sequence_ [ w | (c',w) <- waits cnt, c' == c ]
-                 newAlt cnt c (theArgs c args')
+                 --newAlt cnt c (theArgs c args')
                  return l
      addClauseHere [l]
      cnt <- liftIO $ readIORef ref
@@ -158,6 +160,7 @@ isCons obj@(Dynamic _ inp ref) c h =
     size = length alts
     p    = length pres
 
+{-
 ifAnyCons :: Object -> (Cons -> [Object] -> M ()) -> M ()
 ifAnyCons (Static c xs)     h = h c xs
 ifAnyCons obj@(Dynamic _ inp ref) h =
@@ -166,23 +169,28 @@ ifAnyCons obj@(Dynamic _ inp ref) h =
      if null (alts cnt) || length (alts cnt) < length (head [ as | (Cons _ as _,_) <- alts cnt ]) then
        do ctx <- here
           liftIO $ writeIORef ref cnt{ newAlt = \c xs -> newAlt cnt c xs >> withNewContext ctx (h c xs) }
-          when inp $ enqueue obj
+          --when inp $ enqueue obj
       else
-       do liftIO $ writeIORef ref cnt{ waits = [], newAlt = \_ _ -> return (), newWait = \_ -> return () }
+       do return ()
+-}
 
 ifAnyWait :: Object -> (Cons -> M ()) -> M ()
-ifAnyWait (Static c xs) _ = return ()
+ifAnyWait (Static c xs) h =
+  do h c
+
 ifAnyWait obj@(Dynamic _ inp ref) h =
   do cnt <- liftIO $ readIORef ref
+     sequence_ [ h c | (c,_) <- alts cnt ]
      sequence_ [ h c | (c,_) <- waits cnt ]
      ctx <- here
-     liftIO $ writeIORef ref cnt{ newWait = \c -> newWait cnt c >> h c }
+     liftIO $ writeIORef ref cnt{ newWait = \c -> newWait cnt c >> withNewContext ctx (h c) }
 
 expand :: Object -> M ()
 expand (Static _ _) = return ()
 expand obj@(Dynamic _ _ ref) =
   do cnt <- liftIO $ readIORef ref
      let Cons _ _ (Type _ _ cs) = head (map fst (waits cnt) ++ map fst (alts cnt))
+     --liftIO $ print cs
      ls <- withSolver $ \s ->
              do ls <- sequence [ newLit s | c <- cs ]
                 addClause s ls
@@ -195,12 +203,20 @@ expand obj@(Dynamic _ _ ref) =
 o1 >>> o2 = do memo ">>>" (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return ()
  where
   copy o1 o2 =
-    do ifAnyCons o1 $ \c xs ->
-         isCons o2 c $ \ys ->
-           sequence_ [ x >>> y | (x,y) <- xs `zip` ys ]
-       ifAnyWait o2 $ \c ->
-         ifCons o1 c $ \_ ->
-           return ()
+    do case (o1, o2) of
+         (Static c xs, _) ->
+           isCons o2 c $ \ys ->
+             sequence_ [ x >>> y | (x,y) <- xs `zip` ys ]
+
+         (_, Static c xs) ->
+           isCons o1 c $ \ys ->
+             sequence_ [ y >>> x | (x,y) <- xs `zip` ys ]
+
+         _ ->
+           ifAnyWait o2 $ \c ->
+             ifCons o1 c $ \xs ->
+               isCons o2 c $ \ys ->
+                 sequence_ [ x >>> y | (x,y) <- xs `zip` ys ]
 
 --------------------------------------------------------------------------------------------
 
@@ -224,24 +240,38 @@ memo name f xs =
 
 trySolve :: M (Maybe Bool)
 trySolve = M $ \env ->
-  do lxs <- reverse `fmap` readIORef (queue env)
-     putStrLn ("solving with queue size " ++ show (length lxs) ++ "...")
+  do lxs <- (nub . reverse) `fmap` readIORef (queue env)
+     as <- sequence [ let M m = objectView x in m env | (_,x) <- lxs ]
+     putStr ("> solve: Q=" ++ show (length lxs) ++ " [" ++ intercalate ", " (nub as) ++ "]...")
+     hFlush stdout
      b <- solve (solver env) [ neg l | (l,_) <- lxs ]
      if b then
-       do putStrLn "+++ SOLUTION"
+       do putStrLn ""
+          putStrLn "+++ SOLUTION"
           return (Just True)
      else
        do cs <- conflict (solver env)
           if null cs then
-            do putStrLn "*** NO SOLUTION"
+            do putStrLn ""
+               putStrLn "*** NO SOLUTION"
                return (Just False)
            else
             do let x    = head [ x | (l,x) <- lxs, l `elem` cs ]
                    lxs' = reverse [ ly | ly@(_,y) <- lxs, y /= x ]
                writeIORef (queue env) lxs'
-               putStrLn ("expanding " ++ show (length lxs - length lxs') ++ " points...")
+               putStrLn (" E=" ++ show (length lxs - length lxs'))
                let M m = expand x in m env
+               -- these two lines are here because sometimes expansion adds an element
+               -- to the queue that is going to be expanded in the same expansion
+               lxs <- readIORef (queue env)
+               writeIORef (queue env) [ q | q@(l,y) <- lxs, y /= x ]
                return Nothing
+ where
+  nub xs = del S.empty xs
+   where
+    del seen [] = []
+    del seen (x:xs) | x `S.member` seen = del seen xs
+                    | otherwise         = x : del (S.insert x seen) xs
 
 --------------------------------------------------------------------------------------------
 
@@ -274,11 +304,25 @@ objectVal (Dynamic _ _ ref) =
                 
       in alt (alts cnt)
 
+objectView :: Object -> M String
+objectView (Static c xs) =
+  do as <- sequence [ objectView x | x <- xs ]
+     return ("!" ++ show c ++ "(" ++ intercalate "," as ++ ")")
+
+objectView (Dynamic unq _ ref) =
+  do cnt <- liftIO $ readIORef ref
+     as <- sequence [ objectView x | (_,x) <- args cnt ]
+     return $ case map (show . fst) (alts cnt) of
+       []  -> show unq ++ "?"
+       [c] -> show unq ++ c ++ "(" ++ intercalate "," as ++ ")"
+       cs  -> show unq ++ "{" ++ intercalate "|" cs ++ "}(" ++ intercalate "," as ++ ")"
+
 --------------------------------------------------------------------------------------------
 
 data Env =
   Env{ solver  :: Solver
      , context :: Lit
+     , unique  :: IORef Int
      , table   :: IORef (Map (Name,[Object]) (Lit,[Object]))
      , queue   :: IORef [(Lit,Object)]
      }
@@ -301,10 +345,12 @@ instance Monad M where
 run :: M () -> IO ()
 run (M m) =
   withNewSolver $ \s ->
-    do refTable <- newIORef M.empty
-       refQueue <- newIORef []
+    do refUnique <- newIORef 0
+       refTable  <- newIORef M.empty
+       refQueue  <- newIORef []
        let env = Env{ solver  = s
                     , context = true
+                    , unique  = refUnique
                     , table   = refTable
                     , queue   = refQueue
                     }
@@ -316,6 +362,15 @@ enqueue :: Object -> M ()
 enqueue x = M $ \env ->
   do lxs <- readIORef (queue env)
      writeIORef (queue env) ((context env,x):lxs)
+
+type Unique = Int
+
+newUnique :: M Unique
+newUnique = M $ \env ->
+  do n <- readIORef (unique env)
+     let n' = n+1
+     n' `seq` writeIORef (unique env) n'
+     return n'
 
 getTable :: M (IORef (Map (Name,[Object]) (Lit,[Object])))
 getTable = M (return . table)
