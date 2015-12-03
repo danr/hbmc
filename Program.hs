@@ -16,6 +16,7 @@ data Expr
   | Let Name Expr Expr
   | LetApp Name [Name] Expr Expr
   | Case Expr [(Cons,[Name],Expr)]
+ deriving ( Eq, Ord, Show )
 
 type Program = Map Name ([Name],Expr)
 
@@ -41,12 +42,13 @@ eval prog apps env (App f as) =
   case (M.lookup f apps, M.lookup f prog) of
     (Just (trig,ys,z), _) ->
       do isCons trig unit $ \_ ->
-           sequence_ [ evalInto prog apps env a y | (a,y) <- as `zipp` ys ]
+           sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("App/LetApp:" ++ show f) as ys ]
          return z
 
     (_, Just (xs,rhs)) ->
-      do ys <- sequence [ eval prog apps env a | a <- as ]
-         eval prog M.empty (M.fromList (xs `zipp` ys)) rhs
+      do --liftIO $ putStrLn (show f ++ show as)
+         ys <- sequence [ eval prog apps env a | a <- as ]
+         eval prog M.empty (M.fromList (zipp ("App:" ++ show f) xs ys)) rhs
 
 eval prog apps env (Let x a b) =
   do y <- eval prog apps env a
@@ -57,7 +59,7 @@ eval prog apps env (LetApp f xs a b) =
      ys   <- sequence [ new | x <- xs ]
      z    <- new
      ifCons trig unit $ \_ ->
-       evalInto prog apps (inserts (xs `zipp` ys) env) a z
+       evalInto prog apps (inserts (zipp ("LetApp:" ++ show f) xs ys) env) a z
      eval prog (M.insert f (trig,ys,z) apps) env b
 
 eval prog apps env (Case a alts) =
@@ -73,18 +75,19 @@ evalInto prog apps env (Var x) res =
 
 evalInto prog apps env (Con c as) res =
   do isCons res c $ \ys ->
-       sequence_ [ evalInto prog apps env a y | (a,y) <- as `zipp` ys ]
+       sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("Con:" ++ show c ++ "->") as ys ]
 
 evalInto prog apps env (App f as) res =
   case (M.lookup f apps, M.lookup f prog) of
     (Just (trig,ys,z), _) ->
       do isCons trig unit $ \_ ->
-           sequence_ [ evalInto prog apps env a y | (a,y) <- as `zipp` ys ]
+           sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("App/LetApp:" ++ show f ++ "->") as ys ]
          z >>> res
 
     (_, Just (xs,rhs)) ->
-      do ys <- sequence [ eval prog apps env a | a <- as ]
-         evalInto prog M.empty (M.fromList (xs `zipp` ys)) rhs res
+      do --liftIO $ putStrLn (show f ++ show as)
+         ys <- sequence [ eval prog apps env a | a <- as ]
+         evalInto prog M.empty (M.fromList (zipp ("App:" ++ show f ++ "->") xs ys)) rhs res
 
 evalInto prog apps env (Let x a b) res =
   do y <- eval prog apps env a
@@ -95,23 +98,23 @@ evalInto prog apps env (LetApp f xs a b) res =
      ys   <- sequence [ new | x <- xs ]
      z    <- new
      ifCons trig unit $ \_ ->
-       evalInto prog apps (inserts (xs `zipp` ys) env) a z
+       evalInto prog apps (inserts (zipp ("LetApp:" ++ show f ++ "->") xs ys) env) a z
      evalInto prog (M.insert f (trig,ys,z) apps) env b res
 
 evalInto prog apps env (Case a alts) res =
   do y <- eval prog apps env a
      sequence_
        [ ifCons y c $ \ys ->
-           evalInto prog apps (inserts (xs `zipp` ys) env) rhs res
+           evalInto prog apps (inserts (zipp ("Case:" ++ show c) xs ys) env) rhs res
        | (c,xs,rhs) <- alts
        ]
   
 --------------------------------------------------------------------------------------------
 
-zipp :: [a] -> [b] -> [(a,b)]
-zipp []     []     = []
-zipp (x:xs) (y:ys) = (x,y) : zipp xs ys
-zipp _      _      = error "zipp: unequal lengths"
+zipp :: String -> [a] -> [b] -> [(a,b)]
+zipp s []     []     = []
+zipp s (x:xs) (y:ys) = (x,y) : zipp s xs ys
+zipp s _      _      = error ("zipp (" ++ s ++ "): unequal lengths")
 
 inserts :: Ord a => [(a,b)] -> Map a b -> Map a b
 inserts xys mp = foldr (\(x,y) -> M.insert x y) mp xys

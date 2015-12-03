@@ -46,6 +46,17 @@ prog = M.fromList
       ]
     ))
 
+  , ("leq", (["x","y"],
+      Case (Var "x")
+      [ (zer, [], Con true [])
+      , (suc, ["x'"],
+          Case (Var "y")
+            [ (zer, [], Con false [])
+            , (suc, ["y'"], App "leq" [Var "x'", Var "y'"])
+            ])
+      ]
+    ))
+
   , ("sorted", (["xs"],
       Case (Var "xs")
       [ (nil natT, [], Con true [])
@@ -58,6 +69,23 @@ prog = M.fromList
     ))
 
   , ("target2", (["xs"], App "&&" [len 10 (Var "xs"),App "sorted" [Var "xs"]]))
+
+  , ("sort", (["xs"],
+      Case (Var "xs")
+      [ (nil natT, [], Con (nil natT) [])
+      , (cns natT, ["y","ys"], App "insert" [Var "y", App "sort" [Var "ys"]])
+      ]
+    ))
+
+  , ("insert", (["x","xs"],
+      Case (Var "xs")
+      [ (nil natT, [], Con (cns natT) [Var "x", Con (nil natT) []])
+      , (cns natT, ["y","ys"], Case (App "leq" [Var "x", Var "y"])
+                               [ (true,  [], Con (cns natT) [Var "x", Var "xs"])
+                               , (false, [], Con (cns natT) [Var "y", App "insert" [Var "x", Var "ys"]])
+                               ])
+      ]
+    ))
   ]
 
 atLeast' 0 e = Con true []
@@ -76,9 +104,20 @@ test =
        (cons true [])
      -}
      
+     {-
      evalInto prog M.empty
        (M.fromList [("x",x)])
        (App "target2" [Var "x"])
+       (cons true [])
+     -}
+
+     evalInto prog M.empty
+       (M.fromList [("x",x)])
+       (App "sort" [Var "x"])
+       x
+     evalInto prog M.empty
+       (M.fromList [("x",x)])
+       (len 11 (Var "x"))
        (cons true [])
      
      let loop =

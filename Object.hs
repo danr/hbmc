@@ -79,8 +79,8 @@ data Contents
   = Contents
   { alts    :: [(Cons,Lit)]
   , waits   :: [(Cons,M ())]
-  -- , newAlt  :: Cons -> [Object] -> M ()
-  , newWait :: Cons -> M ()
+  , myType  :: Maybe Type
+  , newType :: Type -> M ()
   , args    :: [(Type,Object)]
   }
 
@@ -92,7 +92,7 @@ new' inp =
   do ref <- liftIO $ newIORef undefined
      unq <- newUnique
      let x = Dynamic unq inp ref
-     liftIO $ writeIORef ref (Contents [] [] {- (\_ _ -> return ()) -} (\_ -> return ()) [])
+     liftIO $ writeIORef ref (Contents [] [] Nothing (\_ -> return ()) [])
      return x
 
 new :: M Object
@@ -105,7 +105,7 @@ ifCons :: Object -> Cons -> ([Object] -> M ()) -> M ()
 ifCons (Static c' xs) c h =
   if c' == c then h xs else return ()
 
-ifCons obj@(Dynamic _ inp ref) c h =
+ifCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
   do cnt <- liftIO $ readIORef ref
      ctx <- here
      case [ l | (c',l) <- alts cnt, c' == c ] of
@@ -113,9 +113,14 @@ ifCons obj@(Dynamic _ inp ref) c h =
          do withExtraContext l $ h (theArgs c (args cnt))
        
        _ ->
-         do liftIO $ writeIORef ref cnt{ waits = (c,wait) : filter ((/=c).fst) (waits cnt) }
+         do liftIO $ writeIORef ref cnt{ waits   = (c,wait) : filter ((/=c).fst) (waits cnt)
+                                       , myType  = Just t
+                                       , newType = \_ -> return ()
+                                       }
             when inp $ enqueue obj
-            newWait cnt c
+            case myType cnt of
+              Nothing -> newType cnt t
+              Just _  -> return ()
         where
          newwait =
            withNewContext ctx $
@@ -130,7 +135,7 @@ isCons :: Object -> Cons -> ([Object] -> M ()) -> M ()
 isCons (Static c' xs) c h =
   if c' == c then h xs else addClauseHere []
 
-isCons obj@(Dynamic _ inp ref) c h =
+isCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
   do cnt <- liftIO $ readIORef ref
      l <- case [ l | (c',l) <- alts cnt, c' == c ] of
             l:_ ->
@@ -140,10 +145,16 @@ isCons obj@(Dynamic _ inp ref) c h =
               do l <- newLit' c (alts cnt)
                  let ts = missingArgs c (args cnt)
                  as <- sequence [ new' inp | t <- ts ]
-                 let args' = args cnt ++ (ts `zip` as)
-                 liftIO $ writeIORef ref cnt{ alts = (c,l) : alts cnt, waits = filter ((/=c).fst) (waits cnt), args = args' }
+                 liftIO $ writeIORef ref cnt{ alts    = (c,l) : alts cnt
+                                            , waits   = filter ((/=c).fst) (waits cnt)
+                                            , args    = args cnt ++ (ts `zip` as)
+                                            , myType  = Just t
+                                            , newType = \_ -> return ()
+                                            }
                  sequence_ [ w | (c',w) <- waits cnt, c' == c ]
-                 --newAlt cnt c (theArgs c args')
+                 case myType cnt of
+                   Nothing -> newType cnt t
+                   Just _  -> return ()
                  return l
      addClauseHere [l]
      cnt <- liftIO $ readIORef ref
@@ -160,37 +171,33 @@ isCons obj@(Dynamic _ inp ref) c h =
     size = length alts
     p    = length pres
 
-{-
-ifAnyCons :: Object -> (Cons -> [Object] -> M ()) -> M ()
-ifAnyCons (Static c xs)     h = h c xs
-ifAnyCons obj@(Dynamic _ inp ref) h =
-  do cnt <- liftIO $ readIORef ref
-     sequence_ [ withExtraContext l $ h c (theArgs c (args cnt)) | (c,l) <- alts cnt ]
-     if null (alts cnt) || length (alts cnt) < length (head [ as | (Cons _ as _,_) <- alts cnt ]) then
-       do ctx <- here
-          liftIO $ writeIORef ref cnt{ newAlt = \c xs -> newAlt cnt c xs >> withNewContext ctx (h c xs) }
-          --when inp $ enqueue obj
-      else
-       do return ()
--}
+ifNewType :: Object -> (Type -> M ()) -> M ()
+ifNewType (Static (Cons _ _ t) _) h =
+  do h t
 
-ifAnyWait :: Object -> (Cons -> M ()) -> M ()
-ifAnyWait (Static c xs) h =
-  do h c
-
-ifAnyWait obj@(Dynamic _ inp ref) h =
+ifNewType obj@(Dynamic _ _ ref) h =
   do cnt <- liftIO $ readIORef ref
-     sequence_ [ h c | (c,_) <- alts cnt ]
-     sequence_ [ h c | (c,_) <- waits cnt ]
-     ctx <- here
-     liftIO $ writeIORef ref cnt{ newWait = \c -> newWait cnt c >> withNewContext ctx (h c) }
+     case myType cnt of
+       Just t  -> do h t
+       Nothing -> do ctx <- here
+                     liftIO $ writeIORef ref cnt{ newType = \t -> newType cnt t >> withNewContext ctx (h t) }
+
+isNewType :: Object -> Type -> M ()
+isNewType (Static (Cons _ _ t') _) t | t' == t =
+  do return ()
+
+isNewType obj@(Dynamic _ _ ref) t =
+  do cnt <- liftIO $ readIORef ref
+     case myType cnt of
+       Just t' | t == t' -> do return ()
+       Nothing           -> do liftIO $ writeIORef ref cnt{ myType = Just t, newType = \_ -> return () }
+                               newType cnt t
 
 expand :: Object -> M ()
 expand (Static _ _) = return ()
 expand obj@(Dynamic _ _ ref) =
   do cnt <- liftIO $ readIORef ref
-     let Cons _ _ (Type _ _ cs) = head (map fst (waits cnt) ++ map fst (alts cnt))
-     --liftIO $ print cs
+     let Just (Type _ _ cs) = myType cnt
      ls <- withSolver $ \s ->
              do ls <- sequence [ newLit s | c <- cs ]
                 addClause s ls
@@ -203,20 +210,16 @@ expand obj@(Dynamic _ _ ref) =
 o1 >>> o2 = do memo ">>>" (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return ()
  where
   copy o1 o2 =
-    do case (o1, o2) of
-         (Static c xs, _) ->
-           isCons o2 c $ \ys ->
-             sequence_ [ x >>> y | (x,y) <- xs `zip` ys ]
-
-         (_, Static c xs) ->
-           isCons o1 c $ \ys ->
-             sequence_ [ y >>> x | (x,y) <- xs `zip` ys ]
-
-         _ ->
-           ifAnyWait o2 $ \c ->
-             ifCons o1 c $ \xs ->
-               isCons o2 c $ \ys ->
-                 sequence_ [ x >>> y | (x,y) <- xs `zip` ys ]
+    do ifNewType o2 $ \t ->
+         isNewType o1 t
+       
+       ifNewType o1 $ \(Type _ _ cs) ->
+         sequence_
+         [ ifCons o1 c $ \xs ->
+             isCons o2 c $ \ys ->
+               sequence_ [ x >>> y | (x,y) <- xs `zip` ys ]
+         | c <- cs
+         ]
 
 --------------------------------------------------------------------------------------------
 
