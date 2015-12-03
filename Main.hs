@@ -26,6 +26,13 @@ prog = M.fromList
       ]
     ))
 
+  , ("||", (["x","y"],
+      Case (Var "x")
+      [ (false, [], Var "y")
+      , (true, [], Con true [])
+      ]
+    ))
+
   , ("==>", (["x","y"],
       Case (Var "x")
       [ (false, [], Con true [])
@@ -124,7 +131,7 @@ prog = M.fromList
       ]
     ))
 
-  , ("prop1", (["xs","ys"], App "==>" [App "eqList" [App "sort" [Var "xs"], App "sort" [Var "ys"]], App "eqList" [Var "xs", Var "ys"]]))
+  , ("prop1", (["xs","ys"], App "==>" [App "eqList" [App "sort" [Var "xs"], App "sort" [Var "ys"]], App "||" [App "eqList" [Var "xs", Var "ys"], App "||" [App "eqList" [App "sort" [Var "ys"], Var "ys"], App "eqList" [App "sort" [Var "xs"], Var "xs"]]]]))
   ]
 
 atLeast' 0 e = Con true []
@@ -151,6 +158,10 @@ test =
        (cons true [])
      -}
 
+     evalInto prog M.empty
+       (M.fromList [("x",x),("y",y)])
+       (len 20 (Var "x"))
+       (cons true [])
      evalInto prog M.empty
        (M.fromList [("x",x),("y",y)])
        (App "prop1" [Var "x",Var "y"])
