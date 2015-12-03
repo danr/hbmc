@@ -64,7 +64,7 @@ missingArgs (Cons _ ts _) txs = find ts txs []
 
 data Object
   = Static Cons [Object]
-  | Dynamic Unique Bool (IORef Contents)
+  | Dynamic Unique Bool {-input?-} (IORef Contents)
 
 instance Eq Object where
   o1 == o2 = o1 `compare` o2 == EQ
@@ -77,11 +77,11 @@ instance Ord Object where
 
 data Contents
   = Contents
-  { alts    :: [(Cons,Lit)]
-  , waits   :: [(Cons,M ())]
-  , myType  :: Maybe Type
-  , newType :: Type -> M ()
-  , args    :: [(Type,Object)]
+  { alts    :: [(Cons,Lit)]    -- alternatives already present
+  , waits   :: [(Cons,M ())]   -- alternatives someone is waiting for
+  , myType  :: Maybe Type      -- do we already know the type of this object?
+  , newType :: Type -> M ()    -- people waiting to get to know the type
+  , args    :: [(Type,Object)] -- arguments to all constructors
   }
 
 cons :: Cons -> [Object] -> Object
