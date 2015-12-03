@@ -198,11 +198,7 @@ expand (Static _ _) = return ()
 expand obj@(Dynamic _ _ ref) =
   do cnt <- liftIO $ readIORef ref
      let Just (Type _ _ cs) = myType cnt
-     ls <- withSolver $ \s ->
-             do ls <- sequence [ newLit s | c <- cs ]
-                addClause s ls
-                return ls
-     sequence_ [ withExtraContext l $ isCons obj c $ \_ -> return () | (l,c) <- ls `zip` cs ]
+     sequence_ [ withNewContext false (isCons obj c $ \_ -> return ()) | c <- cs ]
 
 --------------------------------------------------------------------------------------------
 

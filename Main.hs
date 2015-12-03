@@ -26,6 +26,13 @@ prog = M.fromList
       ]
     ))
 
+  , ("==>", (["x","y"],
+      Case (Var "x")
+      [ (false, [], Con true [])
+      , (true, [], Var "y")
+      ]
+    ))
+
   , ("add", (["x","y"],
       Case (Var "x")
       [ (zer, [], Var "y")
@@ -53,6 +60,36 @@ prog = M.fromList
           Case (Var "y")
             [ (zer, [], Con false [])
             , (suc, ["y'"], App "leq" [Var "x'", Var "y'"])
+            ])
+      ]
+    ))
+
+  , ("eqNat", (["x","y"],
+      Case (Var "x")
+      [ (zer, [],
+          Case (Var "y")
+            [ (zer, [], Con true [])
+            , (suc, ["y'"], Con false [])
+            ])
+      , (suc, ["x'"],
+          Case (Var "y")
+            [ (zer, [], Con false [])
+            , (suc, ["y'"], App "eqNat" [Var "x'", Var "y'"])
+            ])
+      ]
+    ))
+
+  , ("eqList", (["xs","ys"],
+      Case (Var "xs")
+      [ (nil natT, [],
+          Case (Var "ys")
+            [ (nil natT, [], Con true [])
+            , (cns natT, ["z","zs"], Con false [])
+            ])
+      , (cns natT, ["z","zs"],
+          Case (Var "ys")
+            [ (nil natT, [], Con false [])
+            , (cns natT, ["w","ws"], App "&&" [App "eqNat" [Var "z", Var "w"], App "eqList" [Var "zs", Var "ws"]])
             ])
       ]
     ))
@@ -86,6 +123,8 @@ prog = M.fromList
                                ])
       ]
     ))
+
+  , ("prop1", (["xs","ys"], App "==>" [App "eqList" [App "sort" [Var "xs"], App "sort" [Var "ys"]], App "eqList" [Var "xs", Var "ys"]]))
   ]
 
 atLeast' 0 e = Con true []
@@ -97,6 +136,7 @@ len n e = Case e [ (nil natT, [], Con false [])
 
 test =
   do x <- newInput
+     y <- newInput
      {-
      evalInto prog M.empty
        (M.fromList [("x",x)])
@@ -112,17 +152,15 @@ test =
      -}
 
      evalInto prog M.empty
-       (M.fromList [("x",x)])
-       (App "sort" [Var "x"])
-       x
-     evalInto prog M.empty
-       (M.fromList [("x",x)])
-       (len 11 (Var "x"))
-       (cons true [])
+       (M.fromList [("x",x),("y",y)])
+       (App "prop1" [Var "x",Var "y"])
+       (cons false [])
      
      let loop =
            do s <- objectView x
               liftIO $ putStrLn ("x = " ++ s)
+              s <- objectView y
+              liftIO $ putStrLn ("y = " ++ s)
               mb <- trySolve
               case mb of
                 Nothing -> loop
@@ -132,6 +170,8 @@ test =
      if b then
        do a <- objectVal x
           liftIO $ putStrLn ("x = " ++ show a)
+          b <- objectVal y
+          liftIO $ putStrLn ("y = " ++ show b)
       else
        do return ()
      
