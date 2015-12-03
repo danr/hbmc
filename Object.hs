@@ -62,6 +62,14 @@ missingArgs (Cons _ ts _) txs = find ts txs []
 
 --------------------------------------------------------------------------------------------
 
+unitT :: Type
+unitT = Type "()" [] [unit]
+
+unit :: Cons
+unit = Cons "()" [] unitT
+
+--------------------------------------------------------------------------------------------
+
 data Object
   = Static Cons [Object]
   | Dynamic Unique Bool {-input?-} (IORef Contents)
@@ -234,6 +242,13 @@ memo name f xs =
                    do return (l,ys)
      addClauseHere [l]
      return ys
+
+--------------------------------------------------------------------------------------------
+
+later :: M () -> M ()
+later h =
+  do x <- new' True
+     ifCons x unit $ \_ -> h
 
 --------------------------------------------------------------------------------------------
 

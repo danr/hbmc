@@ -13,20 +13,13 @@ data Expr
   = Var Name
   | Con Cons [Expr]
   | App Name [Expr]
+  | Later Expr
   | Let Name Expr Expr
   | LetApp Name [Name] Expr Expr
   | Case Expr [(Cons,[Name],Expr)]
  deriving ( Eq, Ord, Show )
 
 type Program = Map Name ([Name],Expr)
-
---------------------------------------------------------------------------------------------
-
-unitT :: Type
-unitT = Type "()" [] [unit]
-
-unit :: Cons
-unit = Cons "()" [] unitT
 
 --------------------------------------------------------------------------------------------
 
@@ -49,6 +42,11 @@ eval prog apps env (App f as) =
       do --liftIO $ putStrLn (show f ++ show as)
          ys <- sequence [ eval prog apps env a | a <- as ]
          eval prog M.empty (M.fromList (zipp ("App:" ++ show f) xs ys)) rhs
+
+eval prog apps env (Later a) =
+  do y <- new
+     evalInto prog apps env (Later a) y
+     return y
 
 eval prog apps env (Let x a b) =
   do y <- eval prog apps env a
@@ -88,6 +86,9 @@ evalInto prog apps env (App f as) res =
       do --liftIO $ putStrLn (show f ++ show as)
          ys <- sequence [ eval prog apps env a | a <- as ]
          evalInto prog M.empty (M.fromList (zipp ("App:" ++ show f ++ "->") xs ys)) rhs res
+
+evalInto prog apps env (Later a) res =
+  do later (evalInto prog apps env (Later a) res)
 
 evalInto prog apps env (Let x a b) res =
   do y <- eval prog apps env a
