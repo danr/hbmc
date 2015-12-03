@@ -171,22 +171,22 @@ isCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
     size = length alts
     p    = length pres
 
-ifNewType :: Object -> (Type -> M ()) -> M ()
-ifNewType (Static (Cons _ _ t) _) h =
+ifType :: Object -> (Type -> M ()) -> M ()
+ifType (Static (Cons _ _ t) _) h =
   do h t
 
-ifNewType obj@(Dynamic _ _ ref) h =
+ifType obj@(Dynamic _ _ ref) h =
   do cnt <- liftIO $ readIORef ref
      case myType cnt of
        Just t  -> do h t
        Nothing -> do ctx <- here
                      liftIO $ writeIORef ref cnt{ newType = \t -> newType cnt t >> withNewContext ctx (h t) }
 
-isNewType :: Object -> Type -> M ()
-isNewType (Static (Cons _ _ t') _) t | t' == t =
+isType :: Object -> Type -> M ()
+isType (Static (Cons _ _ t') _) t | t' == t =
   do return ()
 
-isNewType obj@(Dynamic _ _ ref) t =
+isType obj@(Dynamic _ _ ref) t =
   do cnt <- liftIO $ readIORef ref
      case myType cnt of
        Just t' | t == t' -> do return ()
@@ -206,10 +206,10 @@ expand obj@(Dynamic _ _ ref) =
 o1 >>> o2 = do memo ">>>" (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return ()
  where
   copy o1 o2 =
-    do ifNewType o2 $ \t ->
-         isNewType o1 t
+    do ifType o2 $ \t ->
+         isType o1 t
        
-       ifNewType o1 $ \(Type _ _ cs) ->
+       ifType o1 $ \(Type _ _ cs) ->
          sequence_
          [ ifCons o1 c $ \xs ->
              isCons o2 c $ \ys ->
