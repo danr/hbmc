@@ -89,6 +89,7 @@ data Contents
   = Contents
   { alts    :: [(Cons,Lit)]    -- alternatives already present
   , waits   :: [(Cons,M ())]   -- alternatives someone is waiting for
+  , newCons :: M ()            -- this callback will be run *once* when a new alternative becomes present
   , myType  :: Maybe Type      -- do we already know the type of this object?
   , newType :: Type -> M ()    -- people waiting to get to know the type
   , args    :: [(Type,Object)] -- arguments to all constructors
@@ -102,7 +103,7 @@ new' inp =
   do ref <- liftIO $ newIORef undefined
      unq <- newUnique
      let x = Dynamic unq inp ref
-     liftIO $ writeIORef ref (Contents [] [] Nothing (\_ -> return ()) [])
+     liftIO $ writeIORef ref (Contents [] [] (return ()) Nothing (\_ -> return ()) [])
      return x
 
 new :: M Object
@@ -141,6 +142,43 @@ ifCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
              w:_ -> w >> newwait
              _   -> newwait
 
+ifNotCons :: Object -> [Cons] -> M () -> M ()
+ifNotCons (Static c xs) cs h =
+  if c `elem` cs then return () else h
+
+ifNotCons obj@(Dynamic _ inp ref) cs h =
+  do -- set up code h to run, and a trigger literal that says when the constraints should hold
+     trig <- new
+     l    <- withSolver newLit
+     withNewContext l $
+       ifCons trig unit $ \_ ->
+         h
+     
+     let loop cs' =
+           do cnt <- liftIO $ readIORef ref
+              let someOther = any (\(c,_) -> c `notElem` cs) (alts cnt)
+                  final     = all (\c -> c `elem` map fst (alts cnt)) cs
+              
+              -- if there exists a constructor that should trigger the code h
+              when someOther $
+                   -- run the code
+                do isCons trig unit $ \_ -> return ()
+                   -- add the clause that says when the constraints should hold
+                   if final then
+                     addClauseHere (l : [ l | (c,l) <- alts cnt, c `elem` cs ])
+                    else
+                     sequence_ [ addClauseHere [l, neg l']
+                               | (c,l') <- alts cnt
+                               , c `notElem` cs
+                               , c `notElem` map fst cs'
+                               ]
+              
+              -- please wake me up when a new constructor is added?
+              when (not someOther || not final) $
+                whenNewCons obj (loop (alts cnt))
+
+      in loop []
+
 isCons :: Object -> Cons -> ([Object] -> M ()) -> M ()
 isCons (Static c' xs) c h =
   if c' == c then h xs else addClauseHere []
@@ -158,6 +196,7 @@ isCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
                  liftIO $ writeIORef ref cnt{ alts    = (c,l) : alts cnt
                                             , waits   = filter ((/=c).fst) (waits cnt)
                                             , args    = args cnt ++ (ts `zip` as)
+                                            , newCons = return ()
                                             , myType  = Just t
                                             , newType = \_ -> return ()
                                             }
@@ -165,6 +204,7 @@ isCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
                  case myType cnt of
                    Nothing -> newType cnt t
                    Just _  -> return ()
+                 newCons cnt
                  return l
      addClauseHere [l]
      cnt <- liftIO $ readIORef ref
@@ -180,6 +220,13 @@ isCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
    where
     size = length alts
     p    = length pres
+
+whenNewCons :: Object -> M () -> M ()
+whenNewCons (Static c _) h = return ()
+whenNewCons (Dynamic _ _ ref) h =
+  do cnt <- liftIO $ readIORef ref
+     ctx <- here
+     liftIO $ writeIORef ref cnt{ newCons = newCons cnt >> withNewContext ctx h }
 
 ifType :: Object -> (Type -> M ()) -> M ()
 ifType (Static (Cons _ _ t) _) h =
