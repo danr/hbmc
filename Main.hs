@@ -10,10 +10,6 @@ natT = Type "Nat" [] [zer,suc]
 zer  = Cons "Zer" [] natT
 suc  = Cons "Suc" [natT] natT
 
-boolT = Type "Bool"  [] [false,true]
-false = Cons "False" [] boolT
-true  = Cons "True"  [] boolT
-
 listT t = Type "List" [t] [nil t, cns t]
 nil t   = Cons "Nil"  []          (listT t)
 cns t   = Cons "Cns"  [t,listT t] (listT t)

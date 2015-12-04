@@ -34,7 +34,7 @@ eval prog apps env (Con c as) =
 eval prog apps env (App f as) =
   case (M.lookup f apps, M.lookup f prog) of
     (Just (trig,ys,z), _) ->
-      do isCons trig unit $ \_ ->
+      do isCons trig true $ \_ ->
            sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("App/LetApp:" ++ show f) as ys ]
          return z
 
@@ -56,7 +56,7 @@ eval prog apps env (LetApp f xs a b) =
   do trig <- new
      ys   <- sequence [ new | x <- xs ]
      z    <- new
-     ifCons trig unit $ \_ ->
+     ifCons trig true $ \_ ->
        evalInto prog apps (inserts (zipp ("LetApp:" ++ show f) xs ys) env) a z
      eval prog (M.insert f (trig,ys,z) apps) env b
 
@@ -78,7 +78,7 @@ evalInto prog apps env (Con c as) res =
 evalInto prog apps env (App f as) res =
   case (M.lookup f apps, M.lookup f prog) of
     (Just (trig,ys,z), _) ->
-      do isCons trig unit $ \_ ->
+      do isCons trig true $ \_ ->
            sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("App/LetApp:" ++ show f ++ "->") as ys ]
          z >>> res
 
@@ -98,7 +98,7 @@ evalInto prog apps env (LetApp f xs a b) res =
   do trig <- new
      ys   <- sequence [ new | x <- xs ]
      z    <- new
-     ifCons trig unit $ \_ ->
+     ifCons trig true $ \_ ->
        evalInto prog apps (inserts (zipp ("LetApp:" ++ show f ++ "->") xs ys) env) a z
      evalInto prog (M.insert f (trig,ys,z) apps) env b res
 

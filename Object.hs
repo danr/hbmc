@@ -12,7 +12,8 @@ import Control.Applicative
 import Control.Monad( when )
 import System.IO( hFlush, stdout )
 
-import SAT
+import SAT hiding ( false, true )
+import qualified SAT
 
 --------------------------------------------------------------------------------------------
 
@@ -62,11 +63,12 @@ missingArgs (Cons _ ts _) txs = find ts txs []
 
 --------------------------------------------------------------------------------------------
 
-unitT :: Type
 unitT = Type "()" [] [unit]
+unit  = Cons "()" [] unitT
 
-unit :: Cons
-unit = Cons "()" [] unitT
+boolT = Type "Bool"  [] [false,true]
+false = Cons "False" [] boolT
+true  = Cons "True"  [] boolT
 
 --------------------------------------------------------------------------------------------
 
@@ -169,7 +171,7 @@ isCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
      h (theArgs c (args cnt))
  where
   newLit' c@(Cons _ _ (Type _ _ alts)) pres
-    | size == 1           = do return true
+    | size == 1           = do return SAT.true
     | size == 2 && p == 1 = do return (neg (snd (head pres)))
     | otherwise           = do l <- withSolver newLit  
                                withSolver $ \s -> sequence_ [ addClause s [neg l,neg l'] | (_,l') <- pres ]
@@ -206,7 +208,7 @@ expand (Static _ _) = return ()
 expand obj@(Dynamic _ _ ref) =
   do cnt <- liftIO $ readIORef ref
      let Just (Type _ _ cs) = myType cnt
-     sequence_ [ withNewContext false (isCons obj c $ \_ -> return ()) | c <- cs ]
+     sequence_ [ withNewContext SAT.false (isCons obj c $ \_ -> return ()) | c <- cs ]
 
 --------------------------------------------------------------------------------------------
 
@@ -363,7 +365,7 @@ run (M m) =
        refTable  <- newIORef M.empty
        refQueue  <- newIORef []
        let env = Env{ solver  = s
-                    , context = true
+                    , context = SAT.true
                     , unique  = refUnique
                     , table   = refTable
                     , queue   = refQueue
