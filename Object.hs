@@ -146,7 +146,7 @@ ifNotCons :: Object -> [Cons] -> M () -> M ()
 ifNotCons (Static c xs) cs h =
   if c `elem` cs then return () else h
 
-ifNotCons obj@(Dynamic _ inp ref) cs h =
+ifNotCons obj@(Dynamic _ _ ref) cs h =
   do -- set up code h to run, and a trigger literal that says when the constraints should hold
      trig <- new
      l    <- withSolver newLit
@@ -178,6 +178,21 @@ ifNotCons obj@(Dynamic _ inp ref) cs h =
                 whenNewCons obj (loop (alts cnt))
 
       in loop []
+
+ifArg :: Object -> Type -> Int -> (Object -> M ()) -> M ()
+ifArg (Static (Cons _ ts _) xs) t i h
+  | i < length as = h (as !! i)
+  | otherwise     = return ()
+ where
+  as = [ x | (t',x) <- ts `zip` xs, t' == t ] 
+
+ifArg obj@(Dynamic _ _ ref) t i h =
+  do cnt <- liftIO $ readIORef ref
+     let as = [ x | (t',x) <- args cnt, t' == t ]
+     if i < length as then
+       h (as !! i)
+      else
+       whenNewCons obj (ifArg obj t i h)
 
 isCons :: Object -> Cons -> ([Object] -> M ()) -> M ()
 isCons (Static c' xs) c h =
