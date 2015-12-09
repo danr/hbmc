@@ -63,7 +63,7 @@ data Var
   | System    String (Maybe (Type Var))
   | SystemCon String (Maybe (Type Var))
   | Prelude String
-  | Proj Int
+  | Proj Int (Type Var)
   | Refresh Int Var
   | Prefixed String Var
  deriving (Show,Eq,Ord)
@@ -74,12 +74,12 @@ isCon SystemCon{} = True
 isCon (Refresh _ x) = isCon x
 isCon _     = False
 
-proj :: Int -> Var
+proj :: Int -> Type Var -> Var
 proj = Proj
 
-unproj :: Var -> Maybe Int
-unproj (Proj i) = Just i
-unproj _        = Nothing
+unproj :: Var -> Maybe (Int, Type Var)
+unproj (Proj i t) = Just (i,t)
+unproj _          = Nothing
 
 varMax :: Var -> Int
 varMax Var{}         = 0
@@ -93,7 +93,7 @@ varStr' x =
     Var x         -> x
     Con x         -> varStr' (Var x)
     Refresh i v   -> varStr' v
-    Proj i        -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
+    Proj i _      -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
     Api x         -> x
     Prelude x     -> x
     System    x m -> x ++ maybe "" ppRender m

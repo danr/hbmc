@@ -16,14 +16,27 @@ data Expr a
   | Later (Expr a)
   | Let a (Expr a) (Expr a)
   | LetApp a [a] (Expr a) (Expr a)
-  | Case (Expr a) [(Cons a,[a],Expr a)]
+  | Case (Expr a) [(Maybe (Cons a),[a],Expr a)]
+
+  | Proj (Expr a) (Type a) Int
+  | Noop
+  | EqPrim EqPrim (Expr a) (Expr a)
  deriving ( Eq, Ord, Show )
 
-type Program n = Map n ([n],Expr n)
+data EqPrim = EqualHere | NotEqualHere
+ deriving ( Eq, Ord, Show )
+
+data MemoFlag = DoMemo | Don'tMemo
+
+type Program n = Map n ([n],MemoFlag,Expr n)
 
 type Apps n = Map n (Object n,[Object n],Object n)
 
 type VarEnv n = Map n (Object n)
+
+evalPrim :: (Names n,Ord n) => EqPrim -> Object n -> Object n -> M n ()
+evalPrim EqualHere    = equalHere
+evalPrim NotEqualHere = notEqualHere
 
 --------------------------------------------------------------------------------------------
 
@@ -42,7 +55,7 @@ eval prog apps env (App f as) =
            sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("App/LetApp:" ++ show f) as ys ]
          return z
 
-    (_, Just (xs,rhs)) ->
+    (_, Just (xs,_memo,rhs)) ->
       do --liftIO $ putStrLn (show f ++ show as)
          ys <- sequence [ eval prog apps env a | a <- as ]
          eval prog M.empty (M.fromList (zipp ("App:" ++ show f) xs ys)) rhs
@@ -69,6 +82,19 @@ eval prog apps env (Case a alts) =
      evalInto prog apps env (Case a alts) res
      return res
 
+eval prog apps env (Proj e t i) =
+  do obj <- eval prog apps env e
+     unsafeProj obj t i
+
+eval prog apps env Noop =
+  do return (cons unit [])
+
+eval prog apps env (EqPrim prim e1 e2) =
+  do o1 <- eval prog apps env e1
+     o2 <- eval prog apps env e2
+     evalPrim prim o1 o2
+     return (cons unit [])
+
 --------------------------------------------------------------------------------------------
 
 evalInto :: (Names n,Ord n,Show n) => Program n -> Apps n -> VarEnv n -> Expr n -> Object n -> M n ()
@@ -86,7 +112,7 @@ evalInto prog apps env (App f as) res =
            sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("App/LetApp:" ++ show f ++ "->") as ys ]
          z >>> res
 
-    (_, Just (xs,rhs)) ->
+    (_, Just (xs,_memo,rhs)) ->
       do --liftIO $ putStrLn (show f ++ show as)
          ys <- sequence [ eval prog apps env a | a <- as ]
          evalInto prog M.empty (M.fromList (zipp ("App:" ++ show f ++ "->") xs ys)) rhs res
@@ -109,10 +135,25 @@ evalInto prog apps env (LetApp f xs a b) res =
 evalInto prog apps env (Case a alts) res =
   do y <- eval prog apps env a
      sequence_
-       [ ifCons y c $ \ys ->
-           evalInto prog apps (inserts (zipp ("Case:" ++ show c) xs ys) env) rhs res
-       | (c,xs,rhs) <- alts
+       [ case mc of
+           Nothing -> ifNotCons y [ c | (Just c,_,_) <- alts ] (h [])
+           Just c  -> ifCons y c h
+       | (mc,xs,rhs) <- alts
+       , let h ys = evalInto prog apps (inserts (zip xs ys) env) rhs res
        ]
+
+evalInto prog apps env (Proj e t i) res =
+  do obj <- eval prog apps env e
+     pobj <- unsafeProj obj t i
+     pobj >>> res
+
+evalInto prog apps env Noop res =
+  do return ()
+
+evalInto prog apps env (EqPrim prim e1 e2) res =
+  do o1 <- eval prog apps env e1
+     o2 <- eval prog apps env e2
+     evalPrim prim o1 o2
 
 --------------------------------------------------------------------------------------------
 

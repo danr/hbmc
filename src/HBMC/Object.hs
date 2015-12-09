@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module HBMC.Object where
 
 --------------------------------------------------------------------------------------------
@@ -27,13 +28,19 @@ class Names a where
   boolName  :: a
   falseName :: a
   trueName  :: a
+  copyName  :: a
+  equalHereName    :: a
+  notEqualHereName :: a
 
 instance Names Name where
-  unkName = "?"
-  unitName = "()"
-  boolName = "Bool"
+  unkName   = "?"
+  unitName  = "()"
+  boolName  = "Bool"
   falseName = "False"
-  trueName = "True"
+  trueName  = "True"
+  copyName  = ">>>"
+  equalHereName    = "equalHereName"
+  notEqualHereName = "notEqualHereName"
 
 --------------------------------------------------------------------------------------------
 
@@ -202,20 +209,28 @@ ifNotCons obj@(Dynamic _ _ ref) cs h =
 
       in loop []
 
-ifArg :: Eq a => Object a -> Type a -> Int -> (Object a -> M a ()) -> M a ()
-ifArg (Static (Cons _ ts _) xs) t i h
+proj_ :: Eq a => Object a -> Type a -> Int -> (Object a -> M a k) -> M a k -> M a k
+proj_ (Static (Cons _ ts _) xs) t i h n
   | i < length as = h (as !! i)
-  | otherwise     = return ()
+  | otherwise     = error "proj_: out of bounds"
  where
   as = [ x | (t',x) <- ts `zip` xs, t' == t ]
 
-ifArg obj@(Dynamic _ _ ref) t i h =
+proj_ obj@(Dynamic _ _ ref) t i h n =
   do cnt <- liftIO $ readIORef ref
      let as = [ x | (t',x) <- args cnt, t' == t ]
      if i < length as then
        h (as !! i)
       else
-       whenNewCons obj (ifArg obj t i h)
+       n
+
+unsafeProj :: Eq a => Object a -> Type a -> Int -> M a (Object a)
+unsafeProj o t i =
+  proj_ o t i return (error "unsafeProj: index out of bounds")
+
+ifArg :: Eq a => Object a -> Type a -> Int -> (Object a -> M a ()) -> M a ()
+ifArg o t i h =
+  proj_ o t i h (whenNewCons o (ifArg o t i h))
 
 isCons :: Eq a => Object a -> Cons a -> ([Object a] -> M a ()) -> M a ()
 isCons (Static c' xs) c h =
@@ -298,7 +313,7 @@ expand obj@(Dynamic _ _ ref) =
 --------------------------------------------------------------------------------------------
 
 (>>>) :: (Names a,Ord a) => Object a -> Object a -> M a ()
-o1 >>> o2 = do memo ">>>" (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return ()
+o1 >>> o2 = do memo copyName (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return ()
  where
   copy o1 o2 =
     do ifType o2 $ \t ->
@@ -312,9 +327,48 @@ o1 >>> o2 = do memo ">>>" (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return
          | c <- cs
          ]
 
+equalHere :: (Names a,Ord a) => Object a -> Object a -> M a ()
+o1 `equalHere` o2 = do memo equalHereName (\[o1,o2] -> do go o1 o2; return []) [o1,o2]; return ()
+ where
+  go o1 o2 =
+    do ifType o2 $ \t ->
+         isType o1 t
+
+       ifType o1 $ \(Type _ _ cs) ->
+         sequence_
+         [ ifCons o1 c $ \xs ->
+             do ifCons o2 c $ \ys ->
+                  sequence_ [ x `equalHere` y | (x,y) <- xs `zip` ys ]
+                ifNotCons o2 [c] (addClauseHere [])
+         | c <- cs
+         ]
+
+notEqualHere :: (Names a,Ord a) => Object a -> Object a -> M a ()
+o1 `notEqualHere` o2 = do memo notEqualHereName (\[o1,o2] -> do go o1 o2; return []) [o1,o2]; return ()
+ where
+  go o1 o2 =
+    do ifType o2 $ \t ->
+         isType o1 t
+
+       ifType o1 $ \(Type _ _ cs) ->
+         sequence_
+         [ ifCons o1 c $ \ xs ->
+             ifCons o2 c $ \ ys ->
+               choice (zipWith notEqualHere xs ys)
+         | c <- cs
+         ]
+
+choice :: [M a ()] -> M a ()
+choice [h] = h
+choice hs =
+  do xs <- sequence [ withSolver newLit | h <- hs ]
+     addClauseHere xs
+     a <- here
+     sequence_ [ do withNewContext x (do addClauseHere [a]; h) | (x,h) <- xs `zip` hs ]
+
 --------------------------------------------------------------------------------------------
 
-memo :: Ord a => Name -> ([Object a] -> M a [Object a]) -> [Object a] -> M a [Object a]
+memo :: Ord a => a -> ([Object a] -> M a [Object a]) -> [Object a] -> M a [Object a]
 memo name f xs =
   do tab <- getTable
      mp  <- liftIO $ readIORef tab
@@ -427,7 +481,7 @@ data Env a =
   Env{ solver  :: Solver
      , context :: Lit
      , unique  :: IORef Int
-     , table   :: IORef (Map (Name,[Object a]) (Lit,[Object a]))
+     , table   :: IORef (Map (a,[Object a]) (Lit,[Object a]))
      , queue   :: IORef [(Lit,Object a)]
      }
 
@@ -476,7 +530,7 @@ newUnique = M $ \env ->
      n' `seq` writeIORef (unique env) n'
      return n'
 
-getTable :: M n (IORef (Map (Name,[Object n]) (Lit,[Object n])))
+getTable :: M n (IORef (Map (n,[Object n]) (Lit,[Object n])))
 getTable = M (return . table)
 
 withSolver :: (Solver -> IO a) -> M n a

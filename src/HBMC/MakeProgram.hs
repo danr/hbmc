@@ -20,7 +20,7 @@ import Data.Generics.Geniplate
 
 import HBMC.ToSimple
 import qualified HBMC.Program as P
-import HBMC.Program (Expr')
+import qualified HBMC.Object as Object
 
 import Data.List
 
@@ -34,8 +34,12 @@ import Debug.Trace
 import qualified Data.Map as M
 import Data.Map( Map )
 
--- the other constructors
-type ConInfo a = a -> Maybe [a]
+-- Making object version of projections and constructors
+data ConInfo a =
+  ConInfo
+    { proj_info :: Int -> Type a -> (Object.Type a,Int)
+    , con_info  :: a -> a -> [Type a] -> Object.Cons a
+    }
 
 -- Simple termination check: there is some argument that always decreases
 -- Not working for mutually recursive groups!
@@ -55,20 +59,22 @@ terminates f as e =
     = needle == x
   chase _ _ = False
 
-trFunction :: Params -> ConInfo Var -> [Component Var] -> Function Var -> Fresh (Var,([Var],Expr' Var))
+trFunction :: Params -> ConInfo Var -> [Component Var] -> Function Var -> Fresh (Var,([Var],P.MemoFlag,P.Expr Var))
 trFunction p ci fn_comps Function{..} =
-  do r <- fresh
-     let (rec,mut_rec) = case lookupComponent func_name fn_comps of
+  do let (rec,mut_rec) = case lookupComponent func_name fn_comps of
                            Just (Rec xs) -> (True,length xs > 1)
                            _             -> (False,False)
      let args = map lcl_name func_args
      let chk = strict_data_lazy_fun p || ((not (terminates func_name args func_body) || mut_rec) && postpone p)
      let mem = memo p && rec
-     body <- trExpr ci func_body (Just r)
+     body <- trExpr ci func_body
 
-     return (func_name,(args,(if chk then Later else id) body))
-                             -- TODO: memo?
+     return (func_name,
+               (args
+               ,if mem then P.DoMemo else P.Don'tMemo
+               ,if chk then P.Later body else body))
 
+{-
 trFormula :: ConInfo Var -> Formula Var -> Fresh (Prop Var)
 trFormula ci fm =
   case fm of
@@ -79,9 +85,10 @@ trFormula ci fm =
          let cs      = conjuncts (ifToBoolOp e')
          let news    = [ x :<-: New True (tyConOf t) | Local x t <- vs ]
          asserts <- mapM (trToTrue ci) cs
-         return (Prop (map lcl_name vs) (simpMon (news ++ concat asserts)))
+         return (Prop (map lcl_name vs) (news ++ concat asserts))
+-}
 
-trToTrue :: ConInfo Var -> Expr Var -> Fresh (Mon Var)
+trToTrue :: ConInfo Var -> Expr Var -> Fresh (P.Expr Var)
 trToTrue ci e0 =
   case e0 of
     Builtin Equal    :@: ~[e1,e2] -> tr True  e1 e2
@@ -94,7 +101,7 @@ trToTrue ci e0 =
        let equal_fn = blankGlobal
                         (api (if pol then "equalHere" else "notEqualHere"))
                         (error "trToTrue global type")
-       trExpr ci (makeLets (lets1 ++ lets2) (Gbl equal_fn :@: [s1,s2])) Nothing
+       trExpr ci (makeLets (lets1 ++ lets2) (Gbl equal_fn :@: [s1,s2]))
 
 conjuncts :: Expr a -> [Expr a]
 conjuncts e0 =
@@ -104,16 +111,19 @@ conjuncts e0 =
     Builtin Not :@: [Builtin Implies :@: [e1,e2]] -> concatMap conjuncts [e1,neg e2]
     _                                             -> [e0]
 
-trExpr :: ConInfo Var -> Expr Var -> Fresh (Expr' Var)
-trExpr ci e00 =
+trExpr :: ConInfo Var -> Expr Var -> Fresh (P.Expr Var)
+trExpr ci = go
+  {-
   let (lets,rest) = collectLets e00
       (matches,fn_calls)  = partition (isMatch . snd) lets
   in  ([x :<-: New False (tyConOf t) | (Local x t,_) <- matches ] ++)
          <$> go (makeLets (fn_calls ++ matches) rest)
+  -}
   where
+  go :: Expr Var -> Fresh (P.Expr Var)
   go e0 =
     case e0 of
-      Let x e b -> P.Let x <$> go e <*>  go b
+      Let x e b -> P.Let (lcl_name x) <$> go e <*>  go b
 
       {-o
       Let x (Match s brs) e ->
@@ -128,8 +138,12 @@ trExpr ci e00 =
           <$> go s
           <*> sequence
            [ do rhs' <- go rhs
-                return (k,[??],rhs')
-           | Case (ConPat (Global k _ _) _ as) rhs <- brs
+                let pat' = case pat of
+                             ConPat (Global k (PolyType _ _ (TyCon tc _)) ts) _
+                                     -> Just (con_info ci k tc ts)
+                             Default -> Nothing
+                return (pat',[],rhs')
+           | Case pat rhs <- brs
            ]
 
       Gbl (Global (SystemCon "noop" _) _ _) :@: _ -> return P.Noop
@@ -137,32 +151,14 @@ trExpr ci e00 =
       Gbl (Global (Api "equalHere") _ _) :@: [s1,s2]    -> P.EqPrim P.EqualHere    <$> go s1 <*> go s2
       Gbl (Global (Api "notEqualHere") _ _) :@: [s1,s2] -> P.EqPrim P.NotEqualHere <$> go s1 <*> go s2
 
-      Lcl (Local x _) -> P.Var x
+      Lcl (Local x _) -> return (P.Var x)
 
-      Gbl (Global k _ _) :@: [s] | Just i <- unproj k -> P.Proj i <$> go s
-      Gbl (Global k (PolyType _ _ (TyCon tc _)) _) :@: ss -> P.Con tc k (map trSimple ss)
-                                                             -- continue
-                                                             -- here with
-                                                             -- cons
+      Gbl (Global k _ _) :@: [s] | Just (i,t) <- unproj k  -> do let (ot,oi) = proj_info ci i t
+                                                                 s' <- go s
+                                                                 return (P.Proj s' ot oi)
+      Gbl (Global k (PolyType _ _ (TyCon tc _)) ts) :@: ss -> do P.Con (con_info ci k tc ts) <$> mapM go ss
 
       _ -> error $ "trExpr " ++ ppRender e0
-
-trSimple :: Expr Var -> Simp Var
-trSimple s =
-  case s of
-    _ -> error $ "trSimple, not simple: " ++ ppRender s
-
-trCase :: ConInfo Var -> Var -> Maybe Var -> [Var] -> Case Var -> Fresh (Mon Var)
-trCase ci c mr cons (Case pat rhs) =
-  do body <- trExpr ci rhs mr
-     return $
-       case body of
-         [] -> []
-         _  ->
-           return $
-             case pat of
-               Default                 -> Guard Unless [c :=? k | k <- cons] body
-               ConPat (Global k _ _) _ -> Guard When   [c :=? k] body
 
 isMatch :: Expr a -> Bool
 isMatch Match{} = True
