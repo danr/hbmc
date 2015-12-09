@@ -1,4 +1,4 @@
-module Object where
+module HBMC.Object where
 
 --------------------------------------------------------------------------------------------
 
@@ -99,7 +99,7 @@ cons :: Cons -> [Object] -> Object
 cons c as = Static c as
 
 new' :: Bool -> M Object
-new' inp = 
+new' inp =
   do ref <- liftIO $ newIORef undefined
      unq <- newUnique
      let x = Dynamic unq inp ref
@@ -122,7 +122,7 @@ ifCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
      case [ l | (c',l) <- alts cnt, c' == c ] of
        l:_ ->
          do withExtraContext l $ h (theArgs c (args cnt))
-       
+
        _ ->
          do liftIO $ writeIORef ref cnt{ waits   = (c,wait) : filter ((/=c).fst) (waits cnt)
                                        , myType  = Just t
@@ -136,7 +136,7 @@ ifCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
          newwait =
            withNewContext ctx $
              do ifCons obj c h
-         
+
          wait =
            case [ w | (c',w) <- waits cnt, c' == c ] of
              w:_ -> w >> newwait
@@ -153,12 +153,12 @@ ifNotCons obj@(Dynamic _ _ ref) cs h =
      withNewContext l $
        ifCons trig unit $ \_ ->
          h
-     
+
      let loop cs' =
            do cnt <- liftIO $ readIORef ref
               let someOther = any (\(c,_) -> c `notElem` cs) (alts cnt)
                   final     = all (\c -> c `elem` map fst (alts cnt)) cs
-              
+
               -- if there exists a constructor that should trigger the code h
               when someOther $
                    -- run the code
@@ -172,7 +172,7 @@ ifNotCons obj@(Dynamic _ _ ref) cs h =
                                , c `notElem` cs
                                , c `notElem` map fst cs'
                                ]
-              
+
               -- please wake me up when a new constructor is added?
               when (not someOther || not final) $
                 whenNewCons obj (loop (alts cnt))
@@ -184,7 +184,7 @@ ifArg (Static (Cons _ ts _) xs) t i h
   | i < length as = h (as !! i)
   | otherwise     = return ()
  where
-  as = [ x | (t',x) <- ts `zip` xs, t' == t ] 
+  as = [ x | (t',x) <- ts `zip` xs, t' == t ]
 
 ifArg obj@(Dynamic _ _ ref) t i h =
   do cnt <- liftIO $ readIORef ref
@@ -203,7 +203,7 @@ isCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
      l <- case [ l | (c',l) <- alts cnt, c' == c ] of
             l:_ ->
               do return l
-              
+
             _ ->
               do l <- newLit' c (alts cnt)
                  let ts = missingArgs c (args cnt)
@@ -228,7 +228,7 @@ isCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
   newLit' c@(Cons _ _ (Type _ _ alts)) pres
     | size == 1           = do return SAT.true
     | size == 2 && p == 1 = do return (neg (snd (head pres)))
-    | otherwise           = do l <- withSolver newLit  
+    | otherwise           = do l <- withSolver newLit
                                withSolver $ \s -> sequence_ [ addClause s [neg l,neg l'] | (_,l') <- pres ]
                                sequence_ [ withSolver $ \s -> addClause s (l : map snd pres) | size == p+1 ]
                                return l
@@ -280,7 +280,7 @@ o1 >>> o2 = do memo ">>>" (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return
   copy o1 o2 =
     do ifType o2 $ \t ->
          isType o1 t
-       
+
        ifType o1 $ \(Type _ _ cs) ->
          sequence_
          [ ifCons o1 c $ \xs ->
@@ -301,7 +301,7 @@ memo name f xs =
                       ys <- withNewContext l (f xs)
                       liftIO $ writeIORef tab (M.insert (name,xs) (l,ys) mp)
                       return (l,ys)
-                      
+
                  Just (l,ys) ->
                    do return (l,ys)
      addClauseHere [l]
@@ -371,7 +371,7 @@ objectVal (Dynamic _ _ ref) =
   do cnt <- liftIO $ readIORef ref
      let alt [] =
            do return (Cn unk [])
-         
+
          alt ((c,l):cls) =
            do b <- withSolver $ \s -> modelValue s l
               if b then
@@ -379,7 +379,7 @@ objectVal (Dynamic _ _ ref) =
                    return (Cn c as)
                else
                 alt cls
-                
+
       in alt (alts cnt)
 
 objectView :: Object -> M String

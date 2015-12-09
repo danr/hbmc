@@ -1,11 +1,11 @@
-module Program where
+module HBMC.Program where
 
 import qualified Data.Map as M
 import Data.Map( Map )
 import Data.Maybe( fromJust )
 import Data.List( intersperse )
 
-import Object
+import HBMC.Object
 
 --------------------------------------------------------------------------------------------
 
@@ -30,7 +30,7 @@ eval prog apps env (Var x) =
 eval prog apps env (Con c as) =
   do ys <- sequence [ eval prog apps env a | a <- as ]
      return (cons c ys)
-     
+
 eval prog apps env (App f as) =
   case (M.lookup f apps, M.lookup f prog) of
     (Just (trig,ys,z), _) ->
@@ -109,7 +109,7 @@ evalInto prog apps env (Case a alts) res =
            evalInto prog apps (inserts (zipp ("Case:" ++ show c) xs ys) env) rhs res
        | (c,xs,rhs) <- alts
        ]
-  
+
 --------------------------------------------------------------------------------------------
 
 zipp :: String -> [a] -> [b] -> [(a,b)]
