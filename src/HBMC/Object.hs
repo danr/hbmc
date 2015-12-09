@@ -15,36 +15,52 @@ import System.IO( hFlush, stdout )
 import SAT hiding ( false, true )
 import qualified SAT
 
+import Data.Function( on )
+
 --------------------------------------------------------------------------------------------
 
 type Name = String -- or whatever
 
+class Names a where
+  unkName   :: a
+  unitName  :: a
+  boolName  :: a
+  falseName :: a
+  trueName  :: a
+
+instance Names Name where
+  unkName = "?"
+  unitName = "()"
+  boolName = "Bool"
+  falseName = "False"
+  trueName = "True"
+
 --------------------------------------------------------------------------------------------
 
-data Cons = Cons Name [Type] Type
+data Cons a = Cons a [Type a] (Type a)
 
-instance Eq Cons where
+instance Eq a => Eq (Cons a) where
   Cons c1 _ _ == Cons c2 _ _ = c1 == c2
 
-instance Ord Cons where
+instance Ord a => Ord (Cons a) where
   Cons c1 _ _ `compare` Cons c2 _ _ = c1 `compare` c2
 
-instance Show Cons where
-  show (Cons c _ _) = c
+instance Show a => Show (Cons a) where
+  show (Cons c _ _) = show c
 
-data Type = Type Name [Type] [Cons]
+data Type a = Type a [Type a] [Cons a]
 
-instance Eq Type where
+instance Eq a => Eq (Type a) where
   Type t1 a1 _ == Type t2 a2 _ = (t1,a1) == (t2,a2)
 
-instance Ord Type where
+instance Ord a=> Ord (Type a) where
   Type t1 a1 _ `compare` Type t2 a2 _ = (t1,a1) `compare` (t2,a2)
 
-instance Show Type where
-  show (Type t [] _) = t
-  show (Type t a  _) = t ++ "(" ++ intercalate "," (map show a) ++ ")"
+instance Show a => Show (Type a) where
+  show (Type t [] _) = show t
+  show (Type t a  _) = show t ++ "(" ++ intercalate "," (map show a) ++ ")"
 
-theArgs :: Cons -> [(Type,a)] -> [a]
+theArgs :: Eq n => Cons n -> [(Type n,a)] -> [a]
 theArgs (Cons _ ts _) txs = find ts txs []
  where
   find []     _ _ = []
@@ -52,7 +68,7 @@ theArgs (Cons _ ts _) txs = find ts txs []
     | t == t'     = x : find ts (reverse txs' ++ txs) []
     | otherwise   = find (t:ts) txs ((t',x):txs')
 
-missingArgs :: Cons -> [(Type,a)] -> [Type]
+missingArgs :: Eq n => Cons n -> [(Type n,a)] -> [Type n]
 missingArgs (Cons _ ts _) txs = find ts txs []
  where
   find []     _ _ = []
@@ -63,42 +79,49 @@ missingArgs (Cons _ ts _) txs = find ts txs []
 
 --------------------------------------------------------------------------------------------
 
-unitT = Type "()" [] [unit]
-unit  = Cons "()" [] unitT
+unitT :: Names a => Type a
+unitT = Type unitName [] [unit]
 
-boolT = Type "Bool"  [] [false,true]
-false = Cons "False" [] boolT
-true  = Cons "True"  [] boolT
+unit  :: Names a => Cons a
+unit  = Cons unitName [] unitT
+
+boolT :: Names a => Type a
+boolT = Type boolName [] [false,true]
+
+false, true :: Names a => Cons a
+false = Cons falseName [] boolT
+true  = Cons trueName  [] boolT
 
 --------------------------------------------------------------------------------------------
 
-data Object
-  = Static Cons [Object]
-  | Dynamic Unique Bool {-input?-} (IORef Contents)
+data Object a
+  = Static (Cons a) [Object a]
+  | Dynamic Unique Bool {-input?-} (IORef (Contents a))
 
-instance Eq Object where
-  o1 == o2 = o1 `compare` o2 == EQ
+cmpView :: Object a -> Either (Cons a,[Object a]) Unique
+cmpView (Static c os)   = Left (c,os)
+cmpView (Dynamic u _ _) = Right u
 
-instance Ord Object where
-  Static c1 a1   `compare` Static c2 a2   = (c1,a1) `compare` (c2,a2)
-  Static _  _    `compare` Dynamic _ _ _  = LT
-  Dynamic _ _ _  `compare` Static _ _     = GT
-  Dynamic u1 _ _ `compare` Dynamic u2 _ _ = u1 `compare` u2
+instance Eq a => Eq (Object a) where
+  (==) = (==) `on` cmpView
 
-data Contents
+instance Ord a => Ord (Object a) where
+  compare = compare `on` cmpView
+
+data Contents a
   = Contents
-  { alts    :: [(Cons,Lit)]    -- alternatives already present
-  , waits   :: [(Cons,M ())]   -- alternatives someone is waiting for
-  , newCons :: M ()            -- this callback will be run *once* when a new alternative becomes present
-  , myType  :: Maybe Type      -- do we already know the type of this object?
-  , newType :: Type -> M ()    -- people waiting to get to know the type
-  , args    :: [(Type,Object)] -- arguments to all constructors
+  { alts    :: [(Cons a,Lit)]      -- alternatives already present
+  , waits   :: [(Cons a,M a ())]   -- alternatives someone is waiting for
+  , newCons :: M a ()              -- this callback will be run *once* when a new alternative becomes present
+  , myType  :: Maybe (Type a)      -- do we already know the type of this object?
+  , newType :: Type a -> M a ()    -- people waiting to get to know the type
+  , args    :: [(Type a,Object a)] -- arguments to all constructors
   }
 
-cons :: Cons -> [Object] -> Object
+cons :: Cons a -> [Object a] -> Object a
 cons c as = Static c as
 
-new' :: Bool -> M Object
+new' :: Bool -> M a (Object a)
 new' inp =
   do ref <- liftIO $ newIORef undefined
      unq <- newUnique
@@ -106,13 +129,13 @@ new' inp =
      liftIO $ writeIORef ref (Contents [] [] (return ()) Nothing (\_ -> return ()) [])
      return x
 
-new :: M Object
+new :: M a (Object a)
 new = new' False
 
-newInput :: M Object
+newInput :: M a (Object a)
 newInput = new' True
 
-ifCons :: Object -> Cons -> ([Object] -> M ()) -> M ()
+ifCons :: (Names a,Eq a) => Object a -> Cons a -> ([Object a] -> M a ()) -> M a ()
 ifCons (Static c' xs) c h =
   if c' == c then h xs else return ()
 
@@ -142,7 +165,7 @@ ifCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
              w:_ -> w >> newwait
              _   -> newwait
 
-ifNotCons :: Object -> [Cons] -> M () -> M ()
+ifNotCons :: (Names a,Eq a) => Object a -> [Cons a] -> M a () -> M a ()
 ifNotCons (Static c xs) cs h =
   if c `elem` cs then return () else h
 
@@ -179,7 +202,7 @@ ifNotCons obj@(Dynamic _ _ ref) cs h =
 
       in loop []
 
-ifArg :: Object -> Type -> Int -> (Object -> M ()) -> M ()
+ifArg :: Eq a => Object a -> Type a -> Int -> (Object a -> M a ()) -> M a ()
 ifArg (Static (Cons _ ts _) xs) t i h
   | i < length as = h (as !! i)
   | otherwise     = return ()
@@ -194,7 +217,7 @@ ifArg obj@(Dynamic _ _ ref) t i h =
       else
        whenNewCons obj (ifArg obj t i h)
 
-isCons :: Object -> Cons -> ([Object] -> M ()) -> M ()
+isCons :: Eq a => Object a -> Cons a -> ([Object a] -> M a ()) -> M a ()
 isCons (Static c' xs) c h =
   if c' == c then h xs else addClauseHere []
 
@@ -236,14 +259,14 @@ isCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
     size = length alts
     p    = length pres
 
-whenNewCons :: Object -> M () -> M ()
+whenNewCons :: Object a -> M a () -> M a ()
 whenNewCons (Static c _) h = return ()
 whenNewCons (Dynamic _ _ ref) h =
   do cnt <- liftIO $ readIORef ref
      ctx <- here
      liftIO $ writeIORef ref cnt{ newCons = newCons cnt >> withNewContext ctx h }
 
-ifType :: Object -> (Type -> M ()) -> M ()
+ifType :: Object a -> (Type a -> M a ()) -> M a ()
 ifType (Static (Cons _ _ t) _) h =
   do h t
 
@@ -254,7 +277,7 @@ ifType obj@(Dynamic _ _ ref) h =
        Nothing -> do ctx <- here
                      liftIO $ writeIORef ref cnt{ newType = \t -> newType cnt t >> withNewContext ctx (h t) }
 
-isType :: Object -> Type -> M ()
+isType :: Eq a => Object a -> Type a -> M a ()
 isType (Static (Cons _ _ t') _) t | t' == t =
   do return ()
 
@@ -265,7 +288,7 @@ isType obj@(Dynamic _ _ ref) t =
        Nothing           -> do liftIO $ writeIORef ref cnt{ myType = Just t, newType = \_ -> return () }
                                newType cnt t
 
-expand :: Object -> M ()
+expand :: Eq a => Object a -> M a ()
 expand (Static _ _) = return ()
 expand obj@(Dynamic _ _ ref) =
   do cnt <- liftIO $ readIORef ref
@@ -274,7 +297,7 @@ expand obj@(Dynamic _ _ ref) =
 
 --------------------------------------------------------------------------------------------
 
-(>>>) :: Object -> Object -> M ()
+(>>>) :: (Names a,Ord a) => Object a -> Object a -> M a ()
 o1 >>> o2 = do memo ">>>" (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return ()
  where
   copy o1 o2 =
@@ -291,7 +314,7 @@ o1 >>> o2 = do memo ">>>" (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return
 
 --------------------------------------------------------------------------------------------
 
-memo :: Name -> ([Object] -> M [Object]) -> [Object] -> M [Object]
+memo :: Ord a => Name -> ([Object a] -> M a [Object a]) -> [Object a] -> M a [Object a]
 memo name f xs =
   do tab <- getTable
      mp  <- liftIO $ readIORef tab
@@ -309,14 +332,14 @@ memo name f xs =
 
 --------------------------------------------------------------------------------------------
 
-later :: M () -> M ()
+later :: (Eq n,Names n) => M n () -> M n ()
 later h =
   do x <- new' True
      ifCons x unit $ \_ -> h
 
 --------------------------------------------------------------------------------------------
 
-trySolve :: M (Maybe Bool)
+trySolve :: (Show n,Ord n) => M n (Maybe Bool)
 trySolve = M $ \env ->
   do lxs <- (nub . reverse) `fmap` readIORef (queue env)
      as <- sequence [ let M m = objectView x in m env | (_,x) <- lxs ]
@@ -353,16 +376,19 @@ trySolve = M $ \env ->
 
 --------------------------------------------------------------------------------------------
 
-data Val = Cn Cons [Val] deriving ( Eq, Ord )
+data Val a = Cn (Cons a) [Val a] deriving ( Eq, Ord )
 
-unkT = Type "?" [] [unk]
-unk  = Cons "?" [] unkT
+unkT :: Names a => Type a
+unkT = Type unkName [] [unk]
 
-instance Show Val where
+unk :: Names a => Cons a
+unk  = Cons unkName [] unkT
+
+instance Show a => Show (Val a) where
   show (Cn c []) = show c
   show (Cn c xs) = show c ++ "(" ++ intercalate "," (map show xs) ++ ")"
 
-objectVal :: Object -> M Val
+objectVal :: (Names a,Eq a) => Object a -> M a (Val a)
 objectVal (Static c xs) =
   do as <- sequence [ objectVal x | x <- xs ]
      return (Cn c as)
@@ -382,7 +408,7 @@ objectVal (Dynamic _ _ ref) =
 
       in alt (alts cnt)
 
-objectView :: Object -> M String
+objectView :: (Show a,Eq a) => Object a -> M a String
 objectView (Static c xs) =
   do as <- sequence [ objectView x | x <- xs ]
      return ("!" ++ show c ++ "(" ++ intercalate "," as ++ ")")
@@ -397,30 +423,30 @@ objectView (Dynamic unq _ ref) =
 
 --------------------------------------------------------------------------------------------
 
-data Env =
+data Env a =
   Env{ solver  :: Solver
      , context :: Lit
      , unique  :: IORef Int
-     , table   :: IORef (Map (Name,[Object]) (Lit,[Object]))
-     , queue   :: IORef [(Lit,Object)]
+     , table   :: IORef (Map (Name,[Object a]) (Lit,[Object a]))
+     , queue   :: IORef [(Lit,Object a)]
      }
 
-newtype M a = M (Env -> IO a)
+newtype M n a = M (Env n -> IO a)
 
-instance Functor M where
+instance Functor (M n) where
   f `fmap` M h = M (fmap f . h)
 
-instance Applicative M where
+instance Applicative (M n) where
   pure x      = return x
   M f <*> M a = M (\env -> f env <*> a env)
 
-instance Monad M where
+instance Monad (M n) where
   return x  = M (\_   -> return x)
   M h >>= k = M (\env -> do x <- h env; let M h' = k x in h' env)
 
 -- run function
 
-run :: M () -> IO ()
+run :: M n () -> IO ()
 run (M m) =
   withNewSolver $ \s ->
     do refUnique <- newIORef 0
@@ -436,43 +462,43 @@ run (M m) =
 
 -- operations
 
-enqueue :: Object -> M ()
+enqueue :: Object n -> M n ()
 enqueue x = M $ \env ->
   do lxs <- readIORef (queue env)
      writeIORef (queue env) ((context env,x):lxs)
 
 type Unique = Int
 
-newUnique :: M Unique
+newUnique :: M n Unique
 newUnique = M $ \env ->
   do n <- readIORef (unique env)
      let n' = n+1
      n' `seq` writeIORef (unique env) n'
      return n'
 
-getTable :: M (IORef (Map (Name,[Object]) (Lit,[Object])))
+getTable :: M n (IORef (Map (Name,[Object n]) (Lit,[Object n])))
 getTable = M (return . table)
 
-withSolver :: (Solver -> IO a) -> M a
+withSolver :: (Solver -> IO a) -> M n a
 withSolver h = M (h . solver)
 
-here :: M Lit
+here :: M n Lit
 here = M (return . context)
 
-withNewContext :: Lit -> M a -> M a
+withNewContext :: Lit -> M n a -> M n a
 withNewContext l (M h) = M (\env -> h env{ context = l })
 
 -- derived
 
-liftIO :: IO a -> M a
+liftIO :: IO a -> M n a
 liftIO io = withSolver $ \_ -> io
 
-addClauseHere :: [Lit] -> M ()
+addClauseHere :: [Lit] -> M n ()
 addClauseHere xs =
   do ctx <- here
      withSolver $ \s -> addClause s (neg ctx : xs)
 
-withExtraContext :: Lit -> M a -> M a
+withExtraContext :: Lit -> M n a -> M n a
 withExtraContext l h =
   do l' <- withSolver newLit
      addClauseHere [neg l, l']

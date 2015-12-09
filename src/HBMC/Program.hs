@@ -9,21 +9,25 @@ import HBMC.Object
 
 --------------------------------------------------------------------------------------------
 
-data Expr
-  = Var Name
-  | Con Cons [Expr]
-  | App Name [Expr]
-  | Later Expr
-  | Let Name Expr Expr
-  | LetApp Name [Name] Expr Expr
-  | Case Expr [(Cons,[Name],Expr)]
+data Expr a
+  = Var a
+  | Con (Cons a) [Expr a]
+  | App a [Expr a]
+  | Later (Expr a)
+  | Let a (Expr a) (Expr a)
+  | LetApp a [a] (Expr a) (Expr a)
+  | Case (Expr a) [(Cons a,[a],Expr a)]
  deriving ( Eq, Ord, Show )
 
-type Program = Map Name ([Name],Expr)
+type Program n = Map n ([n],Expr n)
+
+type Apps n = Map n (Object n,[Object n],Object n)
+
+type VarEnv n = Map n (Object n)
 
 --------------------------------------------------------------------------------------------
 
-eval :: Program -> Map Name (Object,[Object],Object) -> Map Name Object -> Expr -> M Object
+eval :: (Names n,Ord n,Show n) => Program n -> Apps n -> VarEnv n -> Expr n -> M n (Object n)
 eval prog apps env (Var x) =
   do return (fromJust (M.lookup x env))
 
@@ -67,7 +71,7 @@ eval prog apps env (Case a alts) =
 
 --------------------------------------------------------------------------------------------
 
-evalInto :: Program -> Map Name (Object,[Object],Object) -> Map Name Object -> Expr -> Object -> M ()
+evalInto :: (Names n,Ord n,Show n) => Program n -> Apps n -> VarEnv n -> Expr n -> Object n -> M n ()
 evalInto prog apps env (Var x) res =
   do fromJust (M.lookup x env) >>> res
 
