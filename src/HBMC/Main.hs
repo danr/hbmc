@@ -1,4 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Main where
 
 import qualified HBMC.Params as Params
@@ -27,11 +30,16 @@ import HBMC.Identifiers
 import HBMC.Data
 import HBMC.Projections
 
-import HBMC.Monadic hiding (Var)
+import HBMC.Object
+import HBMC.Program
+import HBMC.MakeProgram
 
 import HBMC.ToSimple
 
-import HBMC.Live
+import qualified Data.Map as M
+
+-- import HBMC.Monadic hiding (Var)
+-- import HBMC.Live
 
 import Tip.Passes
 import Tip.Pass.Booleans
@@ -51,9 +59,12 @@ import System.Process
 
 import Text.Show.Pretty (ppShow)
 
-type Translated = ([Datatype Var],[Func Var],[Prop Var])
+deriving instance Names a => Names (PPVar a)
 
-translate :: Params -> Theory Var -> WriterT [String] Fresh Translated
+data Translated a = Translated [PreFunction a] [Prop a]
+  deriving (Show, Functor)
+
+translate :: Params -> Theory Var -> WriterT [String] Fresh (Translated Var)
 translate params thy0 =
   do [thy1] <-
         map (removeBuiltinBoolWith boolNames) <$> lift
@@ -79,19 +90,10 @@ translate params thy0 =
 
      thy2 <- lift (monomorphise False thy1)
 
-     thy <- lift $ do let (dis,_) = unzip (map dataInfo (thy_datatypes thy2))
-                      projectPatterns (concat dis) thy2
+     (di,thy) <- lift $ do let di = dataInfo (thy_datatypes thy2)
+                           (,) di <$> projectPatterns di thy2
 
      let fn_comps = map (fmap func_name) (components defines uses (thy_funcs thy))
-
-     let ci | Params.insist_isnt params = flip lookup
-              [ (c,all_cons \\ [c])
-              | Datatype tc [] cons <- thy_datatypes thy
-              , not (isMaybeTC tc)
-              , let all_cons = map con_name cons
-              , c <- map con_name cons
-              ]
-            | otherwise = const Nothing
 
      fn_decls <- sequence
          [ do let e = func_body fn
@@ -100,30 +102,30 @@ translate params thy0 =
                     then mergeTrace (scope thy) e
                     else sequence [toExpr e]
               tell (ppRender fn:map (ppRender . ren) (e:es))
-              lift (trFunction params ci fn_comps fn{ func_body = last es })
+              lift (trFunction params di fn_comps fn{ func_body = last es })
          | fn <- thy_funcs thy
          ]
 
-     props <- lift $ sequence [ trFormula ci prop | prop <- thy_asserts thy ]
+     props <- lift $ sequence [ trFormula di prop | prop <- thy_asserts thy ]
 
+{-
      let thy' = addMaybesToTheory
                   (concatMap F.toList fn_decls ++ concatMap F.toList props)
                   thy
+                  -}
 
-     tell [ppShow (thy_datatypes thy')]
+     -- This maybe-hack won't me needed with LetApp or dynamic function
+     -- call horizon merging
+
+     tell [ppShow (thy_datatypes thy)]
      tell (map ppShow fn_decls)
      tell [ppShow props]
 
-     return (thy_datatypes thy', fn_decls, props)
+     return (Translated fn_decls props)
 
-runLive :: Params -> Translated -> IO ()
-runLive p (_,_,[])       = error "Needs at least one property!"
-runLive p (ds,fs,prop:_) = liveProp p static (fmap pp_var prop)
-  where
-  pp_var = PPVar
-
-  lkup_data = dataDescs (Params.delay_all_datatypes p) (map (fmap pp_var) ds)
-  static    = liveFuncs p lkup_data (map (fmap pp_var) fs)
+runLive :: Params -> Translated (PPVar Var) -> IO ()
+runLive p (Translated _    [])       = error "Needs at least one property!"
+runLive p (Translated prog (prop:_)) = run (evalProp (M.fromList prog) prop)
 
 ren = renameWith (disambig varStr)
 
@@ -135,7 +137,7 @@ main = do
         (Params.file params)
         Tip.defaultParams{ Tip.prop_names = Params.prop_names params }
 
-    let (m,dbg) = freshPass (runWriterT . (lift . return . runLive params <=< translate params)) thy0
+    let (m,dbg) = freshPass (runWriterT . (lift . return . runLive params <=< fmap (fmap PPVar) . translate params)) thy0
 
     when (Params.debug params) (putStrLn (unlines dbg))
 

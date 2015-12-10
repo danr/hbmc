@@ -19,6 +19,8 @@ import Data.Generics.Geniplate
 import Data.Set (Set)
 import qualified Data.Set as S
 
+import qualified HBMC.Object as O
+
 boolNames :: BoolNames Var
 boolNames = BoolNames
   { boolName    = System "Bool" Nothing
@@ -27,6 +29,16 @@ boolNames = BoolNames
   , isTrueName  = System "isTrue" Nothing
   , isFalseName = System "isFalse" Nothing
   }
+
+instance O.Names Var where
+  unkName   = System "?" Nothing
+  unitName  = System "()" Nothing
+  boolName  = System "Bool" Nothing
+  falseName = System "False" Nothing
+  trueName  = System "True" Nothing
+  copyName  = System ">>>" Nothing
+  equalHereName    = System "equalHere" Nothing
+  notEqualHereName = System "notEqualHere" Nothing
 
 api :: String -> Var
 api = Api
@@ -57,55 +69,56 @@ mkCon :: Var -> Var
 mkCon     = Prefixed "con"
 
 data Var
-  = Var String
+  = X
+  | Var String
   | Con String
   | Api String
   | System    String (Maybe (Type Var))
   | SystemCon String (Maybe (Type Var))
   | Prelude String
-  | Proj Int (Type Var)
-  | Refresh Int Var
+  | Proj (Type Var) Int
+  | Int :~ Var
   | Prefixed String Var
  deriving (Show,Eq,Ord)
 
 isCon :: Var -> Bool
 isCon Con{}       = True
 isCon SystemCon{} = True
-isCon (Refresh _ x) = isCon x
-isCon _     = False
+isCon (_ :~ x)    = isCon x
+isCon _           = False
 
-proj :: Int -> Type Var -> Var
+proj :: Type Var -> Int -> Var
 proj = Proj
 
-unproj :: Var -> Maybe (Int, Type Var)
-unproj (Proj i t) = Just (i,t)
+unproj :: Var -> Maybe (Type Var,Int)
+unproj (Proj t i) = Just (t,i)
 unproj _          = Nothing
 
 varMax :: Var -> Int
-varMax Var{}         = 0
-varMax (Refresh i v) = varMax v `max` i
-varMax _             = 0
+varMax (i :~ v) = varMax v `max` i
+varMax _        = 0
 
 varStr' :: Var -> String
 varStr' x =
   case x of
+    X             -> "x"
     Var ""        -> "x"
     Var x         -> x
     Con x         -> varStr' (Var x)
-    Refresh i v   -> varStr' v
-    Proj i _      -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
+    i :~ v        -> varStr' v
+    Proj _ i      -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
     Api x         -> x
     Prelude x     -> x
     System    x m -> x ++ maybe "" ppRender m
     SystemCon x m -> x ++ maybe "" ppRender m
     Prefixed "" x -> varStr' x
-    Prefixed d x -> d ++ "_" ++ varStr' x
+    Prefixed d x  -> d ++ "_" ++ varStr' x
 
 instance PrettyVar Var where
   varStr x =
     case x of
-      Refresh i v -> varStr' v -- ++ "_" ++ show i
-      _           -> varStr' x
+      i :~ v -> varStr' v -- ++ "_" ++ show i
+      _      -> varStr' x
 
 renameTheory :: forall a . (Ord a,PrettyVar a) => Theory a -> Theory Var
 renameTheory thy = renameWith disambigId thy
@@ -113,7 +126,7 @@ renameTheory thy = renameWith disambigId thy
   cons = S.fromList [ c | Constructor c _ _ <- universeBi thy ]
 
   disambigId :: a -> [Var]
-  disambigId i = vs : [ Refresh x vs | x <- [0..] ]
+  disambigId i = vs : [ x :~ vs | x <- [0..] ]
     where
       var_or_con
         | i `S.member` cons = Con
@@ -124,12 +137,12 @@ renameTheory thy = renameWith disambigId thy
              xs -> var_or_con xs
 
 instance Name Var where
-  fresh        = refresh (Var "")
-  freshNamed x = refresh (Var x)
+  fresh            = refresh X
+  freshNamed x     = refresh (Var x)
   refreshNamed x s = freshNamed (varStr' s ++ x)
-  refresh (Refresh _ v) = refresh v
-  refresh v    = flip Refresh v `fmap` fresh
-  getUnique    = varMax
+  refresh (_ :~ v) = refresh v
+  refresh v        = (:~ v) `fmap` fresh
+  getUnique        = varMax
 
 -- A family of monomorphic Maybes
 

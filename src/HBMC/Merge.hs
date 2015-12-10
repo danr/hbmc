@@ -238,8 +238,8 @@ callMerged = transformExprInM top
 
              (maybe_ty,proj_expr)
                 | need_maybe = ( maybeTy
-                               , \ x -> projExpr 0 (Lcl x)
-                                                 (unMaybeTy (lcl_type x)))
+                               , \ x -> projExpr (unMaybeTy (lcl_type x),0) (Lcl x)
+                               )
                 | otherwise  = (id     ,Lcl)
 
          args <- sequence [ do arg <- refreshNamed "arg" (lcl_name lhs)

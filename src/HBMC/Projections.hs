@@ -22,8 +22,8 @@ projectPatterns di Theory{..}
          | Function{..} <- thy_funcs ]
        return Theory{thy_funcs=fns,..}
 
-projExpr :: Int -> Expr Var -> Type Var -> Expr Var
-projExpr i e t = Gbl (Global (proj i) (PolyType [] [exprType e] t) []) :@: [e]
+projExpr :: (Type Var,Int) -> Expr Var -> Expr Var
+projExpr (t,i) e = Gbl (Global (proj t i) (PolyType [] [exprType e] t) []) :@: [e]
 
 projectExpr :: DataInfo Var -> Expr Var -> Fresh (Expr Var)
 projectExpr di = go
@@ -37,15 +37,15 @@ projectExpr di = go
                [ case pat of
                    Default -> Case Default <$> go rhs
                    ConPat k vars
-                     | Just (tc,ixs) <- lookup (gbl_name k) di
+                     | ps <- projs_of_con di k
                      -> do rhs' <-
                              substMany
-                               [ (v,projExpr i (Lcl lx) (lcl_type v))
-                               | (v,i) <- vars `zip` ixs
+                               [ (v,projExpr p (Lcl lx))
+                               | (v,p) <- vars `zip` ps
                                ]
                                rhs
                            Case (ConPat k []) <$> go rhs'
-                   _ -> error $ "projectPatterns: " ++ ppShow di ++ "\n" ++ ppRender e0
+                   _ -> error $ "projectPatterns: \n" ++ ppRender e0
                | Case pat rhs <- alts
                ])
       hd :@: args -> (hd :@:) <$> mapM go args

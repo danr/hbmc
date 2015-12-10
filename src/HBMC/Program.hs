@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 module HBMC.Program where
 
 import qualified Data.Map as M
@@ -19,14 +20,20 @@ data Expr a
   | Case (Expr a) [(Maybe (Cons a),[a],Expr a)]
 
   | Proj (Expr a) (Type a) Int
-  | Noop
+  | ConstraintsOf [Expr a]
   | EqPrim EqPrim (Expr a) (Expr a)
- deriving ( Eq, Ord, Show )
+ deriving ( Eq, Ord, Show, Functor )
+
+noop :: Expr a
+noop = ConstraintsOf []
 
 data EqPrim = EqualHere | NotEqualHere
  deriving ( Eq, Ord, Show )
 
 data MemoFlag = DoMemo | Don'tMemo
+ deriving ( Eq, Ord, Show )
+
+type PreFunction n = (n,([n],MemoFlag,Expr n))
 
 type Program n = Map n ([n],MemoFlag,Expr n)
 
@@ -56,7 +63,7 @@ eval prog apps env (App f as) =
          return z
 
     (_, Just (xs,_memo,rhs)) ->
-      do --liftIO $ putStrLn (show f ++ show as)
+      do -- liftIO $ putStrLn (show f ++ show as)
          ys <- sequence [ eval prog apps env a | a <- as ]
          eval prog M.empty (M.fromList (zipp ("App:" ++ show f) xs ys)) rhs
 
@@ -86,8 +93,9 @@ eval prog apps env (Proj e t i) =
   do obj <- eval prog apps env e
      unsafeProj obj t i
 
-eval prog apps env Noop =
-  do return (cons unit [])
+eval prog apps env (ConstraintsOf es) =
+  do sequence_ [ eval prog apps env e | e <- es ]
+     return (cons unit [])
 
 eval prog apps env (EqPrim prim e1 e2) =
   do o1 <- eval prog apps env e1
@@ -113,7 +121,7 @@ evalInto prog apps env (App f as) res =
          z >>> res
 
     (_, Just (xs,_memo,rhs)) ->
-      do --liftIO $ putStrLn (show f ++ show as)
+      do -- liftIO $ putStrLn (show f ++ show as)
          ys <- sequence [ eval prog apps env a | a <- as ]
          evalInto prog M.empty (M.fromList (zipp ("App:" ++ show f ++ "->") xs ys)) rhs res
 
@@ -147,13 +155,43 @@ evalInto prog apps env (Proj e t i) res =
      pobj <- unsafeProj obj t i
      pobj >>> res
 
-evalInto prog apps env Noop res =
-  do return ()
+
+evalInto prog apps env (ConstraintsOf es) res =
+  do sequence_ [ eval prog apps env e | e <- es ]
 
 evalInto prog apps env (EqPrim prim e1 e2) res =
   do o1 <- eval prog apps env e1
      o2 <- eval prog apps env e2
      evalPrim prim o1 o2
+
+--------------------------------------------------------------------------------------------
+
+evalProp :: (Names n,Ord n,Show n) => Program n -> ([n],Expr n) -> M n ()
+evalProp prog (vars,e) =
+  do os <- sequence [ (,) v <$> newInput | v <- vars ]
+     eval prog M.empty (M.fromList os) e
+
+     let loop =
+           do sequence_
+                [ do s <- objectView o
+                     liftIO $ putStrLn (show v ++ " = " ++ s)
+                | (v,o) <- os
+                ]
+              mb <- trySolve
+              case mb of
+                Nothing -> loop
+                Just b  -> return b
+
+     b <- loop
+     if b then
+       do sequence_
+            [ do s <- objectVal o
+                 liftIO $ putStrLn (show v ++ " = " ++ show s)
+            | (v,o) <- os
+            ]
+      else
+       do return ()
+
 
 --------------------------------------------------------------------------------------------
 

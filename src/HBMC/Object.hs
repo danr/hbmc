@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module HBMC.Object where
 
@@ -39,12 +40,13 @@ instance Names Name where
   falseName = "False"
   trueName  = "True"
   copyName  = ">>>"
-  equalHereName    = "equalHereName"
-  notEqualHereName = "notEqualHereName"
+  equalHereName    = "equalHere"
+  notEqualHereName = "notEqualHere"
 
 --------------------------------------------------------------------------------------------
 
 data Cons a = Cons a [Type a] (Type a)
+ deriving Functor
 
 instance Eq a => Eq (Cons a) where
   Cons c1 _ _ == Cons c2 _ _ = c1 == c2
@@ -56,6 +58,7 @@ instance Show a => Show (Cons a) where
   show (Cons c _ _) = show c
 
 data Type a = Type a [Type a] [Cons a]
+ deriving Functor
 
 instance Eq a => Eq (Type a) where
   Type t1 a1 _ == Type t2 a2 _ = (t1,a1) == (t2,a2)
@@ -316,7 +319,8 @@ expand obj@(Dynamic _ _ ref) =
 o1 >>> o2 = do memo copyName (\[o1,o2] -> do copy o1 o2; return []) [o1,o2]; return ()
  where
   copy o1 o2 =
-    do ifType o2 $ \t ->
+    do -- liftIO $ putStrLn "copy"
+       ifType o2 $ \t ->
          isType o1 t
 
        ifType o1 $ \(Type _ _ cs) ->
@@ -331,7 +335,8 @@ equalHere :: (Names a,Ord a) => Object a -> Object a -> M a ()
 o1 `equalHere` o2 = do memo equalHereName (\[o1,o2] -> do go o1 o2; return []) [o1,o2]; return ()
  where
   go o1 o2 =
-    do ifType o2 $ \t ->
+    do -- liftIO $ putStrLn "equalHere"
+       ifType o2 $ \t ->
          isType o1 t
 
        ifType o1 $ \(Type _ _ cs) ->
@@ -347,7 +352,8 @@ notEqualHere :: (Names a,Ord a) => Object a -> Object a -> M a ()
 o1 `notEqualHere` o2 = do memo notEqualHereName (\[o1,o2] -> do go o1 o2; return []) [o1,o2]; return ()
  where
   go o1 o2 =
-    do ifType o2 $ \t ->
+    do -- liftIO $ putStrLn "notEqualHere"
+       ifType o2 $ \t ->
          isType o1 t
 
        ifType o1 $ \(Type _ _ cs) ->

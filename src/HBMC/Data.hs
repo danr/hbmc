@@ -1,5 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE RecordWildCards #-}
 module HBMC.Data where
 
 import Tip.Types
@@ -7,63 +7,66 @@ import Tip.Fresh
 import Data.List
 
 import Tip.Utils (recursive)
-import Tip.Core  (defines,uses)
+import Tip.Core  (defines,uses,constructor)
 import Tip.Pretty
 
 import HBMC.Identifiers
-import HBMC.Lib hiding (Type,caseData)
 
 import Tip.Core (Datatype(..),Constructor(..))
 import Control.Applicative
 
-type DataInfo a = [(a,(a,[Int]))]
+import qualified HBMC.Object as O
 
-dataDescs :: forall a . (Show a,PrettyVar a,Ord a) => Bool -> [Datatype a] -> a -> LiveDesc a
-dataDescs lazy_datatypes dts = lkup_desc
+import Data.Map (Map)
+import qualified Data.Map as M
+
+type Proj a = (Type a,Int)
+
+data DataInfo a =
+  DataInfo
+    { tr_con       :: Global a -> O.Cons a
+    , projs_of_con :: Global a -> [Proj a]
+    , tr_type      :: Type a -> O.Type a
+    }
+
+dataInfo :: forall a . Ord a => [Datatype a] -> DataInfo a
+dataInfo dts = DataInfo{..}
   where
-  rec_dts = recursiveDatatypes dts
-  lkup_desc x = case lookup x tbl of Just desc -> desc
-                                     Nothing   -> error $ "Data type not found:" ++ varStr x ++ " (" ++ show x ++ ")"
-  tbl =
-    [ (tc,
-       maybe_thunk $ DataDesc (varStr tc) [ c | Constructor c _ _ <- cons ]
-       [ case ty of
-           TyCon tc [] ->
-             ( [ c | (c,(_,ixs)) <- indexes, i `elem` ixs ]
-             , lkup_desc tc)
-       | (i,ty) <- [0..] `zip` types ])
-    | dt@(Datatype tc [] cons) <- dts
-    , let (indexes,types) = dataInfo dt
-    , let maybe_thunk | tc `elem` rec_dts || lazy_datatypes = ThunkDesc
-                      | otherwise                           = id
-    ]
+  tr_con :: Global a -> O.Cons a
+  tr_con = fst . (con_map M.!)
 
-recursiveDatatypes :: Ord a => [Datatype a] -> [a]
-recursiveDatatypes = recursive defines uses
+  projs_of_con :: Global a -> [Proj a]
+  projs_of_con = snd . (con_map M.!)
 
-dataInfo :: forall a . Eq a => Datatype a -> (DataInfo a,[Type a])
-dataInfo (Datatype tc _tvs cons) = (indexes,types)
+  con_map :: Map (Global a) (O.Cons a,[Proj a])
+  con_map =
+    M.fromList
+      [ (constructor dt c []
+        ,(O.Cons cname [ tr_type t | (_,t) <- args ] (tr_type (TyCon dname []))
+         ,number [ t | (_,t) <- args ]
+         )
+        )
+      | dt@(Datatype dname _ cons) <- dts
+      , c@(Constructor cname _ args) <- cons
+      ]
+
+  tr_type :: Type a -> O.Type a
+  tr_type = (type_map M.!)
+
+  type_map =
+    M.fromList
+      [ (TyCon dname []
+        ,O.Type dname [] [tr_con (constructor dt c []) | c <- cons ]
+        )
+      | dt@(Datatype dname _ cons) <- dts
+      ]
+
+
+-- > number [True,False,True,False,False]
+-- [(True,0),(False,0),(True,1),(False,1),(False,2)]
+number :: Eq a => [a] -> [(a,Int)]
+number = reverse . go . reverse
   where
-    types :: [Type a]
-    types = merge [ map snd args | Constructor _ _ args <- cons ]
-
-    indexes =
-        [ (c,(tc,index (map snd args) (types `zip` [0..])))
-        | Constructor c _ args <- cons
-        ]
-
-    index :: [Type a] -> [(Type a,Int)] -> [Int]
-    index []     _  = []
-    index (a:as) ts = i : index as (l ++ r)
-      where
-        (l,(_,i):r) = break ((a ==) . fst) ts
-
--- | Merging
-merge :: Eq a => [[a]] -> [a]
-merge []       = []
-merge (xs:xss) = help xs (merge xss)
-  where
-    help :: Eq a => [a] -> [a] -> [a]
-    help xs (y:ys) = y:help (delete y xs) ys
-    help xs []     = xs
+  go []     = []
+  go (x:xs) = (x,sum [ 1 | y <- xs, x == y ]):go xs
 
