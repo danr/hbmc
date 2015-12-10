@@ -126,7 +126,7 @@ evalInto prog apps env (App f as) res =
          evalInto prog M.empty (M.fromList (zipp ("App:" ++ show f ++ "->") xs ys)) rhs res
 
 evalInto prog apps env (Later a) res =
-  do later (evalInto prog apps env (Later a) res)
+  do later (evalInto prog apps env a res)
 
 evalInto prog apps env (Let x a b) res =
   do y <- eval prog apps env a
