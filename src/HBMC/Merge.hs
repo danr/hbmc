@@ -7,7 +7,7 @@ module HBMC.Merge where
 import Tip.Core
 import Tip.Fresh
 import Tip.Utils
-import Tip.Scope hiding (locals)
+import Tip.Scope hiding (locals,globals)
 
 import Data.Generics.Geniplate
 
@@ -30,6 +30,99 @@ import Tip.Pretty.SMT ()
 
 import Debug.Trace
 
+merge :: Scope Var -> Expr Var -> Fresh (Expr Var)
+merge scp e0 =
+  case e0 of
+    Let y b e  -> Let y b <$> merge scp e
+    Match e brs ->
+      let cands =
+            [ usort (universeBi rhs) :: [Global Var]
+            | Case _ rhs <- brs
+            ]
+
+      in  case [ f
+               | f <- usort (concat cands)
+               , isFunction scp f
+               , sum [ 1 | fs <- cands,  f `elem` fs ] >= 2 ] of
+            [] -> Match <$> merge scp e
+                        <*> sequence
+                              [ Case pat <$> merge scp rhs | Case pat rhs <- brs ]
+
+            f:_ ->
+              do fname' <- refresh (gbl_name f)
+                 let f' = f { gbl_name = fname' }
+                     S xs      = surgery (gbl_name f) (Match e brs)
+                     (ess,k):_ = reverse (sortOn (length . fst) xs)
+                     same = [ if all (e ==) es then Just e else Nothing
+                            | e:es <- transpose ess
+                            ]
+                     m = k [ Gbl f' :@: [ e | (e,Nothing) <- es `zip` same ] | es <- ess ]
+                 (mvs,as) <-
+                   unzip <$> sequence
+                     [ case me of
+                         Nothing -> do x <- fresh
+                                       let lx = Local x (error "merge x type")
+                                       return (Just lx,Lcl lx)
+                         Just e  -> do return (Nothing,e)
+                     | me <- same
+                     ]
+                 let vs = catMaybes mvs
+                 Let (Local fname' (error "merge f' type" ))
+                     (Lam vs (Gbl f :@: as))
+                     <$> merge scp m
+
+newtype Surg a b c = S [([a],[b] -> c)]
+
+instance Functor (Surg a b) where
+  fmap f (S xs) = S [ (as,\ bs -> f (k bs)) | (as,k) <- xs ]
+
+instance Applicative (Surg a b) where
+  pure x = S [([],\ [] -> x)]
+  S fs <*> S xs = S [ (as ++ bs
+                      ,\ us -> let (vs,ws) = splitAt (length as) us
+                               in  k vs (j ws)
+                      )
+                    | (as,k) <- fs
+                    , (bs,j) <- xs
+                    ]
+
+instance Alternative (Surg a b) where
+  empty = S []
+  S xs <|> S ys = S (xs ++ ys)
+
+hole :: a -> Surg a b b
+hole a = S [([a],\ [b] -> b)]
+
+isFunction :: Ord a => Scope a -> Global a -> Bool
+isFunction scp g = case lookupGlobal (gbl_name g) scp of
+                     Just FunctionInfo{} -> True
+                     _                   -> False
+
+surgery :: Eq a => a -> Expr a -> Surg [Expr a] (Expr a) (Expr a)
+surgery f e0 =
+  case e0 of
+    Lcl{} -> pure e0
+    Lam{} -> pure e0
+    Match e brs ->
+          (`Match` brs) <$> surgery f e
+      <|> Match e <$>
+             sequenceA [ Case pat <$> surgery f rhs | Case pat rhs <- brs ]
+    Let x b e ->
+          (\ b' -> Let x b' e) <$> surgery f b
+      <|> (\ e' -> Let x b e') <$> surgery f e
+    hd :@: es ->
+          aguard (case hd of Gbl g -> f == gbl_name g; _ -> False) (hole es)
+      <|> asum
+            [ (\ e' -> hd :@: (l ++ [e'] ++ r)) <$> surgery f e
+            | (l,e,r) <- cursor es
+            ]
+      <|> pure e0
+
+aguard :: Alternative f => Bool -> f a -> f a
+aguard True  m = m
+aguard False _ = empty
+
+{-
 mergeTrace :: Scope Var -> Expr Var -> Fresh [Expr Var]
 mergeTrace scp e = sequence $ scanl (>>=) (return e)
 -- step 1. to simple
@@ -309,3 +402,4 @@ fixpoint f x
   | otherwise = fixpoint f y
   where y = f x
 
+-}

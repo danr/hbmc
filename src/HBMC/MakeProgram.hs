@@ -117,6 +117,8 @@ trExpr di = go
   go :: Expr Var -> Fresh (P.Expr Var)
   go e0 =
     case e0 of
+      Let x (Lam vs e) b -> P.LetApp (lcl_name x) (map lcl_name vs) <$> go e <*> go b
+
       Let x e b -> P.Let (lcl_name x) <$> go e <*>  go b
 
       {-o
