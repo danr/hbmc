@@ -48,15 +48,12 @@ plus_not_idem x = x + x === x ==> True === False
 plus_inf x =  S x === x
 plus_ninf x =  S x === x ==> True === False
 
-{-
--- mul_idem  x = x * x =:= x
--- plus_not_idem x = x + x =:= x ==> True =:= False
+mul_idem  x = x * x === x
 
-silly x y z = x * (y + z) =:= (x * y) + z
+silly x y z = x * (y + z) === (x * y) + z
 
-sub_assoc x y z = x - (y - z) =:= (x - y) - z
+sub_assoc x y z = x - (y - z) === (x - y) - z
 
-not_trans x y z = x < y =:= True ==> y < z =:= True ==> x < z =:= False
--}
+not_trans x y z = x < y === True ==> y < z === True ==> x < z === False
 
 sub_comm  x y   = x - y === y - x
