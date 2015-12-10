@@ -374,7 +374,7 @@ choice hs =
 
 --------------------------------------------------------------------------------------------
 
-memo :: Ord a => a -> ([Object a] -> M a [Object a]) -> [Object a] -> M a [Object a]
+memo, don'tMemo :: Ord a => a -> ([Object a] -> M a [Object a]) -> [Object a] -> M a [Object a]
 memo name f xs =
   do tab <- getTable
      mp  <- liftIO $ readIORef tab
@@ -389,6 +389,8 @@ memo name f xs =
                    do return (l,ys)
      addClauseHere [l]
      return ys
+
+don'tMemo _name f xs = f xs
 
 --------------------------------------------------------------------------------------------
 

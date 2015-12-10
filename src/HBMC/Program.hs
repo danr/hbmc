@@ -33,6 +33,10 @@ data EqPrim = EqualHere | NotEqualHere
 data MemoFlag = DoMemo | Don'tMemo
  deriving ( Eq, Ord, Show )
 
+ifMemo :: Ord a => MemoFlag -> a -> ([Object a] -> M a [Object a]) -> [Object a] -> M a [Object a]
+ifMemo DoMemo    = memo
+ifMemo Don'tMemo = don'tMemo
+
 type PreFunction n = (n,([n],MemoFlag,Expr n))
 
 type Program n = Map n ([n],MemoFlag,Expr n)
@@ -62,10 +66,11 @@ eval prog apps env (App f as) =
            sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("App/LetApp:" ++ show f) as ys ]
          return z
 
-    (_, Just (xs,_memo,rhs)) ->
+    (_, Just (xs,memo_flag,rhs)) ->
       do -- liftIO $ putStrLn (show f ++ show as)
          ys <- sequence [ eval prog apps env a | a <- as ]
-         eval prog M.empty (M.fromList (zipp ("App:" ++ show f) xs ys)) rhs
+         [x] <- ifMemo memo_flag f (\ zs -> (:[]) <$> eval prog M.empty (M.fromList (zipp ("App:" ++ show f) xs zs)) rhs) ys
+         return x
 
 eval prog apps env (Later a) =
   do y <- new
@@ -120,10 +125,15 @@ evalInto prog apps env (App f as) res =
            sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("App/LetApp:" ++ show f ++ "->") as ys ]
          z >>> res
 
-    (_, Just (xs,_memo,rhs)) ->
+    (_, Just (xs,memo_flag,rhs)) ->
       do -- liftIO $ putStrLn (show f ++ show as)
-         ys <- sequence [ eval prog apps env a | a <- as ]
-         evalInto prog M.empty (M.fromList (zipp ("App:" ++ show f ++ "->") xs ys)) rhs res
+         case memo_flag of
+           Don'tMemo ->
+             do ys <- sequence [ eval prog apps env a | a <- as ]
+                evalInto prog M.empty (M.fromList (zipp ("App:" ++ show f ++ "->") xs ys)) rhs res
+
+           DoMemo ->
+             do eval prog apps env (App f as) >>= (>>> res)
 
 evalInto prog apps env (Later a) res =
   do later (evalInto prog apps env a res)
