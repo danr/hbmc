@@ -81,11 +81,11 @@ insertLaters grp =
         [ Function{
             func_body =
                 laterCallsCoord term_coord func_name func_vars
-              . laterCallsTo (map func_name_ (l++r))
+              . laterCallsTo (map func_name_ r)
               $ func_body,
             ..
           }
-        | (l,Function{..},r) <- cursor grp
+        | (_l,Function{..},r) <- cursor grp
         , let func_vars = map lcl_name func_args
         , let term_coord = bestLaterCoordinate func_name func_vars func_body
         ]
