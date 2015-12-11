@@ -7,6 +7,7 @@ import Data.Maybe( fromJust )
 import Data.List( intersperse )
 
 import Control.Monad( when )
+import Control.Applicative( (<$>) )
 
 import HBMC.Object
 

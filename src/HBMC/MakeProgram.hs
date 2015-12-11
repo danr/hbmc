@@ -28,6 +28,7 @@ import Data.List
 import Data.Ord
 
 import Control.Monad
+import Control.Applicative( (<$>), (<*>) )
 
 import Tip.Pretty
 import Tip.Pretty.SMT ()

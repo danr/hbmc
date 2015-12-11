@@ -51,6 +51,7 @@ import qualified Data.Foldable as F
 
 import Control.Monad
 import Control.Monad.Writer
+import Control.Applicative( (<$>) )
 
 import System.FilePath
 import System.Directory
