@@ -163,7 +163,9 @@ evalInto prog apps env (Case a alts) res =
        | (mc,xs,rhs) <- alts
        , let h ys = evalInto prog apps (inserts (zip xs ys) env) rhs res
        ]
-     when ( all good rhss
+     params <- getParams
+     when ( shortcut_case params
+         && all good rhss
          && length cs >= 1
          && all (== c) cs
           ) $
@@ -200,9 +202,15 @@ evalInto prog apps env (EqPrim prim e1 e2) res =
 
 --------------------------------------------------------------------------------------------
 
-evalProp :: (Names n,Ord n,Show n) => Params -> Program n -> ([n],Expr n) -> M n ()
-evalProp params prog (vars,e) =
-  do os <- sequence [ (,) v <$> newInput | v <- vars ]
+evalProp :: (Names n,Ord n,Show n) => Program n -> ([(n,Type n)],Expr n) -> M n ()
+evalProp prog (vars,e) =
+  do params <- getParams
+     os <- sequence
+             [ do o <- newInput
+                  isType o t
+                  return (v,o)
+             | (v,t) <- vars
+             ]
      eval prog M.empty (M.fromList os) e
 
      let loop =
@@ -212,7 +220,7 @@ evalProp params prog (vars,e) =
                        liftIO $ putStrLn (show v ++ " = " ++ s)
                   | (v,o) <- os
                   ]
-              mb <- trySolve params
+              mb <- trySolve
               case mb of
                 Nothing -> loop
                 Just b  -> return b

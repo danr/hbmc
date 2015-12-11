@@ -5,7 +5,7 @@
 module Main where
 
 import qualified HBMC.Params as Params
-import HBMC.Params (Params,getParams)
+import HBMC.Params (Params,theParams)
 
 import Tip.Pretty
 import Tip.Pretty.SMT ()
@@ -124,13 +124,13 @@ translate params thy0 =
 
 runLive :: Params -> Translated (PPVar Var) -> IO ()
 runLive p (Translated _    [])       = error "Needs at least one property!"
-runLive p (Translated prog (prop:_)) = run (evalProp p (M.fromList prog) prop)
+runLive p (Translated prog (prop:_)) = run p (evalProp (M.fromList prog) prop)
 
 ren = renameWith (disambig varStr)
 
 main :: IO ()
 main = do
-    params <- getParams
+    params <- theParams
     thy0 <- either error renameTheory <$>
       readHaskellOrTipFile
         (Params.file params)

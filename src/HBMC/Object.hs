@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE NamedFieldPuns #-}
 module HBMC.Object where
 
 --------------------------------------------------------------------------------------------
@@ -11,7 +12,7 @@ import Data.Set( Set )
 import Data.List( intercalate )
 import Data.IORef
 import Control.Applicative
-import Control.Monad( when )
+import Control.Monad( when, unless )
 import System.IO( hFlush, stdout )
 
 import SAT hiding ( false, true )
@@ -250,7 +251,10 @@ isCons obj@(Dynamic _ inp ref) c@(Cons _ _ t) h =
             _ ->
               do l <- newLit' c (alts cnt)
                  let ts = missingArgs c (args cnt)
-                 as <- sequence [ new' inp | t <- ts ]
+                 as <- sequence [ do a <- new' inp
+                                     isType a t
+                                     return a
+                                | t <- ts ]
                  liftIO $ writeIORef ref cnt{ alts    = (c,l) : alts cnt
                                             , waits   = filter ((/=c).fst) (waits cnt)
                                             , args    = args cnt ++ (ts `zip` as)
@@ -313,7 +317,25 @@ expand (Static _ _) = return ()
 expand obj@(Dynamic _ _ ref) =
   do cnt <- liftIO $ readIORef ref
      let Just (Type _ _ cs) = myType cnt
-     sequence_ [ withNewContext SAT.false (isCons obj c $ \_ -> return ()) | c <- cs ]
+     params <- getParams
+     sequence_
+       [ withNewContext SAT.false $
+           isCons obj c $
+             \as ->
+               unless (lazy_enums params) $
+                 sequence_
+                   [ do Just t <- tryGetObjectType a
+                        when (enumType t) (expand a)
+                   | a <- as ]
+       | c <- cs
+       ]
+
+tryGetObjectType :: Object a -> M a (Maybe (Type a))
+tryGetObjectType (Static (Cons _ _ t) _) = return (Just t)
+tryGetObjectType (Dynamic _ _ cref)      = myType <$> liftIO (readIORef cref)
+
+enumType :: Type a -> Bool
+enumType (Type _ _ cs) = and [ null as | Cons _ as _ <- cs ]
 
 --------------------------------------------------------------------------------------------
 
@@ -403,9 +425,10 @@ later h =
 
 --------------------------------------------------------------------------------------------
 
-trySolve :: (Show n,Ord n) => Params -> M n (Maybe Bool)
-trySolve params = M $ \env ->
-  do lxs <- ordering `fmap` readIORef (queue env)
+trySolve :: (Show n,Ord n) => M n (Maybe Bool)
+trySolve = M $ \env@Env{params} ->
+  do let verbose = not (quiet params)
+     lxs <- ordering params `fmap` readIORef (queue env)
      as <- sequence [ let M m = objectView x in m env | (_,x) <- lxs ]
      when verbose $ putStr ("> solve: Q=" ++ show (length lxs) ++ " [" ++ intercalate ", " (nub as) ++ "]...")
      hFlush stdout
@@ -432,9 +455,7 @@ trySolve params = M $ \env ->
                writeIORef (queue env) [ q | q@(l,y) <- lxs, y /= x ]
                return Nothing
  where
-  verbose = not (quiet params)
-
-  ordering
+  ordering params
     | age params = usortOn fst
     | otherwise  = nub . reverse
 
@@ -499,6 +520,7 @@ data Env a =
      , unique  :: IORef Int
      , table   :: IORef (Map (a,[Object a]) (Lit,[Object a]))
      , queue   :: IORef [(Lit,Object a)]
+     , params  :: Params
      }
 
 newtype M n a = M (Env n -> IO a)
@@ -516,8 +538,8 @@ instance Monad (M n) where
 
 -- run function
 
-run :: M n () -> IO ()
-run (M m) =
+run :: Params -> M n () -> IO ()
+run params (M m) =
   withNewSolver $ \s ->
     do refUnique <- newIORef 0
        refTable  <- newIORef M.empty
@@ -527,6 +549,7 @@ run (M m) =
                     , unique  = refUnique
                     , table   = refTable
                     , queue   = refQueue
+                    , params  = params
                     }
        m env
 
@@ -551,6 +574,9 @@ getTable = M (return . table)
 
 withSolver :: (Solver -> IO a) -> M n a
 withSolver h = M (h . solver)
+
+getParams :: M n Params
+getParams = M $ \env -> return (params env)
 
 here :: M n Lit
 here = M (return . context)

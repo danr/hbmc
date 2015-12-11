@@ -63,16 +63,12 @@ isProjectionOf e0 v =
 
 bestLaterCoordinate :: Var -> [Var] -> Expr Var -> Int
 bestLaterCoordinate f as
-  =
-  --   traceShowId .
-    fst
+  = fst
   . maximumBy (comparing snd)
   . zip [0..]
   . map (length . filter id)
   . transpose
-  -- . traceShowId
   . decreasing as
-  -- . traceShowId
   . calls f
 
 -- Insert laters to all unsafe calls in a mutually recursive group
@@ -121,7 +117,7 @@ trFunction p di fn_comps Function{..} =
                ,if mem then P.DoMemo else P.Don'tMemo
                ,body))
 
-type Prop a = ([a],P.Expr a)
+type Prop a = ([(a,Object.Type a)],P.Expr a)
 
 trFormula :: DataInfo Var -> Formula Var -> Fresh (Prop Var)
 trFormula di fm =
@@ -132,7 +128,7 @@ trFormula di fm =
       do let (vs,e') = fmap neg (forallView (neg e))
          let cs      = conjuncts (ifToBoolOp e')
          asserts <- mapM (trToTrue di) cs
-         return (map lcl_name vs,P.ConstraintsOf asserts)
+         return ([ (x,tr_type di t) | Local x t <- vs ],P.ConstraintsOf asserts)
 
 trToTrue :: DataInfo Var -> Expr Var -> Fresh (P.Expr Var)
 trToTrue di e0 =

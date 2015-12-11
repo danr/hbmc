@@ -14,7 +14,8 @@ data Params =
      , quiet                :: Bool
      , debug                :: Bool
 --     , conflict_minimzation :: Bool
---     , delay_all_datatypes  :: Bool
+     , lazy_enums           :: Bool
+     , shortcut_case        :: Bool
 --     , insist_isnt          :: Bool
 --     , postpone             :: Bool
 --     , strict_data_lazy_fun :: Bool
@@ -28,17 +29,18 @@ defParams =
     { file                 = ""      &= argPos 0 &= typFile
 --    , depth                = Nothing &= name "d"   &= help "Maximum depth of counterexamples (unlimited)"
 --    , upfront              = False   &= name "u"   &= help "Generate input data upfront (only applies with depth)"
-    , age                  = False                 &= help "Order queue by age of objects   (off)"
-    , merge                = True    &= name "f"   &= help "Merge function calls             (on)"
-    , memo                 = True    &= name "m"   &= help "Memoise recursive functions      (on)"
+    , age                  = False                 &= help "Order queue by age of objects (off)"
+    , merge                = True    &= name "f"   &= help "Merge function calls           (on)"
+    , memo                 = True    &= name "m"   &= help "Memoise recursive functions    (on)"
     , quiet                = False   &= name "q"   &= help "Be quiet"
     , debug                = False   &= name "dbg" &= help "Print debug info"
 --    , conflict_minimzation = False   &= name "c"   &= help "Minimize conflicts"
---    , delay_all_datatypes  = False   &= name "l"   &= help "Delay all datatypes"
+    , lazy_enums           = False   &= name "l"   &= help "Lazy enums                    (off)"
+    , shortcut_case        = True                  &= help "Shortcut case                  (on)"
 --    , insist_isnt          = False   &= name "i"   &= help "Insist isn't when possible"
 --    , postpone             = True                  &= help "Use postpone                     (on)"
 --    , strict_data_lazy_fun = False   &= name "s"   &= help "Always use postpone, make case strict"
-    , prop_names           = Nothing &= name "prop" &= help "Property to consider (default: first)"
+    , prop_names           = Nothing &= name "prop" &= help "Property to consider  (default: first)"
     }
   &= program "hbmc" &= summary logo
 
@@ -54,6 +56,6 @@ logo = map (\ x -> if x == 'z' then '\\' else x) $ unlines
     , " {danr,koen}@chalmers.se  "
     ]
 
-getParams :: IO Params
-getParams = cmdArgs defParams
+theParams :: IO Params
+theParams = cmdArgs defParams
 

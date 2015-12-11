@@ -85,7 +85,7 @@ varStr' x =
 instance PrettyVar Var where
   varStr x =
     case x of
-      i :~ v -> varStr' v ++ "_" ++ show i
+      i :~ v -> varStr' v -- ++ "_" ++ show i
       _      -> varStr' x
 
 renameTheory :: forall a . (Ord a,PrettyVar a) => Theory a -> Theory Var
