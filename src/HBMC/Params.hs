@@ -8,6 +8,7 @@ data Params =
     { file                 :: String
 --     , depth                :: Maybe Int
 --     , upfront              :: Bool
+     , age                  :: Bool
      , merge                :: Bool
      , memo                 :: Bool
      , quiet                :: Bool
@@ -27,6 +28,7 @@ defParams =
     { file                 = ""      &= argPos 0 &= typFile
 --    , depth                = Nothing &= name "d"   &= help "Maximum depth of counterexamples (unlimited)"
 --    , upfront              = False   &= name "u"   &= help "Generate input data upfront (only applies with depth)"
+    , age                  = False                 &= help "Order queue by age of objects   (off)"
     , merge                = True    &= name "f"   &= help "Merge function calls             (on)"
     , memo                 = True    &= name "m"   &= help "Memoise recursive functions      (on)"
     , quiet                = False   &= name "q"   &= help "Be quiet"

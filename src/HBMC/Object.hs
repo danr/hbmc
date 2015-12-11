@@ -18,6 +18,8 @@ import SAT hiding ( false, true )
 import qualified SAT
 
 import Data.Function( on )
+import HBMC.Params hiding ( memo )
+import Tip.Utils( usortOn )
 
 --------------------------------------------------------------------------------------------
 
@@ -401,9 +403,9 @@ later h =
 
 --------------------------------------------------------------------------------------------
 
-trySolve :: (Show n,Ord n) => Bool -> M n (Maybe Bool)
-trySolve verbose = M $ \env ->
-  do lxs <- (nub . reverse) `fmap` readIORef (queue env)
+trySolve :: (Show n,Ord n) => Params -> M n (Maybe Bool)
+trySolve params = M $ \env ->
+  do lxs <- ordering `fmap` readIORef (queue env)
      as <- sequence [ let M m = objectView x in m env | (_,x) <- lxs ]
      when verbose $ putStr ("> solve: Q=" ++ show (length lxs) ++ " [" ++ intercalate ", " (nub as) ++ "]...")
      hFlush stdout
@@ -430,6 +432,12 @@ trySolve verbose = M $ \env ->
                writeIORef (queue env) [ q | q@(l,y) <- lxs, y /= x ]
                return Nothing
  where
+  verbose = not (quiet params)
+
+  ordering
+    | age params = usortOn fst
+    | otherwise  = nub . reverse
+
   nub xs = del S.empty xs
    where
     del seen [] = []

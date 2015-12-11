@@ -6,10 +6,11 @@ import Data.Map( Map )
 import Data.Maybe( fromJust )
 import Data.List( intersperse )
 
-import Control.Monad( when )
+import Control.Monad( when, unless )
 import Control.Applicative( (<$>) )
 
 import HBMC.Object
+import HBMC.Params hiding ( memo )
 
 --------------------------------------------------------------------------------------------
 
@@ -172,14 +173,14 @@ evalInto prog apps env (Case a alts) res =
   rhss = [ e | (_,_,e) <- alts ]
   cs   = [ c | Con c _ <- rhss ]
   c    = head cs -- sorry Dan!
-  
+
   good (Con _ _) = True
   good (Var _)   = True
   good _         = False
 
   addShortCut [] res =
     isCons res c $ \_ -> return ()
-    
+
   addShortCut (v:vs) res =
     ifCons (env M.! v) c $ \_ -> addShortCut vs res
 
@@ -199,19 +200,19 @@ evalInto prog apps env (EqPrim prim e1 e2) res =
 
 --------------------------------------------------------------------------------------------
 
-evalProp :: (Names n,Ord n,Show n) => Bool -> Program n -> ([n],Expr n) -> M n ()
-evalProp verbose prog (vars,e) =
+evalProp :: (Names n,Ord n,Show n) => Params -> Program n -> ([n],Expr n) -> M n ()
+evalProp params prog (vars,e) =
   do os <- sequence [ (,) v <$> newInput | v <- vars ]
      eval prog M.empty (M.fromList os) e
 
      let loop =
-           do when verbose $
+           do unless (quiet params) $
                 sequence_
                   [ do s <- objectView o
                        liftIO $ putStrLn (show v ++ " = " ++ s)
                   | (v,o) <- os
                   ]
-              mb <- trySolve verbose
+              mb <- trySolve params
               case mb of
                 Nothing -> loop
                 Just b  -> return b
