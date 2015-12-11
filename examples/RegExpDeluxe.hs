@@ -127,14 +127,14 @@ rec p []     = eps p
 rec p (x:xs) = rec (step p x) xs
 
 
-{-
+--{-
 
 -- 2m48s:
 prop_star_plus p q s = rec (Star (p :+: q)) s === rec (Star p :+: Star q) s
 
 prop_koen p q s = rec (p :>: q) s === rec (q :>: p) s
 
-
+{-
 -- 10s:
 prop_star_plus p q a b = rec (Star (p :+: q)) [a,b] === rec (Star p :+: Star q) [a,b]
 

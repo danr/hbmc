@@ -162,6 +162,26 @@ evalInto prog apps env (Case a alts) res =
        | (mc,xs,rhs) <- alts
        , let h ys = evalInto prog apps (inserts (zip xs ys) env) rhs res
        ]
+     when ( all good rhss
+         && length cs >= 1
+         && all (== c) cs
+          ) $
+       do --liftIO $ putStrLn ("shortcut! " ++ show c)
+          addShortCut [ v | Var v <- rhss ] res
+ where
+  rhss = [ e | (_,_,e) <- alts ]
+  cs   = [ c | Con c _ <- rhss ]
+  c    = head cs -- sorry Dan!
+  
+  good (Con _ _) = True
+  good (Var _)   = True
+  good _         = False
+
+  addShortCut [] res =
+    isCons res c $ \_ -> return ()
+    
+  addShortCut (v:vs) res =
+    ifCons (env M.! v) c $ \_ -> addShortCut vs res
 
 evalInto prog apps env (Proj e t i) res =
   do obj <- eval prog apps env e
