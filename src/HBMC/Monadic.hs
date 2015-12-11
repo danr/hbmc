@@ -23,6 +23,7 @@ import HBMC.ToSimple
 import Data.List
 
 import Control.Monad
+import Control.Applicative
 
 import Tip.Pretty
 import Tip.Pretty.SMT ()

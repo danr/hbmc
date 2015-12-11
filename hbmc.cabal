@@ -30,6 +30,7 @@ executable hbmc
                        transformers >=0.3,
                        mtl >=2.1,
                        containers >=0.5,
+                       data-ordlist,
 
                        pretty >=1.1,
                        pretty-show >=1.6

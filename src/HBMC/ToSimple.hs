@@ -4,6 +4,7 @@ module HBMC.ToSimple where
 
 import Tip.Pretty
 import Tip.Pretty.SMT ()
+import Control.Applicative( (<$>) )
 
 import Tip.Fresh
 
