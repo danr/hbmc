@@ -25,6 +25,7 @@ import qualified HBMC.Program as P
 import qualified HBMC.Object as Object
 
 import Data.List
+import Data.Ord
 
 import Control.Monad
 
@@ -36,38 +37,88 @@ import Debug.Trace
 import qualified Data.Map as M
 import Data.Map( Map )
 
--- Simple termination check: there is some argument that always decreases
--- Not working for mutually recursive groups!
-terminates :: Var          -- function name
-           -> [Var]        -- arguments
-           -> Expr Var -- body as a simple expression
-           -> Bool
-terminates _ [] _ = True
-terminates f as e =
-  or [ and [ chase a (es !! i)
-           | Gbl (Global f' _ _) :@: es <- universeBi e
-           , f == f' ]
-     | (a,i) <- as `zip` [0..] ]
-  where
-  chase needle (Gbl (Global g _ _) :@: [Lcl (Local x _)])
-    | Just{} <- unproj g
-    = needle == x
-  chase _ _ = False
+calls :: Var -> Expr Var -> [[Expr Var]]
+calls f e = [ es | Gbl (Global f' _ _) :@: es <- universeBi e, f == f' ]
+
+decreasing :: [Var] -> [[Expr Var]] -> [[Bool]]
+decreasing as ess =
+  [ [ e `isProjectionOf` a
+    | (a,e) <- as `zip` es
+    ]
+  | es <- ess
+  ]
+
+isProjectionOf :: Expr Var -> Var -> Bool
+isProjectionOf e0 v =
+  let res =
+        case e0 of
+          Gbl (Global g _ _) :@: [e]
+            | Just{} <- unproj g -> case e of
+                                      Lcl (Local x _) -> x == v
+                                      _               -> e `isProjectionOf` v
+          _ -> False
+  in  -- traceShow (pp e0, v, res)
+      res
+
+bestLaterCoordinate :: Var -> [Var] -> Expr Var -> Int
+bestLaterCoordinate f as
+  =
+  --   traceShowId .
+    fst
+  . maximumBy (comparing snd)
+  . zip [0..]
+  . map (length . filter id)
+  . transpose
+  -- . traceShowId
+  . decreasing as
+  -- . traceShowId
+  . calls f
+
+-- Insert laters to all unsafe calls in a mutually recursive group
+insertLaters :: [Function Var] -> [Function Var]
+insertLaters grp =
+  let res =
+        [ Function{
+            func_body =
+                laterCallsCoord term_coord func_name func_vars
+              . laterCallsTo (map func_name_ (l++r))
+              $ func_body,
+            ..
+          }
+        | (l,Function{..},r) <- cursor grp
+        , let func_vars = map lcl_name func_args
+        , let term_coord = bestLaterCoordinate func_name func_vars func_body
+        ]
+  in  -- traceShow (pp grp, pp res)
+      res
+  where func_name_ = func_name
+
+laterCallsTo :: [Var] -> Expr Var -> Expr Var
+laterCallsTo gs = transformBi $
+  \ e0 -> case e0 of
+    Gbl (Global g _ _) :@: es | g `elem` gs -> laterExpr e0
+    _ -> e0
+
+laterCallsCoord :: Int -> Var -> [Var] -> Expr Var -> Expr Var
+laterCallsCoord i f as = transformBi $
+  \ e0 -> case e0 of
+    Gbl (Global f' _ _) :@: es
+      | f' == f, not ((es !! i) `isProjectionOf` (as !! i)) -> laterExpr e0
+    _ -> e0
 
 trFunction :: Params -> DataInfo Var -> [Component Var] -> Function Var -> Fresh (Var,([Var],P.MemoFlag,P.Expr Var))
 trFunction p di fn_comps Function{..} =
-  do let (rec,mut_rec) = case lookupComponent func_name fn_comps of
-                           Just (Rec xs) -> (True,length xs > 1)
-                           _             -> (False,False)
+  do let (rec,_mut_rec) = case lookupComponent func_name fn_comps of
+                            Just (Rec xs) -> (True,length xs > 1)
+                            _             -> (False,False)
      let args = map lcl_name func_args
-     let chk = not (terminates func_name args func_body) || mut_rec
-     let mem = memo p && rec
+     let mem  = memo p && rec
      body <- trExpr di func_body
 
      return (func_name,
                (args
                ,if mem then P.DoMemo else P.Don'tMemo
-               ,if chk then P.Later body else body))
+               ,body))
 
 type Prop a = ([a],P.Expr a)
 
@@ -93,7 +144,7 @@ trToTrue di e0 =
     do (lets1,s1) <- collectLets <$> toExprSimpleEnd (removeBuiltinBoolFrom boolNames (boolOpToIf e1))
        (lets2,s2) <- collectLets <$> toExprSimpleEnd (removeBuiltinBoolFrom boolNames (boolOpToIf e2))
        let equal_fn = blankGlobal
-                        (api (if pol then "equalHere" else "notEqualHere"))
+                        (if pol then Object.equalHereName else Object.notEqualHereName)
                         (error "trToTrue global type")
        trExpr di (makeLets (lets1 ++ lets2) (Gbl equal_fn :@: [s1,s2]))
 
@@ -141,10 +192,13 @@ trExpr di = go
            | Case pat rhs <- brs
            ]
 
+      Gbl later :@: [e] | later == laterGbl -> P.Later <$> go e
+
       Gbl (Global (SystemCon "noop" _) _ _) :@: _ -> return P.noop
 
-      Gbl (Global (Api "equalHere")    _ _) :@: [s1,s2] -> P.EqPrim P.EqualHere    <$> go s1 <*> go s2
-      Gbl (Global (Api "notEqualHere") _ _) :@: [s1,s2] -> P.EqPrim P.NotEqualHere <$> go s1 <*> go s2
+      Gbl (Global name  _ _) :@: [e1,e2]
+        | name == Object.equalHereName    -> P.EqPrim P.EqualHere    <$> go e1 <*> go e2
+        | name == Object.notEqualHereName -> P.EqPrim P.NotEqualHere <$> go e1 <*> go e2
 
       Lcl (Local x _) -> return (P.Var x)
 

@@ -30,6 +30,9 @@ boolNames = BoolNames
   , isFalseName = System "isFalse" Nothing
   }
 
+dummyType :: Type Var
+dummyType = TyCon (System "Dummy" Nothing) []
+
 instance O.Names Var where
   unkName   = System "?" Nothing
   unitName  = System "()" Nothing
@@ -117,7 +120,7 @@ varStr' x =
 instance PrettyVar Var where
   varStr x =
     case x of
-      i :~ v -> varStr' v -- ++ "_" ++ show i
+      i :~ v -> varStr' v ++ "_" ++ show i
       _      -> varStr' x
 
 renameTheory :: forall a . (Ord a,PrettyVar a) => Theory a -> Theory Var
@@ -181,6 +184,12 @@ noopVar = SystemCon "noop" . Just
 
 noopExpr :: Type Var -> Expr Var
 noopExpr t = Gbl (blankGlobal (noopVar t) t) :@: []
+
+laterGbl :: Global Var
+laterGbl = blankGlobal (System "later" Nothing) dummyType
+
+laterExpr :: Expr Var -> Expr Var
+laterExpr e = Gbl laterGbl :@: [e]
 
 isNoop :: Expr Var -> Bool
 isNoop (Match _ rhss) = all (isNoop . case_rhs) rhss

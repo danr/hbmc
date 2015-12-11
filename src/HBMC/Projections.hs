@@ -32,13 +32,13 @@ projectExpr di = go
     case e0 of
       Match e alts ->
         letExpr e $ \ lx ->
-        do fmap (Match (Lcl lx))
-             (sequence
+           Match (Lcl lx) <$>
+             sequence
                [ case pat of
                    Default -> Case Default <$> go rhs
                    ConPat k vars
-                     | ps <- projs_of_con di k
-                     -> do rhs' <-
+                     -> do let ps = projs_of_con di k
+                           rhs' <-
                              substMany
                                [ (v,projExpr p (Lcl lx))
                                | (v,p) <- vars `zip` ps
@@ -47,7 +47,7 @@ projectExpr di = go
                            Case (ConPat k []) <$> go rhs'
                    _ -> error $ "projectPatterns: \n" ++ ppRender e0
                | Case pat rhs <- alts
-               ])
+               ]
       hd :@: args -> (hd :@:) <$> mapM go args
       Lam args e  -> Lam args <$> go e
       Let l e1 e2 -> Let l <$> go e1 <*> go e2

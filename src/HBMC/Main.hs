@@ -39,7 +39,7 @@ import HBMC.ToSimple
 import qualified Data.Map as M
 
 -- import HBMC.Monadic hiding (Var)
--- import HBMC.Live
+
 
 import Tip.Passes
 import Tip.Pass.Booleans
@@ -93,29 +93,27 @@ translate params thy0 =
      (di,thy) <- lift $ do let di = dataInfo (thy_datatypes thy2)
                            (,) di <$> projectPatterns di thy2
 
-     let fn_comps = map (fmap func_name) (components defines uses (thy_funcs thy))
+     let fns_with_laters =
+           concat
+             [ case c of
+                 Rec fs   -> insertLaters fs
+                 NonRec f -> [f]
+             | c <- components defines uses (thy_funcs thy)
+             ]
+
+     let fn_comps = map (fmap func_name) (components defines uses fns_with_laters)
 
      fn_decls <- sequence
          [ do let e = func_body fn
-              es <- lift $
-                if Params.merge params
-                    then mergeTrace (scope thy) e
-                    else sequence [toExpr e]
-              tell (ppRender fn:map (ppRender . ren) (e:es))
-              lift (trFunction params di fn_comps fn{ func_body = last es })
-         | fn <- thy_funcs thy
+              e' <- if Params.merge params
+                      then lift $ merge (scope thy) e
+                      else return e
+              tell (ppRender fn:map (ppRender . ren) [e,e'])
+              lift (trFunction params di fn_comps fn{ func_body = e' })
+         | fn <- fns_with_laters
          ]
 
      props <- lift $ sequence [ trFormula di prop | prop <- thy_asserts thy ]
-
-{-
-     let thy' = addMaybesToTheory
-                  (concatMap F.toList fn_decls ++ concatMap F.toList props)
-                  thy
-                  -}
-
-     -- This maybe-hack won't me needed with LetApp or dynamic function
-     -- call horizon merging
 
      tell [ppShow (thy_datatypes thy)]
      tell (map ppShow fn_decls)
