@@ -43,45 +43,14 @@ instance O.Names Var where
   equalHereName    = System "equalHere" Nothing
   notEqualHereName = System "notEqualHere" Nothing
 
-api :: String -> Var
-api = Api
-
-isApi :: Var -> Bool
-isApi Api{} = True
-isApi _     = False
-
-prelude :: String -> Var
-prelude = Prelude
-
-conLabel :: Var -> Var
-conLabel  = Prefixed "L"
-
-conRepr :: Var -> Var
-conRepr   = Prefixed ""
-
-thunkRepr :: Var -> Var
-thunkRepr = Prefixed "Thunk"
-
-wrapData :: Var -> Var
-wrapData  = Prefixed "D"
-
-caseData :: Var -> Var
-caseData  = Prefixed "case"
-
-mkCon :: Var -> Var
-mkCon     = Prefixed "con"
-
 data Var
   = X
   | Var String
   | Con String
-  | Api String
   | System    String (Maybe (Type Var))
   | SystemCon String (Maybe (Type Var))
-  | Prelude String
   | Proj (Type Var) Int
   | Int :~ Var
-  | Prefixed String Var
  deriving (Show,Eq,Ord)
 
 isCon :: Var -> Bool
@@ -110,12 +79,8 @@ varStr' x =
     Con x         -> varStr' (Var x)
     i :~ v        -> varStr' v
     Proj _ i      -> "proj" {- <> pp x <> "_" -} ++ show (i+1)
-    Api x         -> x
-    Prelude x     -> x
     System    x m -> x ++ maybe "" ppRender m
     SystemCon x m -> x ++ maybe "" ppRender m
-    Prefixed "" x -> varStr' x
-    Prefixed d x  -> d ++ "_" ++ varStr' x
 
 instance PrettyVar Var where
   varStr x =
@@ -147,70 +112,12 @@ instance Name Var where
   refresh v        = (:~ v) `fmap` fresh
   getUnique        = varMax
 
--- A family of monomorphic Maybes
-
-maybeTC    = System "Maybe" . Just
-justVar    = SystemCon "Just" . Just
-nothingVar = SystemCon "Nothing" . Just
-
-maybeTy :: Type Var -> Type Var
-maybeTy x = TyCon (maybeTC x) []
-
-unMaybeTC :: Var -> Maybe (Type Var)
-unMaybeTC (System "Maybe" jx) = jx
-unMaybeTC _ = Nothing
-
-isMaybeTC :: Var -> Bool
-isMaybeTC = isJust . unMaybeTC
-
-unMaybeTy :: Type Var -> Type Var
-unMaybeTy (TyCon mmtc []) | Just tc <- unMaybeTC mmtc = tc
-unMaybeTy _ = error "unMaybeTy: Not a Maybe Type!"
-
-justGbl :: Type Var -> Global Var
-justGbl t = Global (justVar t) (PolyType [] [t] (maybeTy t)) []
-
-nothingGbl :: Type Var -> Global Var
-nothingGbl t = Global (nothingVar t) (PolyType [] [] (maybeTy t)) []
-
-justExpr :: Expr Var -> Expr Var
-justExpr e = Gbl (justGbl (exprType e)) :@: [e]
-
-nothingExpr :: Type Var -> Expr Var
-nothingExpr t = Gbl (nothingGbl t) :@: []
-
-noopVar :: Type Var -> Var
-noopVar = SystemCon "noop" . Just
-
-noopExpr :: Type Var -> Expr Var
-noopExpr t = Gbl (blankGlobal (noopVar t) t) :@: []
-
 laterGbl :: Global Var
 laterGbl = blankGlobal (System "later" Nothing) dummyType
 
 laterExpr :: Expr Var -> Expr Var
 laterExpr e = Gbl laterGbl :@: [e]
 
-isNoop :: Expr Var -> Bool
-isNoop (Match _ rhss) = all (isNoop . case_rhs) rhss
-isNoop (Gbl (Global (SystemCon "Nothing" _) _ _) :@: []) = True
-isNoop (Gbl (Global (SystemCon "noop" _)    _ _) :@: []) = True
-isNoop _              = False
-
-isNoopCase :: Case Var -> Bool
-isNoopCase (Case _ rhs) = isNoop rhs
-
 blankGlobal :: Var -> Type Var -> Global Var
 blankGlobal g t = Global g (PolyType [] [] t) []
-
-addMaybesToTheory :: [Var] -> Theory Var -> Theory Var
-addMaybesToTheory vs thy@Theory{..} = thy { thy_datatypes = maybe_decls ++ thy_datatypes }
-  where
-  maybe_decls =
-    [ Datatype (maybeTC t) []
-        [ Constructor (nothingVar t) (System "isNothing" (Just t)) []
-        , Constructor (justVar t) (System "isJust" (Just t)) [(System "fromJust" (Just t),t)]
-        ]
-    | t <- usort [ t | System "Maybe" (Just t) <- vs ]
-    ]
 
