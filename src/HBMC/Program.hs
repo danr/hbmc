@@ -6,6 +6,8 @@ import Data.Map( Map )
 import Data.Maybe( fromJust )
 import Data.List( intersperse )
 
+import Control.Monad( when )
+
 import HBMC.Object
 
 --------------------------------------------------------------------------------------------
@@ -176,18 +178,19 @@ evalInto prog apps env (EqPrim prim e1 e2) res =
 
 --------------------------------------------------------------------------------------------
 
-evalProp :: (Names n,Ord n,Show n) => Program n -> ([n],Expr n) -> M n ()
-evalProp prog (vars,e) =
+evalProp :: (Names n,Ord n,Show n) => Bool -> Program n -> ([n],Expr n) -> M n ()
+evalProp verbose prog (vars,e) =
   do os <- sequence [ (,) v <$> newInput | v <- vars ]
      eval prog M.empty (M.fromList os) e
 
      let loop =
-           do sequence_
-                [ do s <- objectView o
-                     liftIO $ putStrLn (show v ++ " = " ++ s)
-                | (v,o) <- os
-                ]
-              mb <- trySolve
+           do when verbose $
+                sequence_
+                  [ do s <- objectView o
+                       liftIO $ putStrLn (show v ++ " = " ++ s)
+                  | (v,o) <- os
+                  ]
+              mb <- trySolve verbose
               case mb of
                 Nothing -> loop
                 Just b  -> return b

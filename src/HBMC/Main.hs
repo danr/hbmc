@@ -123,7 +123,7 @@ translate params thy0 =
 
 runLive :: Params -> Translated (PPVar Var) -> IO ()
 runLive p (Translated _    [])       = error "Needs at least one property!"
-runLive p (Translated prog (prop:_)) = run (evalProp (M.fromList prog) prop)
+runLive p (Translated prog (prop:_)) = run (evalProp (not (Params.quiet p)) (M.fromList prog) prop)
 
 ren = renameWith (disambig varStr)
 

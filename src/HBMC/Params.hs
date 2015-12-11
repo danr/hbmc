@@ -10,7 +10,7 @@ data Params =
 --     , upfront              :: Bool
      , merge                :: Bool
      , memo                 :: Bool
---     , quiet                :: Bool
+     , quiet                :: Bool
      , debug                :: Bool
 --     , conflict_minimzation :: Bool
 --     , delay_all_datatypes  :: Bool
@@ -29,7 +29,7 @@ defParams =
 --    , upfront              = False   &= name "u"   &= help "Generate input data upfront (only applies with depth)"
     , merge                = True    &= name "f"   &= help "Merge function calls             (on)"
     , memo                 = True    &= name "m"   &= help "Memoise recursive functions      (on)"
---    , quiet                = False   &= name "q"   &= help "Be quiet"
+    , quiet                = False   &= name "q"   &= help "Be quiet"
     , debug                = False   &= name "dbg" &= help "Print debug info"
 --    , conflict_minimzation = False   &= name "c"   &= help "Minimize conflicts"
 --    , delay_all_datatypes  = False   &= name "l"   &= help "Delay all datatypes"

@@ -401,11 +401,11 @@ later h =
 
 --------------------------------------------------------------------------------------------
 
-trySolve :: (Show n,Ord n) => M n (Maybe Bool)
-trySolve = M $ \env ->
+trySolve :: (Show n,Ord n) => Bool -> M n (Maybe Bool)
+trySolve verbose = M $ \env ->
   do lxs <- (nub . reverse) `fmap` readIORef (queue env)
      as <- sequence [ let M m = objectView x in m env | (_,x) <- lxs ]
-     putStr ("> solve: Q=" ++ show (length lxs) ++ " [" ++ intercalate ", " (nub as) ++ "]...")
+     when verbose $ putStr ("> solve: Q=" ++ show (length lxs) ++ " [" ++ intercalate ", " (nub as) ++ "]...")
      hFlush stdout
      b <- solve (solver env) [ neg l | (l,_) <- lxs ]
      if b then
@@ -422,7 +422,7 @@ trySolve = M $ \env ->
             do let x    = head [ x | (l,x) <- lxs, l `elem` cs ]
                    lxs' = reverse [ ly | ly@(_,y) <- lxs, y /= x ]
                writeIORef (queue env) lxs'
-               putStrLn (" E=" ++ show (length lxs - length lxs'))
+               when verbose $ putStrLn (" E=" ++ show (length lxs - length lxs'))
                let M m = expand x in m env
                -- these two lines are here because sometimes expansion adds an element
                -- to the queue that is going to be expanded in the same expansion
