@@ -94,7 +94,7 @@ instance Functor (Surg a b) where
 
 instance Applicative (Surg a b) where
   pure x = S [([],\ [] -> x)]
-  S fs <*> S xs = S [ (as ++ bs
+  S fs <*> S xs = s [ (as ++ bs
                       ,\ us -> let (vs,ws) = splitAt (length as) us
                                in  k vs (j ws)
                       )
@@ -104,7 +104,15 @@ instance Applicative (Surg a b) where
 
 instance Alternative (Surg a b) where
   empty = S []
-  S xs <|> S ys = S (xs ++ ys)
+  S xs <|> S ys = s (xs ++ ys)
+
+s :: [([a],[b] -> c)] -> Surg a b c
+s = mini . S
+
+mini :: Surg a b c -> Surg a b c
+mini (S xs) =
+  let (sings,others) = partition (null . fst) xs
+  in  S (take 1 sings ++ others)
 
 shrink :: Ord a => Surg a b c -> Surg a b c
 shrink (S xs) = S (usortOn fst xs)
