@@ -2,6 +2,7 @@
 module HBMC.Projections where
 
 import Text.Show.Pretty (ppShow)
+import Control.Applicative( (<$>), (<*>) )
 
 import Tip.Pretty
 import Tip.Pretty.SMT ()

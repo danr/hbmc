@@ -22,6 +22,7 @@ import HBMC.Projections
 import HBMC.ToSimple
 
 import Data.List
+import Data.List.Ordered( sortOn )
 
 import Control.Monad
 
