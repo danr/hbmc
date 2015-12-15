@@ -10,12 +10,12 @@ category:            Testing
 build-type:          Simple
 cabal-version:       >=1.10
 
-executable hbmc
+executable hbmc-symbo
   main-is:             HBMC/Main.hs
   hs-source-dirs:      src
   default-language:    Haskell2010
   build-depends:       base >=4 && <5,
-                       tip-lib == 0.2.1,
+                       tip-lib == 0.2.2,
                        tip-haskell-frontend == 0.2,
                        geniplate-mirror >= 0.7.1,
 

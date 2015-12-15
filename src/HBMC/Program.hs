@@ -12,6 +12,8 @@ import Control.Applicative( (<$>) )
 import HBMC.Object
 import HBMC.Params hiding ( memo )
 
+import Text.Show.Pretty (ppShow)
+
 --------------------------------------------------------------------------------------------
 
 data Expr a
@@ -138,6 +140,9 @@ evalInto prog apps env (App f as) res =
 
            DoMemo ->
              do eval prog apps env (App f as) >>= (>>> res)
+    (Nothing, Nothing) ->
+      do liftIO $ putStrLn ("Cannot find app" ++ show f ++ " in:\n" ++ ppShow (App f as))
+         error "Cannot proceed!"
 
 evalInto prog apps env (Later a) res =
   do later (evalInto prog apps env a res)
