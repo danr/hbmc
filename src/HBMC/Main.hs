@@ -69,25 +69,36 @@ translate :: Params -> Theory Var -> WriterT [String] Fresh (Translated Var)
 translate params thy0 =
   do [thy1] <-
         map (removeBuiltinBoolWith boolNames) <$> lift
-            (runPasses
+            (flip runPasses thy0 $
               [ SimplifyAggressively
               , RemoveNewtype
               , UncurryTheory
               , SimplifyGently
               , IfToBoolOp
               , AddMatch
-              , SimplifyGently
-              , RemoveAliases, CollapseEqual
-              , BoolOpToIf
-              , CommuteMatch
-              , SimplifyGently
-              , BoolOpToIf
-              , CommuteMatch
+              , SimplifyGently ]
+              ++ (if Params.top_level_bool_ops params then
+                   [ RemoveAliases
+                   , SimplifyGently
+                   , BoolOpLift
+                   , CollapseEqual
+                   , BoolOpToIf
+                   ]
+                 else
+                   [ RemoveAliases, CollapseEqual
+                   , SimplifyGently
+                   , BoolOpToIf
+                   , CommuteMatch
+                   , SimplifyGently
+                   , BoolOpToIf
+                   ])
+              ++
+              [ CommuteMatch
               , CSEMatch
               , TypeSkolemConjecture
               , SortsToNat
               , EliminateDeadCode
-              ] thy0)
+              ])
 
      thy2 <- lift (monomorphise False thy1)
 
