@@ -105,29 +105,36 @@ translate params thy0 =
      (di,thy) <- lift $ do let di = dataInfo (thy_datatypes thy2)
                            (,) di <$> projectPatterns di thy2
 
-     let fns_with_laters =
-           concat
-             [ case c of
-                 Rec fs   -> insertLaters fs
-                 NonRec f -> [f]
-             | c <- components defines uses (thy_funcs thy)
-             ]
-
-     let fn_comps = map (fmap func_name) (components defines uses fns_with_laters)
-
-     fn_decls <- sequence
+     merged_fns <-
+       sequence
          [ do let e = func_body fn
               e' <- if Params.merge params
                       then lift $ merge (scope thy) e
                       else return e
               tell (ppRender fn:map (ppRender . ren) [e,e'])
-              lift (trFunction params di fn_comps fn{ func_body = e' })
+              return fn{func_body=e'}
+         | fn <- thy_funcs thy
+         ]
+
+     let fn_comps = components defines uses merged_fns
+
+     let fns_with_laters =
+           concat
+             [ case c of
+                 Rec fs   -> insertLaters params fs
+                 NonRec f -> [f]
+             | c <- fn_comps
+             ]
+
+
+     fn_decls <-
+       lift $ sequence
+         [ trFunction params di (map (fmap func_name) fn_comps) fn
          | fn <- fns_with_laters
          ]
 
      props <- lift $ sequence [ trFormula di prop | prop <- thy_asserts thy ]
 
-     tell [ppShow (thy_datatypes thy)]
      tell (map ppShow fn_decls)
      tell [ppShow props]
 
