@@ -9,6 +9,12 @@ data Char = PAR1 | PAR2 | PLUS | MULT | CHARX
           | DIG6 | DIG7 | DIG8 | DIG9
  deriving ( P.Show )
 
+koen 0 = X
+koen n = Add (Mul (koen (n P.- 1)) X) X
+
+neok 0 = X
+neok n = Add X (Mul X (neok (n P.- 1)))
+
 PAR1 `eqC` PAR1 = True
 PAR2 `eqC` PAR2 = True
 PLUS `eqC` PLUS = True
@@ -64,28 +70,28 @@ min10 n =
     S n1 ->
       case n1 of
         Z -> Left DIG1
-        S n2 -> 
+        S n2 ->
           case n2 of
             Z -> Left DIG2
-            S n3 -> 
+            S n3 ->
               case n3 of
                 Z -> Left DIG3
-                S n4 -> 
+                S n4 ->
                   case n4 of
                     Z -> Left DIG4
-                    S n5 -> 
+                    S n5 ->
                       case n5 of
                         Z -> Left DIG5
-                        S n6 -> 
+                        S n6 ->
                           case n6 of
                             Z -> Left DIG6
-                            S n7 -> 
+                            S n7 ->
                               case n7 of
                                 Z -> Left DIG7
-                                S n8 -> 
+                                S n8 ->
                                   case n8 of
                                     Z -> Left DIG8
-                                    S n9 -> 
+                                    S n9 ->
                                       case n9 of
                                         Z -> Left DIG9
                                         S n9 -> Right n9
@@ -96,20 +102,17 @@ min10 n =
 (x:xs) `eqS` (y:ys) = x `eqC` y && xs `eqS` ys
 _ `eqS` _ = False
 
-prop1 e = show e === [CHARX,PLUS,DIG0,MULT,CHARX] ==> True === False
-prop2 e = show e === [PAR1,CHARX,PLUS,DIG1,DIG3,PAR2,MULT,CHARX] ==> True === False
-prop3 e = show e === [PAR1,PAR1,CHARX,PLUS,DIG5,PAR2,PLUS,DIG7,PAR2,MULT,CHARX] ==> True === False
+target1 e = question (show e === [CHARX,PLUS,DIG0,MULT,CHARX])
+target2 e = question (show e === [PAR1,CHARX,PLUS,DIG1,DIG3,PAR2,MULT,CHARX])
+target3 e = question (show e === [PAR1,CHARX,PLUS,DIG5,PLUS,DIG7,PAR2,MULT,CHARX])
+target4 e = question (show e === [PAR1,PAR1,CHARX,PLUS,DIG5,PAR2,MULT,CHARX,PLUS,DIG7,PAR2,MULT,CHARX])
+--                                  (     (    x      +    5   )    *    x     +     7    )  *      x
 
-depth (S d) (Add a b) = depth d a && depth d b
-depth (S d) (Mul a b) = depth d a && depth d b
-depth d     (Num n)   = depthN d n
-depth _     X         = True
-depth _     _         = False
+target5 e = question (show e === reverse [PAR2,PAR2,CHARX,PLUS,DIG5,PAR1,MULT,CHARX,PLUS,DIG7,PAR1,MULT,CHARX])
 
-depthN (S d) (S n) = depthN d n
-depthN _     Z     = True
-depthN _     _     = False
+target6 e = question (show e === [PAR1,DIG2,DIG5,PLUS,DIG1,DIG3,PAR2,MULT,DIG3,DIG7])
 
+target10koen e = question (show e === [PAR1,PAR1,PAR1,PAR1,PAR1,PAR1,PAR1,PAR1,PAR1,CHARX,MULT,CHARX,PLUS,CHARX,PAR2,MULT,CHARX,PLUS,CHARX,PAR2,MULT,CHARX,PLUS,CHARX,PAR2,MULT,CHARX,PLUS,CHARX,PAR2,MULT,CHARX,PLUS,CHARX,PAR2,MULT,CHARX,PLUS,CHARX,PAR2,MULT,CHARX,PLUS,CHARX,PAR2,MULT,CHARX,PLUS,CHARX,PAR2,MULT,CHARX,PLUS,CHARX,PAR2,MULT,CHARX,PLUS,CHARX])
 
+target10neok e = question (show e === [CHARX,PLUS,CHARX,MULT,PAR1,CHARX,PLUS,CHARX,MULT,PAR1,CHARX,PLUS,CHARX,MULT,PAR1,CHARX,PLUS,CHARX,MULT,PAR1,CHARX,PLUS,CHARX,MULT,PAR1,CHARX,PLUS,CHARX,MULT,PAR1,CHARX,PLUS,CHARX,MULT,PAR1,CHARX,PLUS,CHARX,MULT,PAR1,CHARX,PLUS,CHARX,MULT,PAR1,CHARX,PLUS,CHARX,MULT,CHARX,PAR2,PAR2,PAR2,PAR2,PAR2,PAR2,PAR2,PAR2,PAR2])
 
-e = Add X (Num Z `Mul` X)
