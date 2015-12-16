@@ -61,6 +61,7 @@ isProjectionOf e0 v =
   in  -- traceShow (pp e0, v, res)
       res
 
+-- unused for now
 bestLaterCoordinate :: Var -> [Var] -> Expr Var -> Int
 bestLaterCoordinate f as
   = fst
@@ -71,20 +72,28 @@ bestLaterCoordinate f as
   . decreasing as
   . calls f
 
+anyTerminatingCoordinate :: Var -> [Var] -> Expr Var -> Bool
+anyTerminatingCoordinate f as
+  = any and
+  . transpose
+  . decreasing as
+  . calls f
+
 -- Insert laters to all unsafe calls in a mutually recursive group
 insertLaters :: [Function Var] -> [Function Var]
 insertLaters grp =
   let res =
         [ Function{
             func_body =
-                laterCallsCoord term_coord func_name func_vars
-              . laterCallsTo (map func_name_ r)
-              $ func_body,
-            ..
+              if length grp > 1 || not self_terminates
+                then laterExpr func_body
+                else func_body
+            , ..
           }
         | (_l,Function{..},r) <- cursor grp
-        , let func_vars = map lcl_name func_args
-        , let term_coord = bestLaterCoordinate func_name func_vars func_body
+        , let func_vars  = map lcl_name func_args
+        , let self_terminates =
+                anyTerminatingCoordinate func_name func_vars func_body
         ]
   in  -- traceShow (pp grp, pp res)
       res
@@ -96,6 +105,7 @@ laterCallsTo gs = transformBi $
     Gbl (Global g _ _) :@: es | g `elem` gs -> laterExpr e0
     _ -> e0
 
+-- unused for now
 laterCallsCoord :: Int -> Var -> [Var] -> Expr Var -> Expr Var
 laterCallsCoord i f as = transformBi $
   \ e0 -> case e0 of
