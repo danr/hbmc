@@ -17,6 +17,7 @@ data Params =
      , lazy_enums           :: Bool
      , shortcut_case        :: Bool
      , top_level_bool_ops   :: Bool
+     , always_later         :: Bool
 --     , insist_isnt          :: Bool
 --     , postpone             :: Bool
 --     , strict_data_lazy_fun :: Bool
@@ -39,6 +40,7 @@ defParams =
     , lazy_enums           = False   &= name "l"   &= help "Lazy enums                     (off)"
     , shortcut_case        = True                  &= help "Shortcut case                   (on)"
     , top_level_bool_ops   = False                 &= help "Top-level ops for shortcutting (off)"
+    , always_later         = False                 &= help "Always put later               (off)"
 --    , insist_isnt          = False   &= name "i"   &= help "Insist isn't when possible"
 --    , postpone             = True                  &= help "Use postpone                     (on)"
 --    , strict_data_lazy_fun = False   &= name "s"   &= help "Always use postpone, make case strict"

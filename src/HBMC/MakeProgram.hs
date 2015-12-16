@@ -80,12 +80,12 @@ anyTerminatingCoordinate f as
   . calls f
 
 -- Insert laters to all unsafe calls in a mutually recursive group
-insertLaters :: [Function Var] -> [Function Var]
-insertLaters grp =
+insertLaters :: Params -> [Function Var] -> [Function Var]
+insertLaters params grp =
   let res =
         [ Function{
             func_body =
-              if length grp > 1 || not self_terminates
+              if length grp > 1 || not self_terminates || always_later params
                 then laterExpr func_body
                 else func_body
             , ..
