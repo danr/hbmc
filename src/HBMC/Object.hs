@@ -14,6 +14,7 @@ import Data.IORef
 import Control.Applicative
 import Control.Monad( when, unless )
 import System.IO( hFlush, stdout )
+import Data.Maybe( fromJust )
 
 import SAT hiding ( false, true )
 import qualified SAT
@@ -429,8 +430,8 @@ trySolve :: (Show n,Ord n) => M n (Maybe Bool)
 trySolve = M $ \env@Env{params} ->
   do let verbose = not (quiet params)
      lxs <- ordering params `fmap` readIORef (queue env)
-     as <- sequence [ let M m = objectView x in m env | (_,x) <- lxs ]
-     when verbose $ putStr ("> solve: Q=" ++ show (length lxs) ++ " [" ++ intercalate ", " (nub as) ++ "]...")
+     as <- sequence [ let M m = objectView' x in m env | (_,x) <- lxs ]
+     when verbose $ putStr ("> solve: Queue has " ++ show (length lxs) ++ " objects ...")
      hFlush stdout
      b <- solve (solver env) [ neg l | (l,_) <- lxs ]
      if b then
@@ -447,7 +448,7 @@ trySolve = M $ \env@Env{params} ->
             do let x    = head [ x | (l,x) <- lxs, l `elem` cs ]
                    lxs' = reverse [ ly | ly@(_,y) <- lxs, y /= x ]
                writeIORef (queue env) lxs'
-               when verbose $ putStrLn (" E=" ++ show (length lxs - length lxs'))
+               when verbose $ putStrLn (" Expanding " ++ show (length lxs - length lxs') ++ " ...")
                let M m = expand x in m env
                -- these two lines are here because sometimes expansion adds an element
                -- to the queue that is going to be expanded in the same expansion
@@ -499,18 +500,31 @@ objectVal (Dynamic _ _ ref) =
 
       in alt (alts cnt)
 
+objectView' :: (Show a,Eq a) => Object a -> M a String
+objectView' (Static c xs) =
+  do as <- sequence [ objectView' x | x <- xs ]
+     return ("!" ++ show c ++ "(" ++ intercalate "," as ++ ")")
+
+objectView' (Dynamic unq _ ref) =
+  do cnt <- liftIO $ readIORef ref
+     as <- sequence [ objectView' x | (_,x) <- args cnt ]
+     return $ case map (show . fst) (alts cnt) of
+       []  -> show unq ++ "?"
+       [c] -> show unq ++ c ++ "(" ++ intercalate "," as ++ ")"
+       cs  -> show unq ++ "{" ++ intercalate "|" cs ++ "}(" ++ intercalate "," as ++ ")"
+
 objectView :: (Show a,Eq a) => Object a -> M a String
 objectView (Static c xs) =
   do as <- sequence [ objectView x | x <- xs ]
-     return ("!" ++ show c ++ "(" ++ intercalate "," as ++ ")")
+     return ("(" ++ show c ++ concat as ++ ")")
 
 objectView (Dynamic unq _ ref) =
   do cnt <- liftIO $ readIORef ref
      as <- sequence [ objectView x | (_,x) <- args cnt ]
      return $ case map (show . fst) (alts cnt) of
-       []  -> show unq ++ "?"
-       [c] -> show unq ++ c ++ "(" ++ intercalate "," as ++ ")"
-       cs  -> show unq ++ "{" ++ intercalate "|" cs ++ "}(" ++ intercalate "," as ++ ")"
+       []  -> "_"
+       [c] -> "(" ++ c ++ concat as ++ ")"
+       cs  -> "(" ++ show (fromJust (myType cnt)) ++ concat as ++ ")"
 
 --------------------------------------------------------------------------------------------
 
