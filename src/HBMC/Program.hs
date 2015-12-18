@@ -3,7 +3,7 @@ module HBMC.Program where
 
 import qualified Data.Map as M
 import Data.Map( Map )
-import Data.Maybe( fromJust )
+import Data.Maybe( fromMaybe )
 import Data.List( intersperse )
 
 import Control.Monad( when, unless )
@@ -59,7 +59,7 @@ evalPrim NotEqualHere = notEqualHere
 
 eval :: (Names n,Ord n,Show n) => Program n -> Apps n -> VarEnv n -> Expr n -> M n (Object n)
 eval prog apps env (Var x) =
-  do return (fromJust (M.lookup x env))
+  do return (fromMaybe (error ("lookup " ++ show x))  (M.lookup x env))
 
 eval prog apps env (Con c as) =
   do ys <- sequence [ eval prog apps env a | a <- as ]
@@ -118,7 +118,7 @@ eval prog apps env (EqPrim prim e1 e2) =
 
 evalInto :: (Names n,Ord n,Show n) => Program n -> Apps n -> VarEnv n -> Expr n -> Object n -> M n ()
 evalInto prog apps env (Var x) res =
-  do fromJust (M.lookup x env) >>> res
+  do fromMaybe (error ("lookup " ++ show x)) (M.lookup x env) >>> res
 
 evalInto prog apps env (Con c as) res =
   do isCons res c $ \ys ->

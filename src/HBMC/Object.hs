@@ -524,7 +524,10 @@ objectView (Dynamic unq _ ref) =
      return $ case map (show . fst) (alts cnt) of
        []  -> "_"
        [c] -> "(" ++ c ++ concat as ++ ")"
-       cs  -> "(" ++ show (fromJust (myType cnt)) ++ concat as ++ ")"
+       cs  -> "(" ++ fromJust' (myType cnt) ++ concat as ++ ")"
+ where
+  fromJust' Nothing  = "<TYPE>"
+  fromJust' (Just t) = show t
 
 --------------------------------------------------------------------------------------------
 
