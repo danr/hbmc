@@ -27,7 +27,7 @@ import Tip.Utils( usortOn )
 
 type Name = String -- or whatever
 
-class Names a where
+class Show a => Names a where
   unkName   :: a
   unitName  :: a
   boolName  :: a
@@ -111,6 +111,10 @@ true  = Cons trueName  [] boolT
 data Object a
   = Static (Cons a) [Object a]
   | Dynamic Unique Bool {-input?-} (IORef (Contents a))
+
+strip :: Object a -> Object a
+strip (Static c os) = Static c (map strip os)
+strip (Dynamic u b r) = Dynamic u (error "strip") (error "strip")
 
 cmpView :: Object a -> Either (Cons a,[Object a]) Unique
 cmpView (Static c os)   = Left (c,os)
@@ -399,19 +403,41 @@ choice hs =
 
 --------------------------------------------------------------------------------------------
 
-memo, don'tMemo :: Ord a => a -> ([Object a] -> M a [Object a]) -> [Object a] -> M a [Object a]
+dynoMemo :: (Show a,Ord a) => a -> [Object a] -> M a (Bool)
+dynoMemo name xs =
+  do let xs' = map strip xs
+     gd <- M (\ env -> return (good env))
+     gd' <- liftIO (readIORef gd)
+     if name `S.member` gd'
+       then do return True
+       else do cs <- M (\ env -> return (calls env))
+               cs' <- liftIO (readIORef cs)
+               if (name,xs') `S.member` cs'
+                 then do liftIO (putStrLn $ "Starting memo of " ++ show name
+                                   ++ " with "
+                                   ++ show (sum [ 1 | (name',_) <- S.toList cs', name == name'])
+                                   ++ " lost")
+                         liftIO (writeIORef gd (S.insert name gd'))
+                         return True
+                 else do liftIO (writeIORef cs (S.insert (name,xs') cs'))
+                         return False
+
+memo, don'tMemo :: (Show a,Ord a) => a -> ([Object a] -> M a [Object a]) -> [Object a] -> M a [Object a]
 memo name f xs =
   do tab <- getTable
      mp  <- liftIO $ readIORef tab
-     (l,ys) <- case M.lookup (name,xs) mp of
+     let xs' = map strip xs
+     (l,ys) <- case M.lookup (name,xs') mp of
                  Nothing ->
                    do l <- withSolver newLit
                       ys <- withNewContext l (f xs)
-                      liftIO $ writeIORef tab (M.insert (name,xs) (l,ys) mp)
+                      liftIO $ writeIORef tab (M.insert (name,xs') (l,ys) mp)
+                      -- liftIO $ putStrLn $ show name ++ " miss!"
                       return (l,ys)
 
                  Just (l,ys) ->
-                   do return (l,ys)
+                   do -- liftIO $ putStrLn $ show name ++ " hit!"
+                      return (l,ys)
      addClauseHere [l]
      return ys
 
@@ -536,6 +562,8 @@ data Env a =
      , context :: Lit
      , unique  :: IORef Int
      , table   :: IORef (Map (a,[Object a]) (Lit,[Object a]))
+     , calls   :: IORef (Set (a,[Object a]))
+     , good    :: IORef (Set a)
      , queue   :: IORef [(Lit,Object a)]
      , params  :: Params
      }
@@ -561,10 +589,14 @@ run params (M m) =
     do refUnique <- newIORef 0
        refTable  <- newIORef M.empty
        refQueue  <- newIORef []
+       refCalls  <- newIORef S.empty
+       refGood   <- newIORef S.empty
        let env = Env{ solver  = s
                     , context = SAT.true
                     , unique  = refUnique
                     , table   = refTable
+                    , calls   = refCalls
+                    , good    = refGood
                     , queue   = refQueue
                     , params  = params
                     }

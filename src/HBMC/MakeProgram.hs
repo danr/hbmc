@@ -124,7 +124,8 @@ trFunction p di fn_comps Function{..} =
 
      return (func_name,
                (args
-               ,if mem then P.DoMemo else P.Don'tMemo
+               ,if mem then (if dyno p then P.DynoMemo else P.DoMemo)
+                       else P.Don'tMemo
                ,body))
 
 type Prop a = ([(a,Object.Type a)],P.Expr a)

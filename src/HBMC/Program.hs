@@ -36,12 +36,15 @@ noop = ConstraintsOf []
 data EqPrim = EqualHere | NotEqualHere
  deriving ( Eq, Ord, Show )
 
-data MemoFlag = DoMemo | Don'tMemo
+data MemoFlag = DoMemo | Don'tMemo | DynoMemo
  deriving ( Eq, Ord, Show )
 
-ifMemo :: Ord a => MemoFlag -> a -> ([Object a] -> M a [Object a]) -> [Object a] -> M a [Object a]
+ifMemo :: (Show a,Ord a) => MemoFlag -> a -> ([Object a] -> M a [Object a]) -> [Object a] -> M a [Object a]
 ifMemo DoMemo    = memo
 ifMemo Don'tMemo = don'tMemo
+ifMemo DynoMemo  = \ f k xs ->
+  do b <- dynoMemo f xs
+     (if b then memo else don'tMemo) f k xs
 
 type PreFunction n = (n,([n],MemoFlag,Expr n))
 
@@ -138,8 +141,16 @@ evalInto prog apps env (App f as) res =
              do ys <- sequence [ eval prog apps env a | a <- as ]
                 evalInto prog M.empty (M.fromList (zipp ("App:" ++ show f ++ "->") xs ys)) rhs res
 
-           DoMemo ->
+           DoMemo    ->
              do eval prog apps env (App f as) >>= (>>> res)
+
+           DynoMemo  ->
+             do ys <- sequence [ eval prog apps env a | a <- as ]
+                b <- dynoMemo f ys
+                if b
+                  then do [x] <- memo f (\ zs -> (:[]) <$> eval prog M.empty (M.fromList (zipp ("App:" ++ show f) xs zs)) rhs) ys
+                          x >>> res
+                  else do evalInto prog M.empty (M.fromList (zipp ("App:" ++ show f ++ "->") xs ys)) rhs res
     (Nothing, Nothing) ->
       do liftIO $ putStrLn ("Cannot find app" ++ show f ++ " in:\n" ++ ppShow (App f as))
          error "Cannot proceed!"
