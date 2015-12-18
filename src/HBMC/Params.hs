@@ -11,6 +11,7 @@ data Params =
      , age                  :: Bool
      , merge                :: Bool
      , memo                 :: Bool
+     , dyno                 :: Bool
      , quiet                :: Bool
      , debug                :: Bool
 --     , conflict_minimzation :: Bool
@@ -34,6 +35,7 @@ defParams =
     , age                  = False                 &= help "Order queue by age of objects  (off)"
     , merge                = True    &= name "f"   &= help "Merge function calls            (on)"
     , memo                 = True    &= name "m"   &= help "Memoise recursive functions     (on)"
+    , dyno                 = False                 &= help "Dynamically decide to memo functions (off)"
     , quiet                = False   &= name "q"   &= help "Be quiet"
     , debug                = False   &= name "dbg" &= help "Print debug info"
 --    , conflict_minimzation = False   &= name "c"   &= help "Minimize conflicts"

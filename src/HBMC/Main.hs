@@ -60,7 +60,7 @@ import System.Process
 
 import Text.Show.Pretty (ppShow)
 
-deriving instance Names a => Names (PPVar a)
+deriving instance (PrettyVar a,Names a) => Names (PPVar a)
 
 data Translated a = Translated [PreFunction a] [Prop a]
   deriving (Show, Functor)
@@ -70,7 +70,7 @@ translate params thy0 =
   do [thy1] <-
         map (removeBuiltinBoolWith boolNames) <$> lift
             (flip runPasses thy0 $
-              [ SimplifyAggressively
+              [ SimplifyGently
               , RemoveNewtype
               , UncurryTheory
               , SimplifyGently
