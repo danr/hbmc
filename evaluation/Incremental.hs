@@ -14,6 +14,7 @@ import Text.Printf
 
 import Data.Char
 import Data.List
+import Data.List.Split
 import Data.Ord
 import Data.Function
 import System.Timeout
@@ -44,9 +45,11 @@ main = do
 
   let is_ok = case bad of
         "-" -> const True
-        _   -> not . (bad `isInfixOf`)
+        _   -> \ u -> and [ not ([ if b == '_' then ' ' else b | b <- bad' ] `isInfixOf` u)
+                          | bad' <- splitOn "-" bad
+                          ]
 
-      log_filename d = (concatMap (++ "_") (cmd:args)) ++ (if use_depths then "_" ++ show d else "")
+      log_filename d = "results/" ++ (concatMap (++ "_") (cmd:args)) ++ (if use_depths then "_" ++ show d else "")
 
       log :: Int -> FilePath -> Maybe Double -> IO ()
       log d f maybe_time =
