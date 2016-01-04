@@ -41,7 +41,7 @@ import qualified Data.Map as M
 
 
 import Tip.Passes
-import Tip.Pass.Booleans
+import Tip.Pass.Booleans as B
 
 import System.Environment
 
@@ -168,10 +168,10 @@ runLive p (Translated thy prog ((e,prop):_)) =
   where
   trVal :: O.Val (PPVar Var) -> E.Val (PPVar Var)
   trVal (O.Cn (O.Cons n _ _) vs)
-    | n == unkName     = E.Unk
-    | n == O.trueName  = E.Lit (Bool True)
-    | n == O.falseName = E.Lit (Bool False)
-    | otherwise        = E.Con n (map trVal vs)
+    | n == unkName                       = E.Unk
+    | n == PPVar (B.trueName  boolNames) = E.Lit (Bool True)
+    | n == PPVar (B.falseName boolNames) = E.Lit (Bool False)
+    | otherwise                          = E.Con n (map trVal vs)
 
   dig (Quant _ Forall _ e) = dig e
   dig e = e

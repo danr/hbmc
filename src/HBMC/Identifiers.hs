@@ -36,9 +36,9 @@ dummyType = TyCon (System "Dummy" Nothing) []
 instance O.Names Var where
   unkName   = System "?" Nothing
   unitName  = System "()" Nothing
-  boolName  = System "Bool" Nothing
-  falseName = System "False" Nothing
-  trueName  = System "True" Nothing
+  boolName  = System "BL" Nothing
+  falseName = SystemCon "FF" Nothing
+  trueName  = SystemCon "TT" Nothing
   copyName  = System ">>>" Nothing
   equalHereName    = System "equalHere" Nothing
   notEqualHereName = System "notEqualHere" Nothing
