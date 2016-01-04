@@ -23,6 +23,9 @@ import Data.Function( on )
 import HBMC.Params hiding ( memo )
 import Tip.Utils( usortOn )
 
+import Data.List (sortBy)
+import Data.Ord (comparing)
+
 --------------------------------------------------------------------------------------------
 
 type Name = String -- or whatever
@@ -456,7 +459,7 @@ trySolve :: (Show n,Ord n) => M n (Maybe Bool)
 trySolve = M $ \env@Env{params} ->
   do let verbose = not (quiet params)
      lxs <- ordering params `fmap` readIORef (queue env)
-     as <- sequence [ let M m = objectView' x in m env | (_,x) <- lxs ]
+     -- as <- sequence [ let M m = objectView' x in m env | (_,x) <- lxs ]
      when verbose $ putStr ("> solve: Queue has " ++ show (length lxs) ++ " objects ...")
      hFlush stdout
      b <- solve (solver env) [ neg l | (l,_) <- lxs ]
@@ -483,7 +486,7 @@ trySolve = M $ \env@Env{params} ->
                return Nothing
  where
   ordering params
-    | age params = usortOn fst
+    | age params = sortBy (comparing fst)
     | otherwise  = nub . reverse
 
   nub xs = del S.empty xs
