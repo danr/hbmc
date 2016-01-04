@@ -142,8 +142,8 @@ translate params thy0 =
          ]
 
      props <- lift $ sequence
-                       [ (,) (fm_body prop) <$> trFormula di prop
-                       | prop <- thy_asserts thy
+                       [ (,) (fm_body prop_orig) <$> trFormula di prop
+                       | (prop_orig,prop) <- thy_asserts thy1 `zip` thy_asserts thy
                        ]
 
      tell (map ppShow fn_decls)
@@ -161,7 +161,8 @@ runLive p (Translated thy prog ((e,prop):_)) =
            Right (E.Lit (Bool True))  -> error "Incorrect!"
            Right E.Unk                -> error "Incorrect (unk)!"
            Right (E.Lit (Bool False)) -> return ()
-           b                          -> error $ "Evaluator returned: " ++ show b
+           Left s  -> error $ "Evaluator errored: " ++ s
+           Right b -> error $ "Evaluator returned: " ++ show b
        Nothing -> return ()
 
   where

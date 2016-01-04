@@ -41,6 +41,9 @@ bool = Right . Lit . Bool
 -- for instance bsort contains a let that needs to be evaluated lazily to
 -- not cause non-termination
 
+decorate s (Left s2) = Left (s2 ++ ", " ++ s)
+decorate _ (Right x) = Right x
+
 evalExpr :: forall n . (Show n,PrettyVar n,Ord n) => Theory n -> Map n (Val n) -> Expr n -> Either String (Val n)
 evalExpr thy u v = deep =<< go u v
   where
@@ -52,6 +55,7 @@ evalExpr thy u v = deep =<< go u v
   force e           = return e
 
   go m e0 =
+    decorate (show (pp e0)) $
     case e0 of
       Lcl (Local l _) -> maybe (Left "Variable not in scope") Right (M.lookup l m)
       hd :@: es ->
@@ -61,7 +65,8 @@ evalExpr thy u v = deep =<< go u v
                | Just (ConstructorInfo _ (Constructor c _ _)) <- lookupGlobal f scp
                -> return (Con c vs)
                | Just Function{..} <- M.lookup f fns
-               -> go (M.fromList (map lcl_name func_args `zip` vs)) func_body
+               -> decorate ("in a call to " ++ varStr f)
+                           (go (M.fromList (map lcl_name func_args `zip` vs)) func_body)
                | otherwise
                -> Left $ "Unknown global: " ++ varStr f
              Builtin At ->
