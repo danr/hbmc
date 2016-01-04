@@ -20,7 +20,6 @@ import Tip.Pass.Booleans
 
 import Data.Generics.Geniplate
 
-import HBMC.ToSimple
 import qualified HBMC.Program as P
 import qualified HBMC.Object as Object
 
@@ -144,17 +143,13 @@ trFormula di fm =
 trToTrue :: DataInfo Var -> Expr Var -> Fresh (P.Expr Var)
 trToTrue di e0 =
   case e0 of
-    Builtin Equal    :@: ~[e1,e2] -> tr True  e1 e2
-    Builtin Distinct :@: ~[e1,e2] -> tr False e1 e2
-    _                             -> tr True  e0 (boolExpr boolNames True)
+    Builtin Equal    :@: ~[e1,e2] -> tr Equal    e1 e2
+    Builtin Distinct :@: ~[e1,e2] -> tr Distinct e1 e2
+    _                             -> tr Equal    e0 (boolExpr boolNames True)
   where
   tr pol e1 e2 =
-    do (lets1,s1) <- collectLets <$> toExprSimpleEnd (removeBuiltinBoolFrom boolNames (boolOpToIf e1))
-       (lets2,s2) <- collectLets <$> toExprSimpleEnd (removeBuiltinBoolFrom boolNames (boolOpToIf e2))
-       let equal_fn = blankGlobal
-                        (if pol then Object.equalHereName else Object.notEqualHereName)
-                        (error "trToTrue global type")
-       trExpr di (makeLets (lets1 ++ lets2) (Gbl equal_fn :@: [s1,s2]))
+    do let k = removeBuiltinBoolFrom boolNames . boolOpToIf
+       trExpr di (Builtin pol :@: [k e1,k e2])
 
 conjuncts :: Expr a -> [Expr a]
 conjuncts e0 =
@@ -204,9 +199,8 @@ trExpr di = go
 
       Gbl (Global (SystemCon "noop" _) _ _) :@: _ -> return P.noop
 
-      Gbl (Global name  _ _) :@: [e1,e2]
-        | name == Object.equalHereName    -> P.EqPrim P.EqualHere    <$> go e1 <*> go e2
-        | name == Object.notEqualHereName -> P.EqPrim P.NotEqualHere <$> go e1 <*> go e2
+      Builtin Equal    :@: [e1,e2] -> P.EqPrim P.EqualHere    <$> go e1 <*> go e2
+      Builtin Distinct :@: [e1,e2] -> P.EqPrim P.NotEqualHere <$> go e1 <*> go e2
 
       Lcl (Local x _) -> return (P.Var x)
 

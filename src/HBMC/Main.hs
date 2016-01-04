@@ -35,8 +35,6 @@ import HBMC.Program
 import HBMC.Eval    as E
 import HBMC.MakeProgram
 
-import HBMC.ToSimple
-
 import qualified Data.Map as M
 
 -- import HBMC.Monadic hiding (Var)
