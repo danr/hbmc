@@ -474,15 +474,17 @@ trySolve = M $ \env@Env{params} ->
                putStrLn "*** NO SOLUTION"
                return (Just False)
            else
-            do let x    = head [ x | (l,x) <- lxs, l `elem` cs ]
-                   lxs' = reverse [ ly | ly@(_,y) <- lxs, y /= x ]
+            do let l'   = head [ l | (l,x) <- lxs, l `elem` cs ]
+                   xs   = (if expand_all params then id else take 1)
+                          [ x | (l,x) <- lxs, l == l' ]
+                   lxs' = reverse [ ly | ly@(_,y) <- lxs, y `notElem` xs ]
                writeIORef (queue env) lxs'
                when verbose $ putStrLn (" Expanding " ++ show (length lxs - length lxs') ++ " ...")
-               let M m = expand x in m env
+               let M m = sequence_ [ expand x | x <- xs ] in m env
                -- these two lines are here because sometimes expansion adds an element
                -- to the queue that is going to be expanded in the same expansion
                lxs <- readIORef (queue env)
-               writeIORef (queue env) [ q | q@(l,y) <- lxs, y /= x ]
+               writeIORef (queue env) [ q | q@(l,y) <- lxs, y `notElem` xs ]
                return Nothing
  where
   ordering params

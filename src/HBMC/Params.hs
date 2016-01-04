@@ -15,6 +15,7 @@ data Params =
      , quiet                :: Bool
      , debug                :: Bool
 --     , conflict_minimzation :: Bool
+     , expand_all           :: Bool
      , lazy_enums           :: Bool
      , shortcut_case        :: Bool
      , top_level_bool_ops   :: Bool
@@ -39,6 +40,7 @@ defParams =
     , quiet                = False   &= name "q"   &= help "Be quiet"
     , debug                = False   &= name "dbg" &= help "Print debug info"
 --    , conflict_minimzation = False   &= name "c"   &= help "Minimize conflicts"
+    , expand_all           = False   &= name "e"   &= help "Expand all objs in chosen ctx  (off)"
     , lazy_enums           = False   &= name "l"   &= help "Lazy enums                     (off)"
     , shortcut_case        = True                  &= help "Shortcut case                   (on)"
     , top_level_bool_ops   = False                 &= help "Top-level ops for shortcutting (off)"
