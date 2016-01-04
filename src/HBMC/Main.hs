@@ -15,7 +15,7 @@ import Tip.HaskellFrontend hiding (Params)
 import Tip.Haskell.Rename
 import Tip.Haskell.Translate (addImports,HsId)
 
-import Tip.Core
+import Tip.Core as Tip
 import Tip.Utils
 
 import Tip.Fresh
@@ -30,8 +30,9 @@ import HBMC.Identifiers
 import HBMC.Data
 import HBMC.Projections
 
-import HBMC.Object
+import HBMC.Object  as O
 import HBMC.Program
+import HBMC.Eval    as E
 import HBMC.MakeProgram
 
 import HBMC.ToSimple
@@ -62,14 +63,20 @@ import Text.Show.Pretty (ppShow)
 
 deriving instance (PrettyVar a,Names a) => Names (PPVar a)
 
-data Translated a = Translated [PreFunction a] [Prop a]
+data Translated a = Translated
+  { tr_thy     :: Theory a
+    -- ^ the final theory is returned so the result can be
+    --   (non-symbolically) evaluated and checked wrt to it
+  , tr_pre_fns :: [PreFunction a]
+    -- ^ functions for symbolic evaluation
+  , tr_props   :: [(Tip.Expr a,Prop a)]
+    -- ^ symbolic properties matched with their original Tip formula (for evaluation)
+  }
   deriving (Show, Functor)
 
 translate :: Params -> Theory Var -> WriterT [String] Fresh (Translated Var)
 translate params thy0 =
-  do [thy1] <-
-        map (removeBuiltinBoolWith boolNames) <$> lift
-            (flip runPasses thy0 $
+  do [thy1] <- lift (flip runPasses thy0 $
               [ SimplifyGently
               , RemoveNewtype
               , UncurryTheory
@@ -98,9 +105,12 @@ translate params thy0 =
               , TypeSkolemConjecture
               , SortsToNat
               , EliminateDeadCode
+              , Monomorphise False
               ])
 
-     thy2 <- lift (monomorphise False thy1)
+     tell [show (pp thy1)]
+
+     let thy2 = removeBuiltinBoolWith boolNames thy1
 
      (di,thy) <- lift $ do let di = dataInfo (thy_datatypes thy2)
                            (,) di <$> projectPatterns di thy2
@@ -133,16 +143,39 @@ translate params thy0 =
          | fn <- fns_with_laters
          ]
 
-     props <- lift $ sequence [ trFormula di prop | prop <- thy_asserts thy ]
+     props <- lift $ sequence
+                       [ (,) (fm_body prop) <$> trFormula di prop
+                       | prop <- thy_asserts thy
+                       ]
 
      tell (map ppShow fn_decls)
-     tell [ppShow props]
+     tell [ppShow (map snd props)]
 
-     return (Translated fn_decls props)
+     return (Translated thy1 fn_decls props)
 
 runLive :: Params -> Translated (PPVar Var) -> IO ()
-runLive p (Translated _    [])       = error "Needs at least one property!"
-runLive p (Translated prog (prop:_)) = run p (evalProp (M.fromList prog) prop)
+runLive p (Translated thy _    [])           = error "Needs at least one property!"
+runLive p (Translated thy prog ((e,prop):_)) =
+  do m <- run p (evalProp (M.fromList prog) prop)
+     case m of
+       Just v  ->
+         case E.evalExpr thy (M.map trVal v) (dig e) of
+           Right (E.Lit (Bool True))  -> error "Incorrect!"
+           Right E.Unk                -> error "Incorrect (unk)!"
+           Right (E.Lit (Bool False)) -> return ()
+           b                          -> error $ "Evaluator returned: " ++ show b
+       Nothing -> return ()
+
+  where
+  trVal :: O.Val (PPVar Var) -> E.Val (PPVar Var)
+  trVal (O.Cn (O.Cons n _ _) vs)
+    | n == unkName     = E.Unk
+    | n == O.trueName  = E.Lit (Bool True)
+    | n == O.falseName = E.Lit (Bool False)
+    | otherwise        = E.Con n (map trVal vs)
+
+  dig (Quant _ Forall _ e) = dig e
+  dig e = e
 
 ren = renameWith (disambig varStr)
 

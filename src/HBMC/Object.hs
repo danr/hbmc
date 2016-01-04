@@ -583,7 +583,7 @@ instance Monad (M n) where
 
 -- run function
 
-run :: Params -> M n () -> IO ()
+run :: Params -> M n a -> IO a
 run params (M m) =
   withNewSolver $ \s ->
     do refUnique <- newIORef 0

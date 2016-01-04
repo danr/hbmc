@@ -218,7 +218,7 @@ evalInto prog apps env (EqPrim prim e1 e2) res =
 
 --------------------------------------------------------------------------------------------
 
-evalProp :: (Names n,Ord n,Show n) => Program n -> ([(n,Type n)],Expr n) -> M n ()
+evalProp :: (Names n,Ord n,Show n) => Program n -> ([(n,Type n)],Expr n) -> M n (Maybe (Map n (Val n)))
 evalProp prog (vars,e) =
   do params <- getParams
      os <- sequence
@@ -243,13 +243,15 @@ evalProp prog (vars,e) =
 
      b <- loop
      if b then
-       do sequence_
+       do vs <- sequence
             [ do s <- objectVal o
                  liftIO $ putStrLn (show v ++ " = " ++ show s)
+                 return (v,s)
             | (v,o) <- os
             ]
+          return (Just (M.fromList vs))
       else
-       do return ()
+       do return Nothing
 
 
 --------------------------------------------------------------------------------------------
