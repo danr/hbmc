@@ -112,7 +112,7 @@ laterCallsCoord i f as = transformBi $
       | f' == f, not ((es !! i) `isProjectionOf` (as !! i)) -> laterExpr e0
     _ -> e0
 
-trFunction :: Params -> DataInfo Var -> [Component Var] -> Function Var -> Fresh (Var,([Var],P.MemoFlag,P.Expr Var))
+trFunction :: Params -> DataInfo Var -> [Component Var] -> Function Var -> Fresh (P.PreFunction Var)
 trFunction p di fn_comps Function{..} =
   do let (rec,_mut_rec) = case lookupComponent func_name fn_comps of
                             Just (Rec xs) -> (True,length xs > 1)
@@ -122,10 +122,9 @@ trFunction p di fn_comps Function{..} =
      body <- trExpr di func_body
 
      return (func_name,
-               (args
-               ,if mem then (if dyno p then P.DynoMemo else P.DoMemo)
-                       else P.Don'tMemo
-               ,body))
+               ((if mem then (if dyno p then P.DynoMemo else P.DoMemo)
+                        else P.Don'tMemo)
+                ,(args,body)))
 
 type Prop a = ([(a,Object.Type a)],P.Expr a)
 
@@ -175,7 +174,7 @@ trExpr di = go
 
       Let x e b -> P.Let (lcl_name x) <$> go e <*>  go b
 
-      {-o
+      {-
       Let x (Match s brs) e ->
         (++) <$> trMatch di s brs (Just (lcl_name x)) <*> go e
 
@@ -208,7 +207,8 @@ trExpr di = go
                                                                  return (P.Proj s' (tr_type di t) i)
       Gbl g@(Global k _ _) :@: ss | isCon k -> P.Con (tr_con di g) <$> mapM go ss
 
-      Gbl (Global f _ _) :@: es -> P.App f <$> mapM go es
+      Gbl (Global f _ _) :@: es -> P.App P.Don'tMemo f <$> mapM go es
+                                        -- don't memo for now, will be added later
 
       _ -> error $ "trExpr " ++ ppRender e0
 

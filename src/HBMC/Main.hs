@@ -151,10 +151,13 @@ translate params thy0 =
 
      return (Translated thy1 fn_decls props)
 
+
 runLive :: Params -> Translated (PPVar Var) -> IO ()
 runLive p (Translated thy _    [])           = error "Needs at least one property!"
 runLive p (Translated thy prog ((e,prop):_)) =
-  do m <- run p (evalProp (M.fromList prog) prop)
+  do let memos = M.fromList [ (f,m) | (f,(m,_)) <- prog ]
+         prog' = M.fromList [ (f,(xs,adjustMemos memos e)) | (f,(_,(xs,e))) <- prog ]
+     m <- run p (evalProp prog' prop)
      case m of
        Just v  ->
          case E.evalExpr thy (M.map trVal v) (dig e) of

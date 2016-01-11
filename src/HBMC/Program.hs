@@ -1,4 +1,8 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ExplicitForAll #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 module HBMC.Program where
 
 import qualified Data.Map as M
@@ -14,12 +18,20 @@ import HBMC.Params hiding ( memo )
 
 import Text.Show.Pretty (ppShow)
 
+import Data.Generics.Geniplate
+
 --------------------------------------------------------------------------------------------
+
+data EqPrim = EqualHere | NotEqualHere
+ deriving ( Eq, Ord, Show )
+
+data MemoFlag = DoMemo | Don'tMemo | DynoMemo
+ deriving ( Eq, Ord, Show )
 
 data Expr a
   = Var a
   | Con (Cons a) [Expr a]
-  | App a [Expr a]
+  | App MemoFlag a [Expr a]
   | Later (Expr a)
   | Let a (Expr a) (Expr a)
   | LetApp a [a] (Expr a) (Expr a)
@@ -30,14 +42,22 @@ data Expr a
   | EqPrim EqPrim (Expr a) (Expr a)
  deriving ( Eq, Ord, Show, Functor )
 
+return []
+
+instanceTransformBi [t| forall a . (Expr a,Expr a) |]
+
+-- Make sure that calls under LetApp are not memoized
+adjustMemos :: Ord n => Map n MemoFlag -> Expr n -> Expr n
+adjustMemos m =
+  transformBi $
+    \ e0 ->
+      case e0 of
+        LetApp g ys (App _ f xs) e -> LetApp g ys (App Don'tMemo f xs) e
+        App _ f xs | Just flag <- M.lookup f m -> App flag f xs
+        _ -> e0
+
 noop :: Expr a
 noop = ConstraintsOf []
-
-data EqPrim = EqualHere | NotEqualHere
- deriving ( Eq, Ord, Show )
-
-data MemoFlag = DoMemo | Don'tMemo | DynoMemo
- deriving ( Eq, Ord, Show )
 
 ifMemo :: (Show a,Ord a) => MemoFlag -> a -> ([Object a] -> M a [Object a]) -> [Object a] -> M a [Object a]
 ifMemo DoMemo    = memo
@@ -46,9 +66,9 @@ ifMemo DynoMemo  = \ f k xs ->
   do b <- dynoMemo f xs
      (if b then memo else don'tMemo) f k xs
 
-type PreFunction n = (n,([n],MemoFlag,Expr n))
+type PreFunction n = (n,(MemoFlag,([n],Expr n)))
 
-type Program n = Map n ([n],MemoFlag,Expr n)
+type Program n = Map n ([n],Expr n)
 
 type Apps n = Map n (Object n,[Object n],Object n)
 
@@ -68,14 +88,14 @@ eval prog apps env (Con c as) =
   do ys <- sequence [ eval prog apps env a | a <- as ]
      return (cons c ys)
 
-eval prog apps env (App f as) =
+eval prog apps env (App memo_flag f as) =
   case (M.lookup f apps, M.lookup f prog) of
     (Just (trig,ys,z), _) ->
       do isCons trig true $ \_ ->
            sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("App/LetApp:" ++ show f) as ys ]
          return z
 
-    (_, Just (xs,memo_flag,rhs)) ->
+    (_, Just (xs,rhs)) ->
       do -- liftIO $ putStrLn (show f ++ show as)
          ys <- sequence [ eval prog apps env a | a <- as ]
          [x] <- ifMemo memo_flag f (\ zs -> (:[]) <$> eval prog M.empty (M.fromList (zipp ("App:" ++ show f) xs zs)) rhs) ys
@@ -127,14 +147,14 @@ evalInto prog apps env (Con c as) res =
   do isCons res c $ \ys ->
        sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("Con:" ++ show c ++ "->") as ys ]
 
-evalInto prog apps env (App f as) res =
+evalInto prog apps env (App memo_flag f as) res =
   case (M.lookup f apps, M.lookup f prog) of
     (Just (trig,ys,z), _) ->
       do isCons trig true $ \_ ->
            sequence_ [ evalInto prog apps env a y | (a,y) <- zipp ("App/LetApp:" ++ show f ++ "->") as ys ]
          z >>> res
 
-    (_, Just (xs,memo_flag,rhs)) ->
+    (_, Just (xs,rhs)) ->
       do -- liftIO $ putStrLn (show f ++ show as)
          case memo_flag of
            Don'tMemo ->
@@ -142,7 +162,7 @@ evalInto prog apps env (App f as) res =
                 evalInto prog M.empty (M.fromList (zipp ("App:" ++ show f ++ "->") xs ys)) rhs res
 
            DoMemo    ->
-             do eval prog apps env (App f as) >>= (>>> res)
+             do eval prog apps env (App memo_flag f as) >>= (>>> res)
 
            DynoMemo  ->
              do ys <- sequence [ eval prog apps env a | a <- as ]
@@ -152,7 +172,7 @@ evalInto prog apps env (App f as) res =
                           x >>> res
                   else do evalInto prog M.empty (M.fromList (zipp ("App:" ++ show f ++ "->") xs ys)) rhs res
     (Nothing, Nothing) ->
-      do liftIO $ putStrLn ("Cannot find app" ++ show f ++ " in:\n" ++ ppShow (App f as))
+      do liftIO $ putStrLn ("Cannot find app" ++ show f ++ " in:\n" ++ ppShow (App memo_flag f as))
          error "Cannot proceed!"
 
 evalInto prog apps env (Later a) res =
