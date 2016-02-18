@@ -12,6 +12,7 @@ data Params =
     , memo                 :: Bool
     , quiet                :: Bool
     , debug                :: Bool
+    , expansion_points     :: Int
     , conflict_minimzation :: Bool
     , delay_all_datatypes  :: Bool
     , insist_isnt          :: Bool
@@ -31,6 +32,7 @@ defParams =
     , memo                 = True    &= name "m"   &= help "Memoise recursive functions      (on)"
     , quiet                = False   &= name "q"   &= help "Be quiet"
     , debug                = False   &= name "dbg" &= help "Print debug info"
+    , expansion_points     = 1       &= name "p"   &= help "Expansion points         (default: 1)"
     , conflict_minimzation = False   &= name "c"   &= help "Minimize conflicts"
     , delay_all_datatypes  = False   &= name "l"   &= help "Delay all datatypes"
     , insist_isnt          = False   &= name "i"   &= help "Insist isn't when possible"

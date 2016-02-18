@@ -98,6 +98,15 @@ trySolve = H (\env ->
      ws <- reverse `fmap` readIORef (waits env)
      verbose $ "== Try solve with " ++ show (length ws) ++ " waits =="
      b <- solveBit (sat env) (here env : reverse [ nt p | (_,(p,_,_)) <- ws ])
+
+     let expand (source,(p,unq,H h)) =
+           do ws <- reverse `fmap` readIORef (waits env)
+              let ws' = [ t | t@(_,(_,unq',_)) <- ws, unq /= unq' ]
+              writeIORef (waits env) (reverse ws')
+              -- verbose ("Points: " ++ show (length ws'))
+              -- verbose $ "Expanding " ++ show source ++ " (" ++ show unq ++ ")..."
+              h env{ here = p }
+
      if b then
        do putStrLn "Counterexample!"
           return (Just True)
@@ -116,14 +125,9 @@ trySolve = H (\env ->
                              else
                                return True
                         if b then
-                          let (source,(p,unq,H h)):_ = [ t | t@(_,(p,_,_)) <- ws, p `elem` qs ] in
-                            do let ws' = [ t | t@(_,(_,unq',_)) <- reverse ws, unq /= unq' ]
-                               verbose ("Points: " ++ show (length ws'))
-                               writeIORef (waits env) ws'
-                               verbose $ "Expanding " ++ show source ++ "..."
-                               h env{ here = p }
-                               verbose "Expansion done"
-                               return Nothing
+                          do mapM_ expand (take expansion_points [ t | t@(_,(p,_,_)) <- ws, p `elem` qs ])
+                             verbose "Expansion done"
+                             return Nothing
                         else
                          do mini
          in mini
@@ -223,6 +227,9 @@ check h@(H m) = H (\env ->
        -- putStrLn "stop"
   )
 -}
+
+instance Show Unique where
+  show = show . hashUnique
 
 check :: H () -> H ()
 check h =
