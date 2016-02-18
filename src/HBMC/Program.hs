@@ -35,7 +35,7 @@ data Expr a
   | Later (Expr a)
   | Let a (Expr a) (Expr a)
   | LetApp a [a] (Expr a) (Expr a)
-  | Case (Expr a) [(Maybe (Cons a),[a],Expr a)]
+  | Case (Expr a) (Cons a) [(Maybe (Cons a),[a],Expr a)]
 
   | Proj (Expr a) (Type a) Int
   | ConstraintsOf [Expr a]
@@ -52,7 +52,7 @@ adjustMemos m =
   transformBi $
     \ e0 ->
       case e0 of
-        LetApp g ys (App _ f xs) e -> LetApp g ys (App Don'tMemo f xs) e
+        LetApp g ys (App _ f xs) e | not (null ys) -> LetApp g ys (App Don'tMemo f xs) e
         App _ f xs | Just flag <- M.lookup f m -> App flag f xs
         _ -> e0
 
@@ -118,7 +118,7 @@ eval prog apps env (LetApp f xs a b) =
        evalInto prog apps (inserts (zipp ("LetApp:" ++ show f) xs ys) env) a z
      eval prog (M.insert f (trig,ys,z) apps) env b
 
-eval prog apps env (Case a alts) =
+eval prog apps env (Case a _ alts) =
   do res <- new
      evalInto prog apps env (Case a alts) res
      return res
@@ -190,7 +190,7 @@ evalInto prog apps env (LetApp f xs a b) res =
        evalInto prog apps (inserts (zipp ("LetApp:" ++ show f ++ "->") xs ys) env) a z
      evalInto prog (M.insert f (trig,ys,z) apps) env b res
 
-evalInto prog apps env (Case a alts) res =
+evalInto prog apps env (Case a _ alts) res =
   do y <- eval prog apps env a
      sequence_
        [ case mc of
