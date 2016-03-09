@@ -76,7 +76,7 @@ translate :: Params -> Theory Var -> WriterT [String] Fresh (Translated Var)
 translate params thy0 =
   do [thy1] <- lift (flip runPasses thy0 $
               [ SimplifyGently
-              , RemoveNewtype
+              -- , RemoveNewtype
               , UncurryTheory
               , SimplifyGently
               , IfToBoolOp
