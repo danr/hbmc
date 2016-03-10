@@ -175,7 +175,7 @@ psorted      xs = sorted xs           === True ==> unique xs === True ==> length
 psorted_rev  xs = sorted (rev xs)     === True ==> unique xs === True ==> length xs <= n3 === True
 psorted_qrev xs = sorted (qrev xs []) === True ==> unique xs === True ==> length xs <= n3 === True
 
-pusorted      xs = usorted xs           === True ==> length xs <= n25 === True
+pusorted      xs = usorted xs           === True ==> length xs <= n10 === True
 pusorted_rev  xs = usorted (rev xs)     === True ==> length xs <= n9 === True
 pusorted_qrev xs = usorted (qrev xs []) === True ==> length xs <= n4 === True
 

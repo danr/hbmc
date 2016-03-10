@@ -163,6 +163,7 @@ psafe dom r g q =
 prop_safe0     r g q = psafe Z     r g q === True
 prop_safe1     r g q = psafe (S Z) r g q === True
 prop_safe2 dom r g q = psafe dom   r g q === True
+prop_safe3     r g q = psafe (S (S (S Z))) r g q === True
 
 -- LIBRARY --
 
