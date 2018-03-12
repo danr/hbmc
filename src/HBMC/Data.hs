@@ -2,12 +2,11 @@
 {-# LANGUAGE TypeFamilies #-}
 module HBMC.Data where
 
-import Tip.Types
 import Tip.Fresh
 import Data.List
 
 import Tip.Utils (recursive)
-import Tip.Core  (defines,uses)
+import Tip.Core
 import Tip.Pretty
 
 import HBMC.Identifiers
@@ -26,13 +25,13 @@ dataDescs lazy_datatypes dts = lkup_desc
                                      Nothing   -> error $ "Data type not found:" ++ varStr x ++ " (" ++ show x ++ ")"
   tbl =
     [ (tc,
-       maybe_thunk $ DataDesc (varStr tc) [ c | Constructor c _ _ <- cons ]
+       maybe_thunk $ DataDesc (varStr tc) [ c | Constructor c _ _ _ <- cons ]
        [ case ty of
            TyCon tc [] ->
              ( [ c | (c,(_,ixs)) <- indexes, i `elem` ixs ]
              , lkup_desc tc)
        | (i,ty) <- [0..] `zip` types ])
-    | dt@(Datatype tc [] cons) <- dts
+    | dt@(Datatype tc _ [] cons) <- dts
     , let (indexes,types) = dataInfo dt
     , let maybe_thunk | tc `elem` rec_dts || lazy_datatypes = ThunkDesc
                       | otherwise                           = id
@@ -42,14 +41,14 @@ recursiveDatatypes :: Ord a => [Datatype a] -> [a]
 recursiveDatatypes = recursive defines uses
 
 dataInfo :: forall a . Eq a => Datatype a -> (DataInfo a,[Type a])
-dataInfo (Datatype tc _tvs cons) = (indexes,types)
+dataInfo (Datatype tc _ _tvs cons) = (indexes,types)
   where
     types :: [Type a]
-    types = merge [ map snd args | Constructor _ _ args <- cons ]
+    types = merge [ map snd args | Constructor _ _ _ args <- cons ]
 
     indexes =
         [ (c,(tc,index (map snd args) (types `zip` [0..])))
-        | Constructor c _ args <- cons
+        | Constructor c _ _ args <- cons
         ]
 
     index :: [Type a] -> [(Type a,Int)] -> [Int]
