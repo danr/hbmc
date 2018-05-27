@@ -1,21 +1,15 @@
-resolver: lts-6.5
+resolver: lts-10.3
 packages:
 - .
-- location:
-    git: git://github.com/tip-org/tools.git
-    commit: b53435e8bb2e7fe0a9fbd485aa974cf23e51b9f3
-  subdirs:
-    - tip-lib/
-    - tip-haskell-frontend
 
 extra-deps:
-- genifunctors-0.3
-- ghc-simple-0.1.3
 - minisat-0.1.2
 - structural-induction-0.3
-- twee-0.1
-- jukebox-0.2.7
-
-flags:
-    tip-haskell-frontend: {stack: True}
-
+- genifunctors-0.4
+- twee-lib-2.1.5
+- spoon-0.3.1
+- git: git://github.com/tip-org/tools.git
+  commit: a1f32b0b5e74ba279e6c5f617229a044a4fb0117
+  subdirs:
+    - tip-types/
+    - tip-lib/

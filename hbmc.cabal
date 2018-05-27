@@ -16,7 +16,6 @@ executable hbmc
   default-language:    Haskell2010
   build-depends:       base >=4 && <5,
                        tip-lib == 0.2.2,
-                       tip-haskell-frontend ==0.2,
                        geniplate-mirror >= 0.7.1,
 
                        cmdargs,
@@ -35,3 +34,13 @@ executable hbmc
                        pretty >=1.1,
                        pretty-show >=1.6
 
+  other-modules:
+    HBMC.Data
+    HBMC.Identifiers
+    HBMC.Lib
+    HBMC.Live
+    HBMC.Merge
+    HBMC.Monadic
+    HBMC.Params
+    HBMC.Projections
+    HBMC.ToSimple

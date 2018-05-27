@@ -110,7 +110,7 @@ instance PrettyVar Var where
 renameTheory :: forall a . (Ord a,PrettyVar a) => Theory a -> Theory Var
 renameTheory thy = renameWith disambigId thy
  where
-  cons = S.fromList [ c | Constructor c _ _ <- universeBi thy ]
+  cons = S.fromList [ c | Constructor c _ _ _ <- universeBi thy ]
 
   disambigId :: a -> [Var]
   disambigId i = vs : [ Refresh x vs | x <- [0..] ]
@@ -124,11 +124,7 @@ renameTheory thy = renameWith disambigId thy
              xs -> var_or_con xs
 
 instance Name Var where
-  fresh        = refresh (Var "")
-  freshNamed x = refresh (Var x)
-  refreshNamed x s = freshNamed (varStr' s ++ x)
-  refresh (Refresh _ v) = refresh v
-  refresh v    = flip Refresh v `fmap` fresh
+  freshNamed x = flip Refresh (Var x) `fmap` fresh
   getUnique    = varMax
 
 -- A family of monomorphic Maybes
@@ -185,9 +181,9 @@ addMaybesToTheory :: [Var] -> Theory Var -> Theory Var
 addMaybesToTheory vs thy@Theory{..} = thy { thy_datatypes = maybe_decls ++ thy_datatypes }
   where
   maybe_decls =
-    [ Datatype (maybeTC t) []
-        [ Constructor (nothingVar t) (System "isNothing" (Just t)) []
-        , Constructor (justVar t) (System "isJust" (Just t)) [(System "fromJust" (Just t),t)]
+    [ Datatype (maybeTC t) [] []
+        [ Constructor (nothingVar t) [] (System "isNothing" (Just t)) []
+        , Constructor (justVar t) [] (System "isJust" (Just t)) [(System "fromJust" (Just t),t)]
         ]
     | t <- usort [ t | System "Maybe" (Just t) <- vs ]
     ]

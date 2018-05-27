@@ -6,11 +6,7 @@ import HBMC.Params (Params,getParams)
 
 import Tip.Pretty
 import Tip.Pretty.SMT ()
-
-import qualified Tip.HaskellFrontend as Tip
-import Tip.HaskellFrontend hiding (Params)
-import Tip.Haskell.Rename
-import Tip.Haskell.Translate (addImports,HsId)
+import Tip.Parser
 
 import Tip.Core
 import Tip.Utils
@@ -73,7 +69,7 @@ translate params thy0 =
               , BoolOpToIf
               , CommuteMatch
               , CSEMatch
-              , TypeSkolemConjecture
+              , Monomorphise False
               , SortsToNat
               , EliminateDeadCode
               ] thy0)
@@ -87,7 +83,7 @@ translate params thy0 =
 
      let ci | Params.insist_isnt params = flip lookup
               [ (c,all_cons \\ [c])
-              | Datatype tc [] cons <- thy_datatypes thy
+              | Datatype tc _ [] cons <- thy_datatypes thy
               , not (isMaybeTC tc)
               , let all_cons = map con_name cons
               , c <- map con_name cons
@@ -132,9 +128,7 @@ main :: IO ()
 main = do
     params <- getParams
     thy0 <- either error renameTheory <$>
-      readHaskellOrTipFile
-        (Params.file params)
-        Tip.defaultParams{ Tip.prop_names = Params.prop_names params }
+      parseFile (Params.file params)
 
     let (m,dbg) = freshPass (runWriterT . (lift . return . runLive params <=< translate params)) thy0
 
